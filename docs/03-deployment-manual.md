@@ -1,6 +1,10 @@
-# 03 — Deployment
+# 03 — Deployment (Manual / Portal + CLI)
 
-Step-by-step build of the RAG knowledge-base pattern. Assumes all of [02-prerequisites.md](./02-prerequisites.md) is complete.
+Step-by-step manual build of the RAG knowledge-base pattern. Assumes all of [02-prerequisites.md](./02-prerequisites.md) is complete.
+
+> **Two deployment paths exist.** This document is the **manual / portal-driven** path — best for learning the architecture component-by-component, demo labs, and one-off builds. For repeatable / CI-driven deployments use **[04-deployment-automated.md](./04-deployment-automated.md)** instead, which provisions the same Azure resources via Bicep + a post-deploy script.
+>
+> The two paths produce the **same end-state**. The Fabric workspace + Copilot Studio agent steps are identical in both (they are low-code, portal-driven, and not expressible in Bicep today).
 
 > **Build order matters.** Phases are sequential because each depends on artifacts from the prior phase. Within a phase, steps are also sequential unless explicitly marked parallel-safe.
 
@@ -72,7 +76,7 @@ In the Azure portal:
 
 ### 1.5 Create Azure AI Foundry resource + OpenAI deployments
 
-> **Why a Foundry resource, not a standalone Azure OpenAI resource?** The Azure AI Foundry resource (kind `AIServices`) is the strategic Microsoft model-gateway resource. It hosts OpenAI models (and the broader Foundry catalog: Cohere, Llama, Phi, Mistral, …) under a single resource and exposes an OpenAI-compatible endpoint at `https://<resource>.openai.azure.com/` — so the AI Search integrated `azureOpenAI` vectorizer works against it unchanged. This pattern uses Foundry's model-gateway capability only; Foundry's agent runtime (Agent Service / Hub / Projects) is **not** used in v1.
+> **Why a Foundry resource, not a standalone Azure OpenAI resource?** The Azure AI Foundry resource (kind `AIServices`) is the strategic Microsoft model-gateway resource. It hosts OpenAI models (and the broader Foundry catalog: Cohere, Llama, Phi, Mistral, …) under a single resource and exposes an OpenAI-compatible endpoint at `https://<resource>.openai.azure.com/` — so the AI Search integrated `azureOpenAI` vectorizer works against it unchanged. This pattern uses Foundry's model-gateway capability only; Foundry's agent runtime (Agent Service / Hub / Projects) is **not** used here — Copilot Studio fills the agent role. Foundry agent runtime is the right addition for engagements that need multi-agent routing, custom tool calling, or query triage beyond knowledge-base Q&A.
 
 In the Azure portal:
 
@@ -83,7 +87,7 @@ In the Azure portal:
    - Deploy `text-embedding-3-large` → name it `embedding`
    - Deploy `gpt-4o` → name it `chat`
    - For both: set capacity to 10K TPM for demo
-   - (Optional) browse the Foundry catalog for non-OpenAI models if you plan to extend later; v1 only requires the two OpenAI deployments above
+   - (Optional) browse the Foundry catalog for non-OpenAI models if you plan to extend later; this pattern only requires the two OpenAI deployments above
 5. Confirm the OpenAI-compatible endpoint: **Endpoints** view shows `https://aif-rag-demo-eus.openai.azure.com/` — that's the value the AI Search vectorizer will use
 
 Copy the Foundry resource's **OpenAI endpoint** and **key 1** to Key Vault as `aif-endpoint` and `aif-key`.
@@ -673,7 +677,7 @@ Confirm answers include **citations** that link back to the original document in
 
 ## Post-deployment checklist
 
-Once all five phases validate green, proceed to [04-testing.md](./04-testing.md) to run the full test suite.
+Once all five phases validate green, proceed to [05-testing.md](./05-testing.md) to run the full test suite.
 
 - [ ] All Phase 1–5 validation boxes checked
 - [ ] Pipeline scheduled (not just on-demand)

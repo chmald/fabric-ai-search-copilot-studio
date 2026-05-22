@@ -1,6 +1,6 @@
-# 04 — Testing
+# 05 — Testing
 
-End-to-end test plan for the RAG knowledge-base pattern. Run these tests after Phase 5 validation in [03-deployment.md](./03-deployment.md) passes.
+End-to-end test plan for the RAG knowledge-base pattern. Run these tests after Phase 5 validation in [03-deployment-manual.md](./03-deployment-manual.md) **or** [04-deployment-automated.md](./04-deployment-automated.md) passes — the two deployment paths converge to the same end-state.
 
 > **Purpose.** Catch regressions early, prove retrieval quality before customer demo, and provide a repeatable evaluation harness that travels with the pattern to new deployments.
 
@@ -100,7 +100,7 @@ Expected: `content_vector` is a non-empty array with the right dimensionality (3
 
 ### B3. Semantic ranker fires
 
-Run a semantic query (sample in 03-deployment.md § 4.5). Verify in the response:
+Run a semantic query (sample in 03-deployment-manual.md § 4.5 or 04-deployment-automated.md § "Verify"). Verify in the response:
 
 - Top results have `@search.rerankerScore` between 0 and 4 (range varies)
 - `@search.captions[].text` and `@search.captions[].highlights` are populated

@@ -1,4 +1,4 @@
-# 05 — Troubleshooting
+# 06 — Troubleshooting
 
 Common failure modes and fixes for the RAG knowledge-base pattern. Organized by **where the symptom appears** so you can navigate quickly during a live incident.
 

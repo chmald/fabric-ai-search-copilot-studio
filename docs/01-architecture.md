@@ -15,8 +15,8 @@ Reference architecture for the low-code RAG knowledge-base pattern. Read this fi
 ## Non-goals
 
 - Structured field extraction into a database (use Document Intelligence custom-extraction + a separate pipeline)
-- Multi-agent orchestration, custom tool-calling, query triage logic (defer to a Foundry-based v2)
-- Bring-your-own model (non-OpenAI: Cohere, Llama, Phi, Mistral, etc.) — Foundry resource supports the model catalog but the AI Search `azureOpenAI` vectorizer is OpenAI-only; alternate vectorizer kinds (AML-hosted) are out of v1 scope
+- Multi-agent orchestration, custom tool-calling, query triage logic (these require **Foundry agent runtime** as an additional layer above this pattern — out of scope for the knowledge-base Q&A focus here)
+- Bring-your-own model (non-OpenAI: Cohere, Llama, Phi, Mistral, etc.) — Foundry resource supports the model catalog but the AI Search `azureOpenAI` vectorizer is OpenAI-only; alternate vectorizer kinds (AML-hosted) are out of scope for this pattern
 - Streaming ingestion below ~1-minute latency (Fabric Data Pipelines is batch-oriented; for event-driven, swap in Power Automate)
 
 ---
@@ -125,7 +125,7 @@ Use Delta merge (`MERGE INTO`) on `file_id` for upserts. Build dashboards on top
 | **Azure Key Vault** | Single source of truth for connection strings, API keys, and secrets. Pipelines and indexers authenticate via **managed identity** wherever possible; Key Vault is the fallback for any secret that cannot be replaced by RBAC. |
 | **Azure Blob Storage** | Permanent canonical store. Two containers: `raw/` (the original files, used for citation linkback from Copilot Studio answers) and `chunks/` (one JSON file per chunk, consumed by the AI Search indexer). |
 | **Azure Document Intelligence** | OCR. Use the **prebuilt-read** model (no training). Returns extracted text, page-aware structure, and confidence scores. |
-| **Azure AI Foundry resource** (model gateway) | Two OpenAI deployments hosted in a single Foundry resource: an **embedding** model (recommended: `text-embedding-3-large`) for the AI Search integrated vectorizer, and a **chat completion** model (recommended: `gpt-4o`) for the Copilot Studio generative answers. Foundry resource (kind `AIServices`) supersedes the legacy standalone Azure OpenAI resource for new deployments and exposes an OpenAI-compatible endpoint at `https://<resource>.openai.azure.com/` for backwards-compatible tooling. **This pattern uses Foundry's model-gateway capability only — not its agent runtime (Agent Service / Hub / Projects), which is filled by Copilot Studio in v1.** |
+| **Azure AI Foundry resource** (model gateway) | Two OpenAI deployments hosted in a single Foundry resource: an **embedding** model (recommended: `text-embedding-3-large`) for the AI Search integrated vectorizer, and a **chat completion** model (recommended: `gpt-4o`) for the Copilot Studio generative answers. Foundry resource (kind `AIServices`) supersedes the legacy standalone Azure OpenAI resource for new deployments and exposes an OpenAI-compatible endpoint at `https://<resource>.openai.azure.com/` for backwards-compatible tooling. **This pattern uses Foundry's model-gateway capability only — not its agent runtime (Agent Service / Hub / Projects), which is filled by Copilot Studio. Foundry agent runtime is an engagement-specific addition for cases that need multi-agent routing, custom tool calling, or query triage beyond knowledge-base Q&A.** |
 | **Azure AI Search** | The retrieval engine. A single index with text, vector, and metadata fields. **Integrated vectorizer** (`azureOpenAI` kind, pointed at the Foundry resource's OpenAI-compatible endpoint) embeds chunks at index time and embeds user queries at search time — **zero custom embedding code anywhere**. **Hybrid query mode** (BM25 + vector) plus **semantic ranker** on top. **Standard (S1) tier or higher** required. |
 
 #### AI Search index schema (reference)
@@ -251,9 +251,9 @@ No code touches this path.
 
 The README table summarized the locked design. The full rationale for each:
 
-### 1. Copilot Studio native (no Foundry in v1)
+### 1. Copilot Studio orchestration (Foundry agent runtime is the alternative when needed)
 
-Copilot Studio's native AI Search knowledge source delivers retrieval + grounding + citation **without code**. Adding Foundry buys orchestration flexibility (multi-agent routing, custom tool calling, query triage logic) but costs the no-code story. For knowledge-base Q&A — the single most common RAG use case — Copilot Studio native is sufficient. Foundry becomes valuable in **v2** when the agent needs to do more than answer questions (e.g. take actions, call tools, route to specialist sub-agents).
+Copilot Studio's native AI Search knowledge source delivers retrieval + grounding + citation **without code**. Adding Foundry agent runtime buys orchestration flexibility (multi-agent routing, custom tool calling, query triage logic) but costs the no-code story. For knowledge-base Q&A — the single most common RAG use case and the focus of this pattern — Copilot Studio native is sufficient. **Foundry agent runtime becomes the right choice** when the agent needs to do more than answer questions (e.g. take actions, call tools, route to specialist sub-agents). That is an engagement-specific decision, not a default progression.
 
 ### 2. Integrated vectorizer (Foundry-hosted OpenAI)
 
@@ -302,7 +302,7 @@ To adapt this pattern to a new document domain, only these knobs change:
 3. **Chunking parameters** — token size + overlap, tuned to document length and answer style
 4. **Index field extensions** — domain-specific filterable metadata (e.g. `effective_date`, `region`, `business_unit`)
 5. **Copilot Studio agent persona** — system prompt, topic flow, greeting, fallback behavior
-6. **Test corpus + acceptance Q&A** — see [04-testing.md](./04-testing.md) for the evaluation harness
+6. **Test corpus + acceptance Q&A** — see [05-testing.md](./05-testing.md) for the evaluation harness
 
 Everything else — pipeline activity wiring, indexer configuration, vectorizer setup, semantic ranker enablement, Copilot Studio knowledge source binding — stays identical.
 
@@ -312,11 +312,11 @@ Everything else — pipeline activity wiring, indexer configuration, vectorizer 
 
 | Topic | Why | Where to go |
 |---|---|---|
-| Foundry orchestration | Not needed for knowledge-base Q&A v1 | Defer to a Foundry-based v2 pattern |
-| Custom field extraction | Different problem class | Document Intelligence custom-extraction + Fabric / SQL ETL |
-| Cross-document reasoning | LLM-side concern, requires larger context or agentic chains | v2 with Foundry agents |
+| Foundry orchestration | Not needed for knowledge-base Q&A — Copilot Studio fills this role | Add Foundry agent runtime when the engagement requires multi-agent routing, custom tool calling, or query triage |
+| Custom field extraction | Different problem class (structured data into rows, not retrieval over prose) | Document Intelligence custom-extraction + Fabric / SQL ETL |
+| Cross-document reasoning | LLM-side concern, requires larger context or agentic chains | Add Foundry agent runtime + multi-document retrieval orchestration |
 | User-level personalization | Not in scope for shared knowledge base | Layer on top with Copilot Studio user variables + per-user filters |
-| Multi-tenancy | Single tenant per agent instance in v1 | Deploy one agent per tenant in v1; revisit for v2 |
+| Multi-tenancy | Single tenant per agent instance in this pattern | Deploy one agent per tenant; revisit if you need cross-tenant routing |
 | Streaming sub-minute ingestion | Fabric Data Pipelines is batch | Swap to Power Automate event-driven flow |
 
 ---
@@ -325,9 +325,10 @@ Everything else — pipeline activity wiring, indexer configuration, vectorizer 
 
 | Version | Date | Change |
 |---|---|---|
-| v1 | 2026-05-21 | Initial locked reference architecture |
+| 1.0 | 2026-05-21 | Initial locked reference architecture |
+| 1.1 | 2026-05-22 | Artifact restructure: docs/ folder layout, Bicep IaC + dual deployment path, ADO pipeline scaffolding |
 
-Future versions follow semantic-style numbering: minor for additive changes, major for breaking changes (e.g. Foundry orchestrator v2).
+Future revisions track changes to the artifact (docs / IaC / scripts), not changes to the architectural decisions. Architectural changes get their own decision records.
 
 ---
 

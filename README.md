@@ -1,4 +1,4 @@
-# Reusable RAG Knowledge-Base Pattern (Low-Code v1)
+# Reusable RAG Knowledge-Base Pattern
 
 A reusable, low-code-first **Retrieval-Augmented Generation (RAG) knowledge-base** pattern for grounding a Copilot Studio agent on a customer document corpus. This folder is the canonical reference for **demo build + production replication**.
 
@@ -17,13 +17,13 @@ A working end-to-end RAG agent that:
 - Re-ranks results with the **AI Search semantic ranker** for production-grade relevance
 - Surfaces answers through a **Copilot Studio agent** published to **Microsoft Teams** and **M365 Copilot**
 
-The pattern is intentionally low-code: every step is either a no-code Azure/Fabric portal configuration, a drag-and-drop Fabric Data Pipeline activity, or a Copilot Studio configuration screen. **No application code is required for v1.**
+The pattern is intentionally low-code: every step is either a no-code Azure/Fabric portal configuration, a drag-and-drop Fabric Data Pipeline activity, or a Copilot Studio configuration screen. **No application code is required for this pattern.**
 
 ---
 
 ## Locked design decisions
 
-These decisions are **the v1 baseline**. Deviate only with an explicit decision record and updated guidance.
+These are the design decisions locked for this pattern's primary use case — single-purpose knowledge-base Q&A over a document corpus. Deviate only with an explicit decision record describing the engagement-specific need and updated guidance.
 
 | # | Decision | Choice | Why |
 |---|---|---|---|
@@ -38,7 +38,7 @@ These decisions are **the v1 baseline**. Deviate only with an explicit decision 
 | 9 | Front-end channels | **Teams + M365 Copilot** | Two native channels with zero additional hosting; demo-ready in minutes |
 | 10 | AI Search tier | **Standard (S1) or higher** | Required for semantic ranker; provides headroom for production scale |
 
-See [01-architecture.md](./01-architecture.md) for the full design narrative and trust boundaries.
+See [docs/01-architecture.md](./docs/01-architecture.md) for the full design narrative and trust boundaries.
 
 ---
 
@@ -47,11 +47,22 @@ See [01-architecture.md](./01-architecture.md) for the full design narrative and
 | File | Purpose |
 |---|---|
 | [README.md](./README.md) | Pattern overview + locked decisions + file index (this file) |
-| [01-architecture.md](./01-architecture.md) | Full reference architecture: diagram, components, data flow, trust boundaries, decisions |
-| [02-prerequisites.md](./02-prerequisites.md) | Subscriptions, licensing, RBAC, model availability, quotas, naming conventions |
-| [03-deployment.md](./03-deployment.md) | Step-by-step build: foundation → ingestion → pipeline → index → agent → publish |
-| [04-testing.md](./04-testing.md) | Functional tests, retrieval quality, semantic-ranker validation, end-to-end demo script |
-| [05-troubleshooting.md](./05-troubleshooting.md) | Common failure modes and fixes |
+| [docs/00-reproduce-this-demo.md](./docs/00-reproduce-this-demo.md) | **Start here.** Single-page orchestrator with Parts A–F + time budget + end-state diagram |
+| [docs/01-architecture.md](./docs/01-architecture.md) | Full reference architecture: diagram, components, data flow, trust boundaries, decisions |
+| [docs/02-prerequisites.md](./docs/02-prerequisites.md) | Subscriptions, licensing, RBAC, model availability + regional matrix, quotas, naming conventions |
+| [docs/03-deployment-manual.md](./docs/03-deployment-manual.md) | Manual / portal + CLI walkthrough — Phase 1–5 step-by-step (best for first-time learning) |
+| [docs/04-deployment-automated.md](./docs/04-deployment-automated.md) | Automated path — Bicep + post-deploy script + ADO pipeline (best for CI/CD and repeat deployments) |
+| [docs/05-testing.md](./docs/05-testing.md) | Functional tests, retrieval quality, semantic-ranker validation, end-to-end demo script |
+| [docs/06-troubleshooting.md](./docs/06-troubleshooting.md) | Common failure modes and fixes |
+| `infra/main.bicep` + `infra/modules/*.bicep` | Bicep IaC for all Azure resources (RG, KV, Storage, Foundry + model deployments, Doc Intelligence, AI Search, RBAC) |
+| `infra/main.parameters.json` | Bicep parameters template — copy to `main.parameters.local.json` for your values (gitignored) |
+| `infra/deploy.ps1` | PowerShell wrapper for `az deployment sub create` + output capture |
+| `scripts/post_deploy_search.py` | Creates AI Search index, data source, and indexer with integrated AOAI vectorizer (Bicep can't express these cleanly) |
+| `scripts/requirements.txt` | Python dependencies for `scripts/` and `tests/` |
+| `scripts/tests/` | Smoke tests for the post-deploy script |
+| `.azuredevops/pipelines/deploy-rag-kb.yml` | CI/CD pipeline: Validate → Deploy → Smoke |
+| `.gitignore` | Excludes secrets, venvs, populated demo-ids, IDE state from ADO commits |
+| `demo-ids.template.json` | Reference template for per-deployment IDs. Copy to `demo-ids.local.json` after deployment; never commit populated copies. |
 
 Read in order on first build. After that, treat them as a reference set.
 
@@ -59,7 +70,7 @@ Read in order on first build. After that, treat them as a reference set.
 
 ## Quick-start prerequisites at a glance
 
-You will need (full detail in [02-prerequisites.md](./02-prerequisites.md)):
+You will need (full detail in [docs/02-prerequisites.md](./docs/02-prerequisites.md)):
 
 - **Azure subscription** with Contributor + User Access Administrator on the target resource group
 - **Microsoft Fabric tenant** with a workspace you can create artifacts in (Lakehouse + Data Pipelines)
@@ -83,31 +94,53 @@ You will need (full detail in [02-prerequisites.md](./02-prerequisites.md)):
 ### Use a different pattern when
 
 - The customer needs **structured field extraction** into a database (e.g. invoice line items, contract clauses into rows) → use a Document Intelligence custom-extraction model + Fabric / SQL pipeline instead
-- The customer needs **multi-agent orchestration** with custom triage, routing, or tool-calling logic → add **Azure AI Foundry** as the orchestration layer (this pattern's v2)
+- The customer needs **multi-agent orchestration** with custom triage, routing, or tool-calling logic → add **Azure AI Foundry agent runtime** as an additional orchestration layer above this pattern's components (out of scope for this pattern as written)
 - The corpus is in the **millions of documents** with stringent low-latency requirements → revisit index sharding, replica counts, and tier selection beyond Standard
-- The customer requires a **non-OpenAI model** (Cohere, Llama, Phi, Mistral, etc.) → Foundry resource supports these via its model catalog, but the AI Search `azureOpenAI` vectorizer is OpenAI-only; non-OpenAI embedding requires the AML-hosted vectorizer kind (out of v1 scope)
+- The customer requires a **non-OpenAI model** (Cohere, Llama, Phi, Mistral, etc.) → Foundry resource supports these via its model catalog, but the AI Search `azureOpenAI` vectorizer is OpenAI-only; non-OpenAI embedding requires the AML-hosted vectorizer kind (out of scope for this pattern as written)
 
 ---
 
-## Pro-code alternative
+## Note on Azure AI Foundry — model gateway vs agent runtime
 
-For pro-code paths (custom Python ingestion, Bicep IaC, eval harness, custom field extraction), see the `chmald/document-intelligence-pattern` repository overlay model. This Demos folder is the **low-code companion**, not a replacement.
+This pattern uses an **Azure AI Foundry resource** as the **model-hosting gateway** (where the OpenAI embedding + chat deployments live). It does **not** use Foundry's agent runtime (Agent Service, Hub, Projects) — that role is filled by Copilot Studio's native AI Search knowledge source. Foundry's two capabilities are independent and chosen per engagement need:
 
-## Note on Azure AI Foundry — model gateway only
-
-This pattern uses an **Azure AI Foundry resource** as the **model-hosting gateway** (where the OpenAI embedding + chat deployments live). It does **not** use Foundry's agent runtime (Agent Service, Hub, Projects) — that role is filled by Copilot Studio's native AI Search knowledge source in v1. The two Foundry capabilities are independent:
-
-| Foundry capability | v1 decision | Why |
+| Foundry capability | Recommendation | When to use |
 |---|---|---|
-| **Model gateway** (Azure AI Foundry resource hosting OpenAI + catalog models) | ✅ Use | Strategic direction; same OpenAI-compatible endpoint as legacy AOAI; future flexibility for non-OpenAI models |
-| **Agent runtime** (Foundry Agent Service / Hub / Projects) | ❌ Defer to v2 | Copilot Studio native handles knowledge-base Q&A without code; Foundry agents become relevant when multi-agent routing, custom tool calling, or query triage is required |
+| **Model gateway** (Azure AI Foundry resource hosting OpenAI + catalog models) | **Default for OpenAI hosting** | The strategic Azure direction for all new AI model deployments; same OpenAI-compatible endpoint as legacy standalone AOAI resource; provides flexibility to add non-OpenAI catalog models later under one resource |
+| **Agent runtime** (Foundry Agent Service / Hub / Projects) | **Add when needed** | When the agent must do **more than knowledge-base Q&A** — multi-agent routing, custom tool calling, query triage logic, or non-standard grounding. For pure knowledge-base Q&A — the focus of this pattern — Copilot Studio's native AI Search knowledge source delivers retrieval + grounding + citation without code. Adding Foundry agent runtime is an additional infrastructure + code layer; only adopt it when an engagement need demands it. |
 
 ---
+
+## Deployment paths
+
+Two paths produce the same end-state:
+
+| Path | Best for | Doc |
+|---|---|---|
+| **Manual** — portal + CLI walkthrough | Learning the architecture; one-off demo labs; first time with this pattern | [docs/03-deployment-manual.md](./docs/03-deployment-manual.md) |
+| **Automated** — Bicep + post-deploy script | Repeated deployments; CI/CD; dev + prod environment parity | [docs/04-deployment-automated.md](./docs/04-deployment-automated.md) |
+
+Both paths converge on the same Azure platform-layer end-state. **Fabric workspace creation** and **Copilot Studio agent configuration** are manual steps in both paths (they are low-code, portal-driven, and not expressible in Bicep today). [docs/00-reproduce-this-demo.md](./docs/00-reproduce-this-demo.md) is the orchestrator that walks both paths through Parts A–F.
+
+---
+
+## Distribution
+
+This Demos folder is intended to be **checked into Azure DevOps** as a standalone repo in your tenant (typical: `https://dev.azure.com/<org>/<project>/_git/rag-knowledge-base-pattern`). The included `.gitignore` and `demo-ids.template.json` are scaffolded for that workflow:
+
+- **`.gitignore`** — excludes secrets (`*.pem`, `*.key`, `.sp-secret.json`, `secrets.json`), the populated copy of demo-ids (`demo-ids.local.json`), Python venvs, IDE state, and local deployment artifacts.
+- **`demo-ids.template.json`** — reference template for the resource IDs (workspace, capacity, search service, Foundry resource, etc.) you'll have after a real deployment. Copy to `demo-ids.local.json` after deploying and populate; that local copy is gitignored. **Never commit a populated `demo-ids.json` or any secret material.**
+- **Runtime values** (per-environment workspace IDs, endpoints) should come from your CI tool's secret store (ADO variable groups / GitHub Actions secrets / Key Vault), not from the repo.
+
+---
+
+## Decision provenance
 
 | Date | Decision | Reference |
 |---|---|---|
-| 2026-05-21 | Locked v1 reference architecture: Copilot Studio native + integrated vectorizer + hybrid + semantic ranker ON; no Foundry in v1 | the CHANGELOG entry |
+| 2026-05-21 | Locked architecture decisions: Copilot Studio orchestration for knowledge-base Q&A, Foundry as model gateway, integrated vectorizer, hybrid + semantic ranker, OneLake + Blob storage, Fabric Data Pipelines | the CHANGELOG entry |
+| 2026-05-22 | Artifact restructure: docs/ folder layout, Bicep IaC + 5 modules, dual deployment path (manual + automated), ADO pipeline | the CHANGELOG entry |
 
 ---
 
-*Last updated: 2026-05-21*
+*Last updated: 2026-05-22*

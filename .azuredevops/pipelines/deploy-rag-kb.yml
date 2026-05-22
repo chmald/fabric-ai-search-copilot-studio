@@ -1,0 +1,208 @@
+# =====================================================================================
+# .azuredevops/pipelines/deploy-rag-kb.yml
+# RAG Knowledge-Base Pattern — CI/CD pipeline (Validate → Deploy → Smoke)
+# =====================================================================================
+#
+# Stages:
+#   1. Validate — Bicep build + what-if + Python lint/test (always runs on PR + push)
+#   2. Deploy   — az deployment sub create + post_deploy_search.py (push to dev/prod only)
+#   3. Smoke    — verify the deployed index responds (push to dev/prod only)
+#
+# Per-environment values come from variable groups: rag-kb-env-dev, rag-kb-env-prod
+# Required variables in each group:
+#   - subscriptionId         (Azure subscription GUID)
+#   - serviceConnectionName  (ADO service connection — federated identity preferred)
+#   - location               (Azure region — e.g. eastus2)
+#   - workloadName           (e.g. rag)
+#   - env                    (dev | test | prod)
+#
+# Required environment in ADO (Pipelines → Environments):
+#   - rag-kb-dev
+#   - rag-kb-prod
+#
+# Required ADO permissions:
+#   - The service connection's identity needs Contributor + User Access Administrator
+#     at subscription scope (the deployment creates the RG + role assignments).
+# =====================================================================================
+
+trigger:
+  branches:
+    include:
+      - main
+      - dev
+      - prod
+  paths:
+    include:
+      - infra/**
+      - scripts/**
+      - .azuredevops/pipelines/deploy-rag-kb.yml
+
+pr:
+  branches:
+    include:
+      - main
+      - dev
+      - prod
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  - name: deploymentName
+    value: 'rag-kb-bicep-$(Build.BuildId)'
+  - name: parameterFile
+    value: 'infra/main.parameters.json'
+  - group: rag-kb-env-$(Build.SourceBranchName)
+
+stages:
+
+  # ===================================================================================
+  # Stage 1: Validate (PR + push)
+  # ===================================================================================
+  - stage: Validate
+    displayName: 'Validate (Bicep build + what-if + Python tests)'
+    jobs:
+      - job: Bicep
+        displayName: 'Bicep build + what-if'
+        steps:
+          - task: AzureCLI@2
+            displayName: 'Bicep build'
+            inputs:
+              azureSubscription: $(serviceConnectionName)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                az bicep install --quiet
+                az bicep build --file infra/main.bicep
+                echo "Bicep compiled successfully."
+
+          - task: AzureCLI@2
+            displayName: 'Bicep what-if'
+            inputs:
+              azureSubscription: $(serviceConnectionName)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                az deployment sub what-if \
+                  --location $(location) \
+                  --template-file infra/main.bicep \
+                  --parameters $(parameterFile) \
+                  --parameters workloadName=$(workloadName) env=$(env) location=$(location)
+
+      - job: Python
+        displayName: 'Python lint + tests'
+        steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: '3.11'
+              addToPath: true
+
+          - script: |
+              python -m pip install --upgrade pip
+              pip install -r scripts/requirements.txt
+            displayName: 'Install dependencies'
+
+          - script: |
+              pytest scripts/tests/ -q --tb=short
+            displayName: 'Run smoke tests'
+
+  # ===================================================================================
+  # Stage 2: Deploy (push to dev/prod only)
+  # ===================================================================================
+  - stage: Deploy
+    displayName: 'Deploy (Bicep + post-deploy AI Search)'
+    dependsOn: Validate
+    condition: |
+      and(
+        succeeded(),
+        ne(variables['Build.Reason'], 'PullRequest'),
+        in(variables['Build.SourceBranchName'], 'dev', 'prod')
+      )
+    jobs:
+      - deployment: BicepDeploy
+        displayName: 'az deployment sub create'
+        environment: 'rag-kb-$(env)'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+
+                - task: AzureCLI@2
+                  displayName: 'Deploy Bicep'
+                  name: bicepDeploy
+                  inputs:
+                    azureSubscription: $(serviceConnectionName)
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      az deployment sub create \
+                        --name $(deploymentName) \
+                        --location $(location) \
+                        --template-file infra/main.bicep \
+                        --parameters $(parameterFile) \
+                        --parameters workloadName=$(workloadName) env=$(env) location=$(location) \
+                        --output json > deployment.json
+
+                      jq '.properties.outputs.deploymentSummary.value
+                          + {subscriptionId: "$(subscriptionId)"}' deployment.json > demo-ids.local.json
+                      cat demo-ids.local.json
+
+                - task: UsePythonVersion@0
+                  inputs:
+                    versionSpec: '3.11'
+                    addToPath: true
+
+                - script: |
+                    python -m pip install --upgrade pip
+                    pip install -r scripts/requirements.txt
+                  displayName: 'Install Python deps'
+
+                - task: AzureCLI@2
+                  displayName: 'Run post_deploy_search.py'
+                  inputs:
+                    azureSubscription: $(serviceConnectionName)
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      python scripts/post_deploy_search.py --ids demo-ids.local.json
+                      python scripts/post_deploy_search.py --ids demo-ids.local.json --run-indexer
+
+                - publish: demo-ids.local.json
+                  artifact: demo-ids-$(env)-$(Build.BuildId)
+                  displayName: 'Publish deployment IDs artifact'
+
+  # ===================================================================================
+  # Stage 3: Smoke (push to dev/prod only)
+  # ===================================================================================
+  - stage: Smoke
+    displayName: 'Smoke (verify index + semantic ranker)'
+    dependsOn: Deploy
+    condition: succeeded()
+    jobs:
+      - job: Verify
+        displayName: 'Run --verify smoke tests'
+        steps:
+          - download: current
+            artifact: demo-ids-$(env)-$(Build.BuildId)
+
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: '3.11'
+              addToPath: true
+
+          - script: |
+              python -m pip install --upgrade pip
+              pip install -r scripts/requirements.txt
+            displayName: 'Install Python deps'
+
+          - task: AzureCLI@2
+            displayName: 'Verify deployment'
+            inputs:
+              azureSubscription: $(serviceConnectionName)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                python scripts/post_deploy_search.py \
+                  --ids $(Pipeline.Workspace)/demo-ids-$(env)-$(Build.BuildId)/demo-ids.local.json \
+                  --verify

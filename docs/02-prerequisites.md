@@ -59,7 +59,7 @@ az provider register --namespace Microsoft.CognitiveServices --wait
 
 > **Why Foundry resource over the legacy AOAI resource?** The Azure AI Foundry resource is Microsoft's strategic direction for all new AI model deployments. It exposes the same OpenAI-compatible endpoint (`https://<resource>.openai.azure.com/`) so all existing tooling — including the AI Search integrated `azureOpenAI` vectorizer — works unchanged, while giving you a single resource for all model families (current + future) and a single capacity / billing / content-safety plane.
 
-> **Important:** this pattern uses Foundry's **model-gateway** capability only. It does **not** use Foundry's agent runtime (Agent Service / Hub / Projects); Copilot Studio's native AI Search knowledge source fills that role in v1.
+> **Important:** this pattern uses Foundry's **model-gateway** capability only. It does **not** use Foundry's agent runtime (Agent Service / Hub / Projects); Copilot Studio's native AI Search knowledge source fills that role. Foundry agent runtime is the right addition when an engagement needs multi-agent routing, custom tool calling, or query triage — that's an engagement-specific decision, not part of this pattern's default stack.
 
 ### Region availability check
 
@@ -225,19 +225,103 @@ These are the role assignments you will make during deployment. List them out in
 
 ## 11 — Regional alignment
 
-Co-locate these in the same Azure region wherever possible:
+This pattern has a strong **co-location** requirement: AI Search, the Foundry resource hosting your OpenAI models, Document Intelligence, Blob Storage, Key Vault, and your Fabric capacity should all live in the **same Azure region** wherever possible. The dominant constraint is **OpenAI model availability** — `text-embedding-3-large` and `gpt-4o` are not in every region, and they're the only services in the stack whose regional rollout lags meaningfully behind general Azure availability.
 
-- Azure AI Foundry resource
-- AI Search
-- Document Intelligence
-- Blob Storage
-- Key Vault
+Copilot Studio's environment region is independent and can differ from the Azure region; choose it based on customer data-residency policy.
 
-Fabric capacity region should match unless cross-region data egress is acceptable.
+**Cross-region egress** is the most common silent cost driver and the most common latency surprise in this pattern. Pay attention to it during region selection.
 
-Copilot Studio environment region is independent and can differ; choose based on customer data-residency policy.
+### Tier-1 recommended regions (full stack, current OpenAI rollout, multi-AZ resilience)
 
-**Cross-region egress** is the most common silent cost driver in this pattern — pay attention to it during region selection.
+These are the regions where every component of the pattern stack is currently available at production-grade SKUs **and** new OpenAI model deployments tend to land first or near-first. Default here unless data-residency forces you elsewhere.
+
+| Region | Geography | Use for |
+|---|---|---|
+| **East US 2** | Americas | Default US choice; strong OpenAI capacity; consistent first-mover for new model deployments |
+| **Sweden Central** | EMEA | Default EU choice; strong OpenAI capacity; preferred over older EU regions for OpenAI workloads |
+| **Australia East** | APAC | Default APAC choice (non-Japan); full stack with reliable model availability |
+| **Japan East** | APAC | Japan data-residency; full stack with reliable model availability |
+
+### Tier-2 acceptable regions (full stack, but model rollout may lag)
+
+Choose from Tier 2 when data-residency, latency to the customer, or existing Azure footprint outweighs the model-rollout-lag concern. Always verify the specific model deployments are available **at deployment time** — see verification commands below.
+
+| Region | Geography | Notes |
+|---|---|---|
+| East US | Americas | Older sibling of East US 2; still solid but East US 2 is preferred for new builds |
+| West US 3 | Americas | Newer Azure region; broad service parity; lower model availability in some matrices |
+| North Central US | Americas | US central residency |
+| Canada Central / Canada East | Americas | Canada data-residency |
+| West Europe (Amsterdam) | EMEA | Strong EU footprint; OpenAI availability lags Sweden Central for newest models |
+| North Europe (Dublin) | EMEA | Ireland residency; chat models reliable, embedding model availability mixed |
+| France Central | EMEA | France residency |
+| UK South | EMEA | UK residency; OpenAI availability has improved but still verify per-model |
+| Switzerland North | EMEA | Switzerland residency; verify gpt-4o availability per quota |
+| Korea Central | APAC | Korea residency |
+
+### Tier-3 regions (workarounds required)
+
+Other regions (UAE North, South Africa North, Brazil South, Central India, etc.) typically require either (a) cross-region OpenAI calls or (b) substituting an alternate model. Both options break the "all-in-region" simplicity of this pattern. **Default away from Tier 3** unless data-residency demands it; if it does, plan for cross-region egress cost and additional latency.
+
+### Component availability matrix (as of pattern publication — VERIFY at deployment time)
+
+> ✅ available · ⚠️ available but rollout often lags / quota-limited · ❌ not available at the time of this matrix's authoring
+
+| Region | AI Search S1+ | Foundry resource | text-embedding-3-large | gpt-4o | Doc Intel prebuilt-read | Fabric F-SKU |
+|---|---|---|---|---|---|---|
+| East US 2 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| East US | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| West US 3 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| North Central US | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ |
+| South Central US | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ |
+| Canada Central | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Canada East | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Sweden Central | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| West Europe | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| North Europe | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ |
+| France Central | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| UK South | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ |
+| Switzerland North | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ |
+| Germany West Central | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ✅ |
+| Australia East | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Japan East | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Japan West | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ✅ |
+| Korea Central | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ |
+| Southeast Asia | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ |
+| Central India | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ✅ |
+| UAE North | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ⚠️ |
+| Brazil South | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ✅ |
+| South Africa North | ✅ | ✅ | ❌ | ⚠️ | ⚠️ | ⚠️ |
+
+**Universally available (any Azure region)** — not in matrix because they don't constrain region choice: Blob Storage, Key Vault.
+
+### Why these regions are the recommendation
+
+1. **Model availability is the only hard constraint.** AI Search, Document Intelligence, Blob, Key Vault, and Fabric are widely available; pick a region for them and they will work. OpenAI deployments are the bottleneck.
+2. **OpenAI model rollouts cluster.** When a new OpenAI model lands in Azure, it typically reaches East US 2, Sweden Central, Australia East, and Japan East within the first wave. These four regions are the "follow Azure OpenAI's roadmap" choices.
+3. **Co-location preserves the no-egress story.** The integrated vectorizer (AI Search → Foundry) and the indexer (AI Search → Blob) both produce non-trivial inter-service traffic. In-region calls are sub-millisecond and free; cross-region calls add cost and meaningfully degrade indexing throughput.
+4. **Semantic ranker latency is region-sensitive.** The semantic ranker adds 300–500 ms at p95 in a single region. Cross-region between AI Search and Foundry can push that to 1+ second.
+5. **Data residency wins ties.** If the customer's residency policy points at a Tier-2 or Tier-3 region, choose that region — the residency win is more valuable than the model-rollout-lag concern. Plan to refresh model deployments quarterly to stay current.
+
+### Verify at deployment time
+
+The matrix above is a **publication-time snapshot**. Region × model availability moves monthly. Always confirm before provisioning:
+
+```bash
+# 1. List OpenAI models available in your target region
+az cognitiveservices model list \
+  --location <region> \
+  --query "[?contains(model.name, 'text-embedding-3-large') || contains(model.name, 'gpt-4o')].{model:model.name, version:model.version}" \
+  -o table
+
+# 2. Check Azure AI Search SKU availability in your target region (Standard S1+ required for semantic ranker)
+az search service list-skus --location <region> -o table
+
+# 3. Check Fabric capacity availability (region list updates as Fabric expands)
+# (No CLI as of pattern publication — verify in Fabric Admin Portal → Capacities → Region)
+```
+
+If any of the three checks fail for your preferred region, fall back to the next Tier-1 region within the same residency boundary.
 
 ---
 
@@ -297,7 +381,7 @@ Indicative monthly costs for a **demo / pilot** scale (single region, ~10K docs 
 
 ## 15 — Pre-flight checklist
 
-Confirm all of these before moving to [03-deployment.md](./03-deployment.md):
+Confirm all of these before moving to your chosen deployment path — [03-deployment-manual.md](./03-deployment-manual.md) (portal / CLI walkthrough) or [04-deployment-automated.md](./04-deployment-automated.md) (Bicep + script):
 
 - [ ] Azure subscription chosen, Contributor + User Access Administrator confirmed
 - [ ] Target region(s) chosen with all 5 Azure services available
@@ -309,7 +393,7 @@ Confirm all of these before moving to [03-deployment.md](./03-deployment.md):
 - [ ] Naming convention agreed
 - [ ] Customer document source identified + access path (SharePoint shortcut, file share, etc.) planned
 
-Once all boxes are checked → proceed to [03-deployment.md](./03-deployment.md).
+Once all boxes are checked → proceed to [03-deployment-manual.md](./03-deployment-manual.md) for the portal walkthrough OR [04-deployment-automated.md](./04-deployment-automated.md) for the Bicep + script-driven path.
 
 ---
 

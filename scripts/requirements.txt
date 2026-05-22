@@ -1,0 +1,4 @@
+# Pinned versions — bump deliberately when validating against a new Azure CLI / Search API version.
+requests==2.32.3
+azure-identity==1.19.0
+pytest==8.3.3

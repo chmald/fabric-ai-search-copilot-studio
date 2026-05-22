@@ -1,0 +1,58 @@
+{
+  "_template": true,
+  "_note": "Populate this file with the IDs that result from a deployment of this pattern. The Demos artifact is checked into Azure DevOps as a repo; this file is a machine-readable reference snapshot of provisioned resource IDs for human re-use and local script dry-runs. Pipelines / scripts should NOT read this file at runtime — runtime values come from ADO variable groups (or equivalent per your CI tool).",
+
+  "tenantId": "<entra-tenant-guid>",
+  "subscriptionId": "<azure-subscription-guid>",
+
+  "adoOrg": "<your-ado-org>",
+  "adoProject": "<your-ado-project>",
+  "adoRepo": "rag-knowledge-base-pattern",
+  "adoRemote": "https://dev.azure.com/<org>/<project>/_git/rag-knowledge-base-pattern",
+
+  "region": "<primary-region — e.g. eastus2>",
+  "resourceGroup": "rg-rag-demo-<env>-<region>",
+
+  "fabric": {
+    "tenantSetting_serviceTagsForFabricAdmin": "Enabled",
+    "capacityId": "<fabric-capacity-guid>",
+    "capacityName": "fabric<workload>",
+    "capacitySku": "<F-SKU — F2 minimum for demo, F16+ recommended for prod>",
+    "workspaceId": "<fabric-workspace-guid>",
+    "workspaceName": "ws-rag-demo-<env>",
+    "lakehouseId": "<lakehouse-guid>",
+    "lakehouseName": "lh_rag_demo",
+    "lakehouseSqlEndpoint": "<sql-endpoint-hostname>",
+    "pipelineId": "<data-pipeline-guid>"
+  },
+
+  "azure": {
+    "storageAccount": "stragdemo<env><region>",
+    "blobContainers": ["raw", "chunks"],
+    "keyVault": "kv-rag-demo-<env>-<region>",
+    "searchService": "srch-rag-demo-<env>-<region>",
+    "searchIndexName": "idx-rag-documents",
+    "searchDataSourceName": "ds-chunks",
+    "searchIndexerName": "ixr-chunks",
+    "foundryResource": "aif-rag-demo-<env>-<region>",
+    "foundryEndpoint": "https://aif-rag-demo-<env>-<region>.openai.azure.com",
+    "foundryEmbeddingDeployment": "embedding",
+    "foundryEmbeddingModel": "text-embedding-3-large",
+    "foundryChatDeployment": "chat",
+    "foundryChatModel": "gpt-4o",
+    "documentIntelligence": "di-rag-demo-<env>-<region>"
+  },
+
+  "copilotStudio": {
+    "environmentRegion": "<region — independent from Azure region>",
+    "agentName": "agent-rag-kb",
+    "knowledgeSource": "idx-rag-documents (Azure AI Search)",
+    "publishedChannels": ["Microsoft Teams", "M365 Copilot"]
+  },
+
+  "principals": {
+    "deploymentServicePrincipalAppId": "<app-id-for-deployment-automation>",
+    "deploymentServicePrincipalObjectId": "<object-id>",
+    "aiSearchSystemAssignedMI_ObjectId": "<auto-populated-by-az-cli-after-search-creation>"
+  }
+}
