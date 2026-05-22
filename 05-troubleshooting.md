@@ -13,13 +13,13 @@ Common failure modes and fixes for the RAG knowledge-base pattern. Organized by 
 | Copilot Studio answers with "I don't have any information" | Knowledge source not bound, or index is empty | [§5](#5--copilot-studio) |
 | Copilot Studio cites generic / wrong source | Hybrid+semantic not enabled in knowledge source | [§5.2](#52-citations-look-wrong-or-generic) |
 | Index has 0 documents | Indexer failed, or chunks not landing in Blob | [§4](#4--ai-search-index--indexer) |
-| Indexer status = `transientFailure` repeatedly | Integrated vectorizer auth failure (AOAI role) | [§4.1](#41-vectorizer-auth-failure) |
+| Indexer status = `transientFailure` repeatedly | Integrated vectorizer auth failure (Foundry role) | [§4.1](#41-vectorizer-auth-failure) |
 | `403 Forbidden` from indexer reading Blob | Search MI missing Storage Blob Data Reader | [§4.2](#42-indexer-cannot-read-blob) |
 | Pipeline activity fails on OCR call | DI auth or wrong endpoint / API version | [§3.1](#31-document-intelligence-call-fails) |
 | Pipeline chunk activity fails | Notebook auth or dependency missing | [§3.2](#32-chunking-notebook-fails) |
 | Control table not updating | Notebook → Lakehouse permission issue | [§3.3](#33-control-table-stuck) |
 | OneLake shortcut shows no files | Shortcut permissions or refresh lag | [§2](#2--onelake--source-attachment) |
-| Cost spike | Fabric capacity left running, AOAI quota burned, indexer over-scheduled | [§6](#6--cost-and-quota) |
+| Cost spike | Fabric capacity left running, Foundry quota burned, indexer over-scheduled | [§6](#6--cost-and-quota) |
 
 ---
 
@@ -29,7 +29,7 @@ Common failure modes and fixes for the RAG knowledge-base pattern. Organized by 
 
 **Symptom.** You assigned a role; it shows in Azure portal IAM; but the consuming service still gets `403 Forbidden`.
 
-**Cause.** Azure role assignments take up to **15 minutes** to propagate to consuming services, especially across different resource types (Search → AOAI, Search → Storage).
+**Cause.** Azure role assignments take up to **15 minutes** to propagate to consuming services, especially across different resource types (Search → Foundry, Search → Storage).
 
 **Fix.** Wait 5–15 min and retry. If still failing after 15 min:
 
@@ -123,20 +123,20 @@ For production: pin versions and consider a custom Fabric environment with these
 
 ### 4.1 Vectorizer auth failure
 
-**Symptom.** Indexer status shows `lastResult.errorMessage` referencing AOAI 401 / 403, or "managed identity not authorized to invoke embedding deployment."
+**Symptom.** Indexer status shows `lastResult.errorMessage` referencing OpenAI 401 / 403 from the Foundry endpoint, or "managed identity not authorized to invoke embedding deployment."
 
-**Cause.** AI Search service's managed identity does not have **Cognitive Services OpenAI User** role on the AOAI resource.
+**Cause.** AI Search service's managed identity does not have **Cognitive Services OpenAI User** role on the Foundry resource hosting the embedding deployment.
 
 **Fix.**
 
 ```bash
 SEARCH_OBJID=<AI Search system-assigned MI object ID>
-AOAI_RES_ID=$(az cognitiveservices account show --name <aoai> -g <rg> --query id -o tsv)
+AIF_RES_ID=$(az cognitiveservices account show --name <foundry-resource> -g <rg> --query id -o tsv)
 
 az role assignment create \
   --assignee-object-id $SEARCH_OBJID --assignee-principal-type ServicePrincipal \
   --role "Cognitive Services OpenAI User" \
-  --scope $AOAI_RES_ID
+  --scope $AIF_RES_ID
 ```
 
 Wait up to 15 minutes for propagation, then re-run the indexer.
@@ -300,15 +300,15 @@ Manually run once to confirm health, then check scheduling settings.
 - Always stop sessions after use
 - Set a **budget alert** in Azure Cost Management on the resource group + a separate one on the Fabric capacity
 
-### 6.2 AOAI quota exhausted
+### 6.2 Foundry / OpenAI quota exhausted
 
-**Symptom.** Indexer / queries fail intermittently with 429 from AOAI.
+**Symptom.** Indexer / queries fail intermittently with 429 from the Foundry OpenAI endpoint.
 
-**Cause.** TPM quota on the embedding or chat deployment hit ceiling.
+**Cause.** TPM quota on the embedding or chat OpenAI deployment hit ceiling.
 
 **Fixes:**
 
-- Increase TPM on the deployment (Azure portal → AOAI → Quotas)
+- Increase TPM on the deployment (Azure portal → Foundry resource → Quotas; OpenAI deployments use the AOAI quota plane)
 - For indexer-side: schedule the indexer less aggressively
 - For query-side: add Copilot Studio rate limiting; or move to higher TPM tier
 
@@ -326,11 +326,11 @@ Manually run once to confirm health, then check scheduling settings.
 
 (Only relevant for production deployments with private endpoints.)
 
-### 7.1 Indexer cannot reach AOAI through private endpoint
+### 7.1 Indexer cannot reach Foundry resource through private endpoint
 
-**Cause.** AI Search service does not have a **shared private link** to AOAI.
+**Cause.** AI Search service does not have a **shared private link** to the Foundry resource.
 
-**Fix.** In AI Search → **Settings → Networking → Shared private access → Add**: target AOAI resource. Approve the connection on the AOAI side.
+**Fix.** In AI Search → **Settings → Networking → Shared private access → Add**: target the Foundry resource. Approve the connection on the Foundry side.
 
 ### 7.2 Indexer cannot reach Blob through private endpoint
 
@@ -352,7 +352,7 @@ When you can't figure out where the failure is:
 
 1. **Fabric Pipeline activity output** — shows raw error from each step
 2. **AI Search indexer status** — `GET .../indexers/<name>/status?api-version=2024-07-01`
-3. **AOAI metrics** — Azure portal → AOAI → Metrics blade → TPM utilization, throttling
+3. **Foundry / OpenAI metrics** — Azure portal → Foundry resource → Metrics blade → TPM utilization, throttling
 4. **AI Search metrics** — search latency, throttling, error rate
 5. **Copilot Studio Test pane activity trace** — shows which knowledge source was called
 
@@ -395,7 +395,7 @@ Escalate to support / Microsoft if, after working through this guide:
 | Issue | Escalate to |
 |---|---|
 | Persistent indexer 5xx errors | Azure support (AI Search) |
-| AOAI capacity / region constraint blocking deployment | AOAI access team |
+| Foundry / OpenAI capacity / region constraint blocking deployment | Foundry / Azure OpenAI access team |
 | Fabric Data Pipeline activity bug | Fabric support |
 | Copilot Studio publishing approval stuck > 5 business days | Power Platform admin → escalation |
 | Semantic ranker returning incorrect captions for a specific query class | Microsoft Learn Q&A first; AI Search support if reproducible |

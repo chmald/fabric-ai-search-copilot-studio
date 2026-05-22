@@ -13,7 +13,7 @@ A working end-to-end RAG agent that:
 - Ingests an unstructured document corpus from **Fabric OneLake** (or any Fabric-attached source)
 - OCRs documents with **Azure Document Intelligence** (prebuilt-read model)
 - Chunks text and writes to **Azure Blob Storage** as the permanent canonical store
-- Indexes content in **Azure AI Search** using **integrated AOAI vectorization** (no custom embedding code) into a **hybrid index** (keyword + vector + metadata)
+- Indexes content in **Azure AI Search** using **integrated vectorization** (no custom embedding code) into a **hybrid index** (keyword + vector + metadata)
 - Re-ranks results with the **AI Search semantic ranker** for production-grade relevance
 - Surfaces answers through a **Copilot Studio agent** published to **Microsoft Teams** and **M365 Copilot**
 
@@ -28,7 +28,7 @@ These decisions are **the v1 baseline**. Deviate only with an explicit decision 
 | # | Decision | Choice | Why |
 |---|---|---|---|
 | 1 | Orchestration layer | **Copilot Studio native** (no Foundry / no custom orchestrator) | Lowest-code path; Copilot Studio's native AI Search knowledge source handles retrieval, grounding, and citation |
-| 2 | Vectorization | **AI Search integrated AOAI vectorizer** | Index-time + query-time embedding handled by AI Search; eliminates custom embedding code in the pipeline |
+| 2 | Vectorization | **AI Search integrated vectorizer** (Foundry-hosted OpenAI embedding) | Index-time + query-time embedding handled by AI Search; eliminates custom embedding code in the pipeline |
 | 3 | Index type | **Hybrid** (BM25 keyword + vector) | Hybrid retrieval consistently beats vector-only on factual / exact-match queries (IDs, dates, names, dollar amounts) |
 | 4 | Semantic ranker | **Enabled** | Second-stage re-ranker delivers 25–50 % relevance lift on Q&A workloads; required for production-grade citation quality |
 | 5 | Storage split | **OneLake = source / staging, Blob = permanent + indexed** | Reuses customer's existing Fabric investment for ingestion; Blob is cheaper, easier to secure, and is the simplest source for the AI Search indexer |
@@ -64,8 +64,8 @@ You will need (full detail in [02-prerequisites.md](./02-prerequisites.md)):
 - **Azure subscription** with Contributor + User Access Administrator on the target resource group
 - **Microsoft Fabric tenant** with a workspace you can create artifacts in (Lakehouse + Data Pipelines)
 - **Copilot Studio license** for the building user (Maker access)
-- **Azure OpenAI** access in your tenant with capacity for one chat completion deployment (e.g. `gpt-4o`) and one embedding deployment (e.g. `text-embedding-3-large`)
-- **Region alignment**: all services (AI Search, AOAI, Document Intelligence, Blob, Fabric) ideally in the **same Azure region**, or at least the same data residency boundary
+- **Azure AI Foundry resource** (the unified Azure AI Services resource) with capacity for one chat completion deployment (e.g. `gpt-4o`) and one embedding deployment (e.g. `text-embedding-3-large`) — Foundry is the strategic model-gateway resource and supersedes the legacy standalone Azure OpenAI resource for new deployments
+- **Region alignment**: all services (AI Search, Azure AI Foundry, Document Intelligence, Blob, Fabric) ideally in the **same Azure region**, or at least the same data residency boundary
 - **AI Search**: **Standard (S1) or higher** SKU (semantic ranker is not available on Basic)
 
 ---
@@ -85,7 +85,7 @@ You will need (full detail in [02-prerequisites.md](./02-prerequisites.md)):
 - The customer needs **structured field extraction** into a database (e.g. invoice line items, contract clauses into rows) → use a Document Intelligence custom-extraction model + Fabric / SQL pipeline instead
 - The customer needs **multi-agent orchestration** with custom triage, routing, or tool-calling logic → add **Azure AI Foundry** as the orchestration layer (this pattern's v2)
 - The corpus is in the **millions of documents** with stringent low-latency requirements → revisit index sharding, replica counts, and tier selection beyond Standard
-- The customer requires a **bring-your-own** model or non-AOAI LLM → revisit the vectorizer + Copilot Studio model choices
+- The customer requires a **non-OpenAI model** (Cohere, Llama, Phi, Mistral, etc.) → Foundry resource supports these via its model catalog, but the AI Search `azureOpenAI` vectorizer is OpenAI-only; non-OpenAI embedding requires the AML-hosted vectorizer kind (out of v1 scope)
 
 ---
 
@@ -93,9 +93,16 @@ You will need (full detail in [02-prerequisites.md](./02-prerequisites.md)):
 
 For pro-code paths (custom Python ingestion, Bicep IaC, eval harness, custom field extraction), see the `chmald/document-intelligence-pattern` repository overlay model. This Demos folder is the **low-code companion**, not a replacement.
 
----
+## Note on Azure AI Foundry — model gateway only
 
-## Decision provenance
+This pattern uses an **Azure AI Foundry resource** as the **model-hosting gateway** (where the OpenAI embedding + chat deployments live). It does **not** use Foundry's agent runtime (Agent Service, Hub, Projects) — that role is filled by Copilot Studio's native AI Search knowledge source in v1. The two Foundry capabilities are independent:
+
+| Foundry capability | v1 decision | Why |
+|---|---|---|
+| **Model gateway** (Azure AI Foundry resource hosting OpenAI + catalog models) | ✅ Use | Strategic direction; same OpenAI-compatible endpoint as legacy AOAI; future flexibility for non-OpenAI models |
+| **Agent runtime** (Foundry Agent Service / Hub / Projects) | ❌ Defer to v2 | Copilot Studio native handles knowledge-base Q&A without code; Foundry agents become relevant when multi-agent routing, custom tool calling, or query triage is required |
+
+---
 
 | Date | Decision | Reference |
 |---|---|---|

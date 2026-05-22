@@ -10,7 +10,7 @@ Step-by-step build of the RAG knowledge-base pattern. Assumes all of [02-prerequ
 
 | Phase | What you build | ~Time | Validation at end |
 |---|---|---|---|
-| 1 | Foundation: RG + Key Vault + Blob + AI Search + AOAI + Doc Intelligence + Fabric workspace + Lakehouse | 60–90 min | All resources deployed; identities + RBAC set |
+| 1 | Foundation: RG + Key Vault + Blob + AI Search + Azure AI Foundry + Doc Intelligence + Fabric workspace + Lakehouse | 60–90 min | All resources deployed; identities + RBAC set |
 | 2 | Ingestion attachment: OneLake source attached; Control Delta table created | 30–45 min | Sample docs visible in Lakehouse; control table queryable |
 | 3 | Fabric Data Pipeline: OCR → chunk → write to Blob, with control-table updates | 90–180 min | Pipeline run succeeds end-to-end on a sample doc; control table reflects state |
 | 4 | AI Search index: schema, integrated vectorizer, hybrid + semantic configuration; indexer pointed at Blob | 45–60 min | Indexer run succeeds; sample query returns chunks with semantic captions |
@@ -70,19 +70,23 @@ In the Azure portal:
 5. Create
 6. After deployment: copy the **endpoint** and **key 1** to Key Vault as secrets `di-endpoint` and `di-key`
 
-### 1.5 Create Azure OpenAI + deployments
+### 1.5 Create Azure AI Foundry resource + OpenAI deployments
+
+> **Why a Foundry resource, not a standalone Azure OpenAI resource?** The Azure AI Foundry resource (kind `AIServices`) is the strategic Microsoft model-gateway resource. It hosts OpenAI models (and the broader Foundry catalog: Cohere, Llama, Phi, Mistral, …) under a single resource and exposes an OpenAI-compatible endpoint at `https://<resource>.openai.azure.com/` — so the AI Search integrated `azureOpenAI` vectorizer works against it unchanged. This pattern uses Foundry's model-gateway capability only; Foundry's agent runtime (Agent Service / Hub / Projects) is **not** used in v1.
 
 In the Azure portal:
 
-1. **Create a resource → Azure OpenAI**
-2. Same resource group, region (confirm model availability)
+1. **Create a resource → Azure AI Foundry** (look for the "Azure AI Foundry" tile; under the hood this provisions a Cognitive Services resource of kind `AIServices`)
+2. Same resource group, region (confirm OpenAI model availability for the region)
 3. Pricing tier: **Standard S0**
-4. After deployment: open **Azure OpenAI Studio** → **Deployments**:
+4. After deployment: open **Azure AI Foundry portal** (foundry.azure.com) → select the resource → **Models + endpoints → Deploy a model**:
    - Deploy `text-embedding-3-large` → name it `embedding`
    - Deploy `gpt-4o` → name it `chat`
    - For both: set capacity to 10K TPM for demo
+   - (Optional) browse the Foundry catalog for non-OpenAI models if you plan to extend later; v1 only requires the two OpenAI deployments above
+5. Confirm the OpenAI-compatible endpoint: **Endpoints** view shows `https://aif-rag-demo-eus.openai.azure.com/` — that's the value the AI Search vectorizer will use
 
-Copy the AOAI **endpoint** and **key 1** to Key Vault as `aoai-endpoint` and `aoai-key`.
+Copy the Foundry resource's **OpenAI endpoint** and **key 1** to Key Vault as `aif-endpoint` and `aif-key`.
 
 ### 1.6 Create AI Search
 
@@ -104,14 +108,14 @@ These are the critical role assignments. **Skip these and the integrated vectori
 
 ```bash
 SEARCH_OBJID=<paste the AI Search system-assigned MI object ID from step 1.6>
-AOAI_RES_ID=$(az cognitiveservices account show --name aoai-rag-demo-eus -g $RG --query id -o tsv)
+AIF_RES_ID=$(az cognitiveservices account show --name aif-rag-demo-eus -g $RG --query id -o tsv)
 ST_RES_ID=$(az storage account show --name $ST -g $RG --query id -o tsv)
 
-# AI Search → AOAI (integrated vectorizer)
+# AI Search → Foundry resource (integrated vectorizer access to OpenAI deployments)
 az role assignment create \
   --assignee-object-id $SEARCH_OBJID --assignee-principal-type ServicePrincipal \
   --role "Cognitive Services OpenAI User" \
-  --scope $AOAI_RES_ID
+  --scope $AIF_RES_ID
 
 # AI Search → Blob (indexer reads chunks)
 az role assignment create \
@@ -133,7 +137,7 @@ In the Fabric portal:
 ### Phase 1 validation
 
 - [ ] All 6 Azure resources exist in the same RG and region
-- [ ] Key Vault contains: `di-endpoint`, `di-key`, `aoai-endpoint`, `aoai-key`, `search-endpoint`, `search-admin-key`
+- [ ] Key Vault contains: `di-endpoint`, `di-key`, `aif-endpoint`, `aif-key`, `search-endpoint`, `search-admin-key`
 - [ ] AI Search managed identity has both role assignments visible in Azure portal IAM
 - [ ] Fabric workspace + Lakehouse exist and you have Member/Admin role
 
@@ -467,10 +471,10 @@ api-key: <admin key>
     ],
     "vectorizers": [
       {
-        "name": "aoai-vectorizer",
+        "name": "aif-vectorizer",
         "kind": "azureOpenAI",
         "azureOpenAIParameters": {
-          "resourceUri": "https://aoai-rag-demo-eus.openai.azure.com",
+          "resourceUri": "https://aif-rag-demo-eus.openai.azure.com",
           "deploymentId": "embedding",
           "modelName": "text-embedding-3-large",
           "authIdentity": null
@@ -478,7 +482,7 @@ api-key: <admin key>
       }
     ],
     "profiles": [
-      { "name": "default-vector-profile", "algorithm": "hnsw-default", "vectorizer": "aoai-vectorizer" }
+      { "name": "default-vector-profile", "algorithm": "hnsw-default", "vectorizer": "aif-vectorizer" }
     ]
   },
   "semantic": {
@@ -497,7 +501,7 @@ api-key: <admin key>
 }
 ```
 
-> **Critical:** the `vectorizers[0].azureOpenAIParameters.authIdentity` set to `null` means **use the service's system-assigned managed identity**. The role assignment from Phase 1.7 (Cognitive Services OpenAI User on AOAI) is what makes this work. If you used a user-assigned identity instead, set the identity object here.
+> **Critical:** the `vectorizers[0].azureOpenAIParameters.authIdentity` set to `null` means **use the service's system-assigned managed identity**. The role assignment from Phase 1.7 (Cognitive Services OpenAI User on the Foundry resource) is what makes this work. If you used a user-assigned identity instead, set the identity object here. The `resourceUri` uses the Foundry resource's OpenAI-compatible endpoint (`*.openai.azure.com`) — Foundry resources expose this for backwards-compatible tooling like the AI Search vectorizer.
 
 ### 4.2 Create the data source
 

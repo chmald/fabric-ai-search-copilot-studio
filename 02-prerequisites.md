@@ -2,7 +2,7 @@
 
 Everything required before you can start building. Work through this list in order; the deployment guide assumes all of these are in place.
 
-> **Plan ahead.** Several items (Copilot Studio licensing, AOAI access approval, Fabric capacity allocation, AI Search tier selection) involve administrative approvals that can take hours to days. Start the slowest-moving ones first.
+> **Plan ahead.** Several items (Copilot Studio licensing, Foundry access approval, Fabric capacity allocation, AI Search tier selection) involve administrative approvals that can take hours to days. Start the slowest-moving ones first.
 
 ---
 
@@ -18,7 +18,7 @@ Everything required before you can start building. Work through this list in ord
 Several integration points require **role assignments**, not just resource creation:
 
 - Assigning managed identity → Storage Blob Data Reader on Blob
-- Assigning AI Search managed identity → Cognitive Services OpenAI User on AOAI
+- Assigning AI Search managed identity → Cognitive Services OpenAI User on the Foundry resource
 - Assigning Fabric workspace identity → Blob Data Contributor on Blob
 
 Contributor-only is **not enough**; you will hit "Authorization failed" errors when wiring up identities.
@@ -29,7 +29,7 @@ Contributor-only is **not enough**; you will hit "Authorization failed" errors w
 
 In the target subscription, register these resource providers (one-time, takes a few minutes):
 
-- `Microsoft.CognitiveServices` (Document Intelligence, Azure OpenAI)
+- `Microsoft.CognitiveServices` (Document Intelligence, Azure AI Foundry — provider covers both)
 - `Microsoft.Search`
 - `Microsoft.Storage`
 - `Microsoft.KeyVault`
@@ -48,32 +48,36 @@ az provider register --namespace Microsoft.CognitiveServices --wait
 
 ---
 
-## 3 — Azure OpenAI
+## 3 — Azure AI Foundry (model gateway)
 
 ### Required
 
-- **AOAI resource** in the target subscription + region
-- **Two model deployments:**
+- **Azure AI Foundry resource** (Azure CLI / ARM kind: `AIServices`) in the target subscription + region. This is the **strategic model-gateway resource** that supersedes the legacy standalone Azure OpenAI resource for new deployments. A single Foundry resource hosts all OpenAI models you deploy and also exposes the broader Foundry model catalog (Cohere, Llama, Phi, Mistral, etc.) under one endpoint.
+- **Two OpenAI model deployments** inside the Foundry resource:
   - **Embedding** — recommended: `text-embedding-3-large` (3072 dim). Acceptable fallback: `text-embedding-3-small` (1536 dim) for cost-sensitive demos.
   - **Chat completion** — recommended: `gpt-4o`. Acceptable fallback: `gpt-4o-mini` for cost-sensitive demos.
+
+> **Why Foundry resource over the legacy AOAI resource?** The Azure AI Foundry resource is Microsoft's strategic direction for all new AI model deployments. It exposes the same OpenAI-compatible endpoint (`https://<resource>.openai.azure.com/`) so all existing tooling — including the AI Search integrated `azureOpenAI` vectorizer — works unchanged, while giving you a single resource for all model families (current + future) and a single capacity / billing / content-safety plane.
+
+> **Important:** this pattern uses Foundry's **model-gateway** capability only. It does **not** use Foundry's agent runtime (Agent Service / Hub / Projects); Copilot Studio's native AI Search knowledge source fills that role in v1.
 
 ### Region availability check
 
 Not every model is available in every region. Confirm before provisioning:
 
-- Microsoft Learn: "Azure OpenAI models and region availability" (search current Microsoft Learn — region matrix updates frequently)
+- Microsoft Learn: "Azure AI Foundry models and region availability" / "Azure OpenAI models and region availability" (search current Microsoft Learn — region matrix updates frequently)
 - Or query the resource directly:
 
 ```bash
 az cognitiveservices account list-models \
-  --name <your-aoai-resource> \
+  --name <your-foundry-resource> \
   --resource-group <your-rg> \
   --query "[].{model:name, version:version, locations:capabilities.locations}"
 ```
 
 ### Approval and quota
 
-- AOAI access is gated. If this is a new subscription, request access via the **Limited Access** form first.
+- Foundry OpenAI access is gated. If this is a new subscription, request access via the **Limited Access** form first (the same form historically used for standalone Azure OpenAI access).
 - Each deployment requires **TPM (tokens-per-minute) quota** assignment. For demo: 10K TPM per deployment is sufficient. For production: size based on expected concurrent users × tokens per turn.
 
 ### Region recommendation
@@ -167,7 +171,7 @@ Initiate these admin asks **before** you start building so they're cleared by th
 
 ### Required
 
-- **Document Intelligence resource** in the target subscription + region (same region as AOAI / AI Search ideally)
+- **Document Intelligence resource** in the target subscription + region (same region as the Foundry resource / AI Search ideally)
 - **Standard pricing tier** (Free tier is limited to 500 pages/month — fine for demo, not for production)
 
 The pattern uses only the `prebuilt-read` model — no custom training, no Document Intelligence Studio work required.
@@ -210,12 +214,12 @@ These are the role assignments you will make during deployment. List them out in
 |---|---|---|---|
 | Fabric workspace identity (or service principal) | **Storage Blob Data Contributor** | Storage account | Write raw + chunk files |
 | Fabric workspace identity | **Cognitive Services User** | Document Intelligence resource | Call OCR |
-| Fabric workspace identity | **Cognitive Services OpenAI User** | AOAI resource | (Optional) direct AOAI calls; skip if pipeline doesn't call AOAI directly |
+| Fabric workspace identity | **Cognitive Services OpenAI User** | Foundry resource | (Optional) direct OpenAI calls; skip if pipeline doesn't call OpenAI directly |
 | AI Search service managed identity | **Storage Blob Data Reader** | Storage account (or `chunks/` container) | Indexer pulls chunk JSON |
-| AI Search service managed identity | **Cognitive Services OpenAI User** | AOAI resource | **Integrated vectorizer auth** — critical |
+| AI Search service managed identity | **Cognitive Services OpenAI User** | Foundry resource | **Integrated vectorizer auth** — critical |
 | Building user | **Key Vault Secrets Officer** | Key Vault | Manage secrets during build |
 | Building user | **Search Service Contributor** | AI Search | Create + manage indexes |
-| Building user | **Cognitive Services Contributor** | AOAI + Document Intelligence | Deploy models, view keys |
+| Building user | **Cognitive Services Contributor** | Foundry resource + Document Intelligence | Deploy models, view keys |
 
 ---
 
@@ -223,7 +227,7 @@ These are the role assignments you will make during deployment. List them out in
 
 Co-locate these in the same Azure region wherever possible:
 
-- AOAI
+- Azure AI Foundry resource
 - AI Search
 - Document Intelligence
 - Blob Storage
@@ -244,7 +248,7 @@ A consistent naming convention makes the build navigable and replicable. Suggest
 ```
 Resource group:   rg-<workload>-<env>-<region>           e.g.  rg-rag-demo-eus
 AI Search:        srch-<workload>-<env>-<region>         e.g.  srch-rag-demo-eus
-AOAI:             aoai-<workload>-<env>-<region>         e.g.  aoai-rag-demo-eus
+AI Foundry:       aif-<workload>-<env>-<region>          e.g.  aif-rag-demo-eus
 Doc Intelligence: di-<workload>-<env>-<region>           e.g.  di-rag-demo-eus
 Storage:          st<workload><env><region>              e.g.  stragdemoeus  (lowercase, no hyphens)
 Key Vault:        kv-<workload>-<env>-<region>           e.g.  kv-rag-demo-eus
@@ -261,8 +265,8 @@ Copilot agent:    agent-<workload>                       e.g.  agent-rag-kb
 
 | Service | Quota | Typical demo need | Where to check |
 |---|---|---|---|
-| AOAI | TPM per deployment | 10K each (embedding + chat) | Azure portal → AOAI resource → Quotas |
-| AOAI | Number of deployments | 2 (embedding + chat) | Same |
+| Foundry | TPM per OpenAI deployment | 10K each (embedding + chat) | Azure portal → Foundry resource → Quotas (uses the AOAI quota plane for OpenAI models) |
+| Foundry | Number of OpenAI deployments | 2 (embedding + chat) | Same |
 | AI Search | Services per subscription | 1 | Azure portal → subscription → Usage + quotas → Search |
 | AI Search | Semantic ranker queries / month | Free quota or paid | AI Search service → Semantic ranker blade |
 | Document Intelligence | Pages per month | Standard tier: ≥ 1M | DI resource → Quotas |
@@ -278,8 +282,8 @@ Indicative monthly costs for a **demo / pilot** scale (single region, ~10K docs 
 | Component | Demo cost / month (USD) | Notes |
 |---|---|---|
 | AI Search Standard S1 | ~$250 | One replica, one partition |
-| AOAI embedding (text-embedding-3-large) | ~$10–$50 | One-time bulk embed + low ongoing |
-| AOAI chat (gpt-4o) | ~$50–$200 | Scales with query volume |
+| Foundry — OpenAI embedding (text-embedding-3-large) | ~$10–$50 | One-time bulk embed + low ongoing |
+| Foundry — OpenAI chat (gpt-4o) | ~$50–$200 | Scales with query volume |
 | Document Intelligence (prebuilt-read) | ~$15–$30 | $1.50 / 1K pages |
 | Blob Storage (Hot, ~50 GB) | ~$2 | |
 | Key Vault | ~$1 | |
@@ -297,7 +301,7 @@ Confirm all of these before moving to [03-deployment.md](./03-deployment.md):
 
 - [ ] Azure subscription chosen, Contributor + User Access Administrator confirmed
 - [ ] Target region(s) chosen with all 5 Azure services available
-- [ ] AOAI access approved + quota assigned for embedding + chat models
+- [ ] Foundry resource access approved + quota assigned for embedding + chat OpenAI deployments
 - [ ] AI Search Standard tier budget approved
 - [ ] Fabric capacity allocated to a workspace
 - [ ] Copilot Studio license assigned to the builder

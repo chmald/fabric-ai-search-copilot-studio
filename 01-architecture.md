@@ -16,7 +16,7 @@ Reference architecture for the low-code RAG knowledge-base pattern. Read this fi
 
 - Structured field extraction into a database (use Document Intelligence custom-extraction + a separate pipeline)
 - Multi-agent orchestration, custom tool-calling, query triage logic (defer to a Foundry-based v2)
-- Bring-your-own model / non-AOAI LLM
+- Bring-your-own model (non-OpenAI: Cohere, Llama, Phi, Mistral, etc.) — Foundry resource supports the model catalog but the AI Search `azureOpenAI` vectorizer is OpenAI-only; alternate vectorizer kinds (AML-hosted) are out of v1 scope
 - Streaming ingestion below ~1-minute latency (Fabric Data Pipelines is batch-oriented; for event-driven, swap in Power Automate)
 
 ---
@@ -40,7 +40,7 @@ flowchart TB
         KV[Azure Key Vault<br/>secrets + managed identities]
         BLOB[(Azure Blob<br/>raw/ + chunks/<br/>permanent canonical store)]
         DI[Document Intelligence<br/>prebuilt-read OCR]
-        AOAI[Azure OpenAI<br/>chat + embedding deployments]
+        AIFNDRY[Azure AI Foundry<br/>OpenAI chat + embedding deployments<br/>model-gateway role only]
         SEARCH[Azure AI Search<br/>hybrid index + integrated vectorizer<br/>+ semantic ranker]
     end
 
@@ -61,7 +61,7 @@ flowchart TB
     DI -->|extracted text| PIPE
     PIPE -->|chunked JSON| BLOB
     BLOB -->|indexer pull| SEARCH
-    SEARCH -.->|integrated vectorizer<br/>auto-embed| AOAI
+    SEARCH -.->|integrated vectorizer<br/>auto-embed| AIFNDRY
     KV -.->|secrets / RBAC| PIPE
     KV -.->|secrets / RBAC| SEARCH
 
@@ -125,8 +125,8 @@ Use Delta merge (`MERGE INTO`) on `file_id` for upserts. Build dashboards on top
 | **Azure Key Vault** | Single source of truth for connection strings, API keys, and secrets. Pipelines and indexers authenticate via **managed identity** wherever possible; Key Vault is the fallback for any secret that cannot be replaced by RBAC. |
 | **Azure Blob Storage** | Permanent canonical store. Two containers: `raw/` (the original files, used for citation linkback from Copilot Studio answers) and `chunks/` (one JSON file per chunk, consumed by the AI Search indexer). |
 | **Azure Document Intelligence** | OCR. Use the **prebuilt-read** model (no training). Returns extracted text, page-aware structure, and confidence scores. |
-| **Azure OpenAI** | Two deployments: an **embedding** model (recommended: `text-embedding-3-large`) for the AI Search integrated vectorizer, and a **chat completion** model (recommended: `gpt-4o`) for the Copilot Studio generative answers. |
-| **Azure AI Search** | The retrieval engine. A single index with text, vector, and metadata fields. **Integrated AOAI vectorizer** embeds chunks at index time and embeds user queries at search time — **zero custom embedding code anywhere**. **Hybrid query mode** (BM25 + vector) plus **semantic ranker** on top. **Standard (S1) tier or higher** required. |
+| **Azure AI Foundry resource** (model gateway) | Two OpenAI deployments hosted in a single Foundry resource: an **embedding** model (recommended: `text-embedding-3-large`) for the AI Search integrated vectorizer, and a **chat completion** model (recommended: `gpt-4o`) for the Copilot Studio generative answers. Foundry resource (kind `AIServices`) supersedes the legacy standalone Azure OpenAI resource for new deployments and exposes an OpenAI-compatible endpoint at `https://<resource>.openai.azure.com/` for backwards-compatible tooling. **This pattern uses Foundry's model-gateway capability only — not its agent runtime (Agent Service / Hub / Projects), which is filled by Copilot Studio in v1.** |
+| **Azure AI Search** | The retrieval engine. A single index with text, vector, and metadata fields. **Integrated vectorizer** (`azureOpenAI` kind, pointed at the Foundry resource's OpenAI-compatible endpoint) embeds chunks at index time and embeds user queries at search time — **zero custom embedding code anywhere**. **Hybrid query mode** (BM25 + vector) plus **semantic ranker** on top. **Standard (S1) tier or higher** required. |
 
 #### AI Search index schema (reference)
 
@@ -192,7 +192,7 @@ No code touches this path.
         4. Update control table: `ocr_status=succeeded`, `chunk_status=succeeded`, `chunk_count=N`
 4. **AI Search indexer runs** (on schedule, default every 5 minutes):
     1. Polls Blob `chunks/` container for new JSON files
-    2. For each new chunk, calls the integrated AOAI vectorizer → embeds the `content` field → writes to `content_vector`
+    2. For each new chunk, calls the integrated vectorizer → embeds the `content` field via the Foundry-hosted OpenAI embedding deployment → writes to `content_vector`
     3. Indexes all fields into the index
 5. **Indexer marks the chunks indexed**; pipeline (next run) updates control table `index_status=indexed`
 
@@ -205,7 +205,7 @@ No code touches this path.
     2. Hybrid retrieval: BM25 on `content` + vector similarity on `content_vector` → top ~50 candidates
     3. Semantic ranker re-ranks the top candidates with a cross-encoder model → top N (default 5)
     4. Returns chunks with relevance scores, captions, and `source_uri`
-4. **Copilot Studio assembles** the grounding prompt with retrieved chunks + system prompt + conversation history → calls AOAI chat completion
+4. **Copilot Studio assembles** the grounding prompt with retrieved chunks + system prompt + conversation history → calls the Foundry-hosted OpenAI chat deployment
 5. **Agent responds** with the answer + inline citations linking back to `source_uri` (the original raw file in Blob)
 
 ### Chunking strategy (reference, configurable)
@@ -224,9 +224,9 @@ No code touches this path.
 - **Managed identity everywhere it's supported:**
   - Fabric Data Pipeline → Blob: storage account managed identity
   - Fabric Data Pipeline → Document Intelligence: managed identity
-  - Fabric Data Pipeline → AOAI: managed identity (where supported in your region; otherwise Key Vault secret)
+  - Fabric Data Pipeline → Foundry resource: managed identity (where supported in your region; otherwise Key Vault secret)
   - AI Search → Blob: search service managed identity (Storage Blob Data Reader on the chunks/ container)
-  - AI Search → AOAI: search service managed identity (Cognitive Services OpenAI User on the AOAI resource) — **this is what the integrated vectorizer uses**
+  - AI Search → Foundry resource: search service managed identity (Cognitive Services OpenAI User on the Foundry resource) — **this is what the integrated vectorizer uses**
   - Copilot Studio → AI Search: API key (Copilot Studio's AI Search knowledge source requires admin or query key today)
 
 ### Secrets
@@ -237,11 +237,11 @@ No code touches this path.
 ### Network
 
 - For demo: public endpoints are acceptable
-- For production: enable **AI Search Private Endpoint**, **AOAI Private Endpoint**, **Blob Private Endpoint**, and an **AI Search shared private link** from the search service to AOAI and Blob. Fabric private link is available in supported regions; otherwise allow Fabric egress IP ranges.
+- For production: enable **AI Search Private Endpoint**, **Foundry resource Private Endpoint**, **Blob Private Endpoint**, and an **AI Search shared private link** from the search service to the Foundry resource and Blob. Fabric private link is available in supported regions; otherwise allow Fabric egress IP ranges.
 
 ### Data residency
 
-- Co-locate **AI Search + AOAI + Blob + Document Intelligence** in the same Azure region wherever possible
+- Co-locate **AI Search + Foundry resource + Blob + Document Intelligence** in the same Azure region wherever possible
 - Fabric capacity region should match unless cross-region egress is acceptable
 - Copilot Studio environment region is independent but should respect customer data-residency policies
 
@@ -255,7 +255,7 @@ The README table summarized the locked design. The full rationale for each:
 
 Copilot Studio's native AI Search knowledge source delivers retrieval + grounding + citation **without code**. Adding Foundry buys orchestration flexibility (multi-agent routing, custom tool calling, query triage logic) but costs the no-code story. For knowledge-base Q&A — the single most common RAG use case — Copilot Studio native is sufficient. Foundry becomes valuable in **v2** when the agent needs to do more than answer questions (e.g. take actions, call tools, route to specialist sub-agents).
 
-### 2. Integrated AOAI vectorizer
+### 2. Integrated vectorizer (Foundry-hosted OpenAI)
 
 Pre-integrated-vectorizer, RAG patterns required custom code to (a) embed chunks at index time and (b) embed user queries at retrieval time. Integrated vectorization makes both invisible: configure the embedding model on the index, and AI Search handles both calls. Removes a class of bugs (embedding-model drift between index and query) and eliminates the need for a custom embedding step in the pipeline.
 
