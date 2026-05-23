@@ -24,6 +24,7 @@ secrets.json
 
 # Deployment ID snapshots populated post-deploy — keep the template, gitignore the populated copy
 demo-ids.local.json
+*.local.json
 
 # OS junk
 .DS_Store

@@ -304,10 +304,17 @@ def main() -> int:
     if "subscriptionId" not in ids:
         try:
             from subprocess import check_output
-            ids["subscriptionId"] = check_output(["az", "account", "show", "--query", "id", "-o", "tsv"],
-                                                  text=True).strip()
-        except Exception:
-            sys.exit("[FATAL] subscriptionId missing from ids file and `az account show` failed.")
+            # shell=True is required on Windows so that `az` (actually az.cmd) resolves.
+            ids["subscriptionId"] = check_output(
+                "az account show --query id -o tsv",
+                text=True, shell=True,
+            ).strip()
+        except Exception as ex:
+            sys.exit(
+                "[FATAL] subscriptionId missing from ids file and `az account show` failed: "
+                f"{ex!r}. Add a top-level \"subscriptionId\" key to the ids file or run "
+                "`az login` / `az account set --subscription <id>` first."
+            )
 
     key = search_admin_key(credential, ids["searchService"], ids["subscriptionId"], ids["resourceGroup"])
 

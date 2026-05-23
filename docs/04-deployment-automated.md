@@ -4,7 +4,7 @@ The automated deployment path. Provisions the Azure platform layer via Bicep, th
 
 > **Two paths exist; this is the automated one.** For the manual portal / CLI walkthrough, see [03-deployment-manual.md](./03-deployment-manual.md). The two paths produce the same end-state.
 
-> **What this path DOES NOT cover.** Fabric workspace creation and Copilot Studio agent configuration are not in Bicep — they are portal-driven low-code components. After running the steps below, jump to [00-reproduce-this-demo.md § Parts C and D](./00-reproduce-this-demo.md) to finish those manual steps.
+> **What this path DOES NOT cover.** Fabric workspace creation and Copilot Studio agent configuration are not in Bicep — they are portal-driven low-code components. The full Fabric build (workspace, identity, Lakehouse, OneLake shortcut, control table, connections, pipeline) is in its own dedicated document: **[03b-fabric-setup.md](./03b-fabric-setup.md)**. The Copilot Studio agent build is in [00-reproduce-this-demo.md § Part D](./00-reproduce-this-demo.md#part-d--build-the-copilot-studio-agent-manual--both-paths). Both are identical regardless of which Azure path (manual or this one) you took.
 
 ---
 
@@ -26,10 +26,10 @@ The automated deployment path. Provisions the Azure platform layer via Bicep, th
 - AI Search data source `ds-chunks` (managed-identity connection to Blob)
 - AI Search indexer `ixr-chunks` (with integrated AOAI vectorizer)
 
-**What is NOT deployed by either** (manual portal steps — see [00-reproduce-this-demo.md § Parts C and D](./00-reproduce-this-demo.md)):
+**What is NOT deployed by either** (manual portal steps):
 
-- Fabric workspace + Lakehouse + Data Pipeline
-- Copilot Studio agent + knowledge source binding + channel publishing
+- **Fabric workspace + Lakehouse + OneLake shortcut + control table + connections + Data Pipeline** — see [03b-fabric-setup.md](./03b-fabric-setup.md) (always manual)
+- **Copilot Studio agent + knowledge source binding + channel publishing** — see [00-reproduce-this-demo.md § Part D](./00-reproduce-this-demo.md#part-d--build-the-copilot-studio-agent-manual--both-paths)
 
 ---
 
@@ -178,7 +178,7 @@ If any check fails, see [06-troubleshooting.md § 4](./06-troubleshooting.md) fo
 
 Bicep + script have provisioned the entire Azure platform layer. Now finish:
 
-- **Part C** in [00-reproduce-this-demo.md](./00-reproduce-this-demo.md) — Fabric workspace + Lakehouse + control table + ingest pipeline
+- **Fabric setup** — [03b-fabric-setup.md](./03b-fabric-setup.md) (workspace, identity, Lakehouse, OneLake shortcut, control table, connections, ingest pipeline)
 - **Part D** in [00-reproduce-this-demo.md](./00-reproduce-this-demo.md) — Copilot Studio agent build + channel publish
 
 Once both are complete, jump to [05-testing.md](./05-testing.md).

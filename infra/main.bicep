@@ -186,6 +186,8 @@ module rbac 'modules/rbac.bicep' = {
 // -------------------------- Outputs -------------------------------------------
 
 output deploymentSummary object = {
+  subscriptionId: subscription().subscriptionId
+  tenantId: subscription().tenantId
   resourceGroup: rgName
   region: location
   environment: env

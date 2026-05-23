@@ -1,6 +1,6 @@
 # 00 — Reproduce this demo
 
-> **Audience.** Someone who wants to clone this repo and stand up the full RAG knowledge-base demo against a fresh Azure subscription + Fabric tenant + Copilot Studio environment. Each Part below is a discrete checkpoint — finish A before starting B, etc. The deep-dive runbooks ([03-deployment-manual.md](03-deployment-manual.md), [04-deployment-automated.md](04-deployment-automated.md), [05-testing.md](05-testing.md), [06-troubleshooting.md](06-troubleshooting.md)) are linked from the specific steps that consume them rather than duplicated here.
+> **Audience.** Someone who wants to clone this repo and stand up the full RAG knowledge-base demo against a fresh Azure subscription + Fabric tenant + Copilot Studio environment. Each Part below is a discrete checkpoint — finish A before starting B, etc. The deep-dive runbooks ([03-deployment-manual.md](03-deployment-manual.md), [03b-fabric-setup.md](03b-fabric-setup.md), [04-deployment-automated.md](04-deployment-automated.md), [05-testing.md](05-testing.md), [06-troubleshooting.md](06-troubleshooting.md)) are linked from the specific steps that consume them rather than duplicated here.
 
 > **Time budget.** First-time stand-up: roughly **4–6 hours** end-to-end for the manual path, **2–3 hours** for the Bicep-automated path (which still requires manual Fabric + Copilot Studio steps). Time is dominated by waits on quota / model deployment propagation and Copilot Studio publishing approvals. Subsequent reproductions in the same tenant: **under 1 hour** for the automated path.
 
@@ -75,7 +75,7 @@ Two paths produce the same end-state:
 | **A1. Manual / portal + CLI** | Learning the architecture; one-off demo labs; first time you touch this pattern | [03-deployment-manual.md](./03-deployment-manual.md) |
 | **A2. Automated / Bicep** | Repeated deployments; CI/CD; multiple environments (dev/prod); production stand-up | [04-deployment-automated.md](./04-deployment-automated.md) |
 
-Both paths skip Fabric workspace creation and Copilot Studio agent configuration in their respective deep-dives — those steps are identical for both paths and are covered below in Parts C and D.
+Both paths skip Fabric workspace creation and Copilot Studio agent configuration in their respective deep-dives — Fabric is **always manual** (no Bicep / IaC surface today) and lives in its own document ([03b-fabric-setup.md](./03b-fabric-setup.md)); Copilot Studio is covered below in Part D. Both are identical regardless of which Azure path you chose in A1 / A2.
 
 ---
 
@@ -83,7 +83,7 @@ Both paths skip Fabric workspace creation and Copilot Studio agent configuration
 
 ### B1. (Path A1) Manual portal walkthrough
 
-Follow [03-deployment-manual.md § Phase 1–4](./03-deployment-manual.md) end-to-end. This provisions: RG, Key Vault, Storage + 2 containers, Doc Intelligence, AI Foundry + 2 model deployments, AI Search Standard tier with semantic ranker, all RBAC role assignments, AI Search index + datasource + indexer with integrated vectorizer.
+Follow [03-deployment-manual.md](./03-deployment-manual.md) § Phase 1 (foundation), then jump to [03b-fabric-setup.md](./03b-fabric-setup.md) for Fabric (covered in Part C below), then return to [03-deployment-manual.md § Phase 4](./03-deployment-manual.md#phase-4--ai-search-index) for the AI Search index/datasource/indexer. This Path A1 leg provisions the Azure resources only: RG, Key Vault, Storage + 2 containers, Doc Intelligence, AI Foundry + 2 model deployments, AI Search Standard tier with semantic ranker, all RBAC role assignments, AI Search index + datasource + indexer with integrated vectorizer.
 
 Validation: end of Phase 4 — `Indexer last run = success, items processed = chunk JSON count`.
 
@@ -97,31 +97,29 @@ Validation: `pwsh ./infra/deploy.ps1 -Verify` reports all resources Ready and th
 
 ## Part C — Stand up the Fabric workspace (manual — both paths)
 
-Fabric workspaces are not expressible in Bicep today. Follow [03-deployment-manual.md § Phase 1.8](./03-deployment-manual.md) and [§ Phase 2](./03-deployment-manual.md):
+Fabric is **always manual** (no Bicep / Terraform / IaC surface for workspaces, Lakehouses, shortcuts, or pipelines as of this pattern's publication). The full step-by-step is in its own document: **[03b-fabric-setup.md](./03b-fabric-setup.md)**.
 
-### C1. Create the workspace + Lakehouse
+What 03b covers end-to-end (Phases F0–F10):
 
-1. Fabric portal → **Workspaces → + New workspace** → name `ws-rag-<env>` → assign your Fabric capacity
-2. Inside the workspace: **+ New → Lakehouse** → name `lh_rag_<env>`
-3. Note the Lakehouse SQL endpoint + OneLake path; record in `demo-ids.local.json`
-
-### C2. Attach the document source
-
-Add an OneLake shortcut to your customer document source (SharePoint library, ADLS, etc.) per [03-deployment-manual.md § 2.1](./03-deployment-manual.md).
-
-### C3. Create the control table
-
-Run the control-table Delta notebook from [03-deployment-manual.md § 2.3](./03-deployment-manual.md) in your Lakehouse.
-
-### C4. Build the ingest pipeline
-
-Build the Fabric Data Pipeline activities per [03-deployment-manual.md § Phase 3](./03-deployment-manual.md). Five activities: lookup new files → copy raw to Blob → call Doc Intelligence → chunk via notebook → write chunks to Blob.
+| 03b Phase | What you build |
+|---|---|
+| F0 | Tenant + capacity prerequisites |
+| F1 | Workspace creation + capacity assignment |
+| F2 | Workspace identity + Blob Data Contributor grant |
+| F3 | Lakehouse `lh_rag_<env>` |
+| F4 | OneLake shortcut to the customer source (SharePoint / ADLS / S3 / etc.) |
+| F5 | Control `control_table_files` Delta table |
+| F6 | Fabric connections to Key Vault and Blob Storage |
+| F7 | Three pipeline notebooks (lookup, chunk+upload, control-table upsert) |
+| F8 | Data Pipeline `pl_ingest_docs` (5 activities + on-error handler) |
+| F9 | End-to-end validation on sample docs |
+| F10 | Pipeline schedule |
 
 ### Part C validation
 
-- [ ] Workspace + Lakehouse visible in Fabric portal
-- [ ] OneLake shortcut populated with sample documents
-- [ ] Pipeline succeeds end-to-end on a sample doc
+- [ ] Workspace + Lakehouse + workspace identity created ([03b §§ F1–F3](./03b-fabric-setup.md))
+- [ ] OneLake shortcut populated with sample documents ([03b § F4](./03b-fabric-setup.md#phase-f4--attach-the-source-via-onelake-shortcut))
+- [ ] Pipeline succeeds end-to-end on sample docs ([03b § F9](./03b-fabric-setup.md#phase-f9--validate-end-to-end))
 - [ ] Control table has rows with `ocr_status = succeeded` and `chunk_status = succeeded`
 - [ ] Blob `chunks/` container has JSON files; AI Search indexer picks them up within ~5 min
 

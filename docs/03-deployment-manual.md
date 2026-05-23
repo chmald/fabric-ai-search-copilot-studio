@@ -1,10 +1,12 @@
-# 03 — Deployment (Manual / Portal + CLI)
+# 03 — Deployment (Manual / Portal + CLI) — Azure platform layer
 
-Step-by-step manual build of the RAG knowledge-base pattern. Assumes all of [02-prerequisites.md](./02-prerequisites.md) is complete.
+Step-by-step manual build of the **Azure platform layer** of the RAG knowledge-base pattern. Assumes all of [02-prerequisites.md](./02-prerequisites.md) is complete.
 
-> **Two deployment paths exist.** This document is the **manual / portal-driven** path — best for learning the architecture component-by-component, demo labs, and one-off builds. For repeatable / CI-driven deployments use **[04-deployment-automated.md](./04-deployment-automated.md)** instead, which provisions the same Azure resources via Bicep + a post-deploy script.
+> **Scope.** This document covers **only the Azure resources** in the pattern (RG, Key Vault, Storage, Document Intelligence, Azure AI Foundry, AI Search, RBAC, AI Search index/datasource/indexer, Copilot Studio agent). The **Fabric layer (workspace, Lakehouse, OneLake shortcut, control table, ingest pipeline) is always manual regardless of deployment path** and has its own dedicated walkthrough: **[03b-fabric-setup.md](./03b-fabric-setup.md)**.
+
+> **Two deployment paths exist.** This document is the **manual / portal-driven** path for the Azure layer — best for learning component-by-component, demo labs, and one-off builds. For repeatable / CI-driven Azure deployments use **[04-deployment-automated.md](./04-deployment-automated.md)** instead, which provisions the same Azure resources via Bicep + a post-deploy script.
 >
-> The two paths produce the **same end-state**. The Fabric workspace + Copilot Studio agent steps are identical in both (they are low-code, portal-driven, and not expressible in Bicep today).
+> Both paths produce the **same Azure end-state** and both feed into the same Fabric setup in [03b-fabric-setup.md](./03b-fabric-setup.md) and the same Copilot Studio configuration in [Phase 5](#phase-5--copilot-studio-agent) below.
 
 > **Build order matters.** Phases are sequential because each depends on artifacts from the prior phase. Within a phase, steps are also sequential unless explicitly marked parallel-safe.
 
@@ -14,13 +16,14 @@ Step-by-step manual build of the RAG knowledge-base pattern. Assumes all of [02-
 
 | Phase | What you build | ~Time | Validation at end |
 |---|---|---|---|
-| 1 | Foundation: RG + Key Vault + Blob + AI Search + Azure AI Foundry + Doc Intelligence + Fabric workspace + Lakehouse | 60–90 min | All resources deployed; identities + RBAC set |
-| 2 | Ingestion attachment: OneLake source attached; Control Delta table created | 30–45 min | Sample docs visible in Lakehouse; control table queryable |
-| 3 | Fabric Data Pipeline: OCR → chunk → write to Blob, with control-table updates | 90–180 min | Pipeline run succeeds end-to-end on a sample doc; control table reflects state |
-| 4 | AI Search index: schema, integrated vectorizer, hybrid + semantic configuration; indexer pointed at Blob | 45–60 min | Indexer run succeeds; sample query returns chunks with semantic captions |
-| 5 | Copilot Studio agent: knowledge source = AI Search; publish to Teams + M365 Copilot | 30–45 min | End-to-end: ask a question in Teams → get a grounded answer with citation |
+| **1** | **Azure foundation:** RG + Key Vault + Blob + Document Intelligence + Azure AI Foundry + 2 model deployments + AI Search + RBAC | 60–90 min | All Azure resources deployed; identities + RBAC set |
+| **— Fabric setup —** | Follow [03b-fabric-setup.md](./03b-fabric-setup.md) → Fabric workspace + Lakehouse + control table + OneLake shortcut + ingest pipeline | 2–3 hours | Pipeline produces chunk JSON files in Blob `chunks/` container |
+| **4** | **AI Search index:** schema, integrated vectorizer, hybrid + semantic configuration; indexer pointed at Blob `chunks/` | 45–60 min | Indexer run succeeds; sample query returns chunks with semantic captions |
+| **5** | **Copilot Studio agent:** knowledge source = AI Search; publish to Teams + M365 Copilot | 30–45 min | End-to-end: ask a question in Teams → get a grounded answer with citation |
 
-**Total demo build: roughly 4–6 hours of hands-on time.**
+> **Why phases 2 and 3 are missing.** They are the Fabric layer and live in [03b-fabric-setup.md](./03b-fabric-setup.md). Phase numbering for the Azure-side phases is preserved across versions so existing cross-references (testing, troubleshooting, orchestrator) continue to resolve.
+
+**Total demo build (Azure + Fabric + Copilot Studio): roughly 4–6 hours of hands-on time.**
 
 ---
 
@@ -128,313 +131,40 @@ az role assignment create \
   --scope $ST_RES_ID
 ```
 
-Fabric workspace identity → Blob (Data Contributor) is configured later in Phase 2 from the Fabric side.
-
-### 1.8 Create Fabric workspace + Lakehouse
-
-In the Fabric portal:
-
-1. **Workspaces → New workspace** → name `ws-rag-demo` → assign Fabric capacity
-2. Inside the workspace: **+ New → Lakehouse** → name `lh_rag_demo`
-3. After creation, note the Lakehouse SQL endpoint and OneLake path
+Fabric workspace identity → Blob (Data Contributor) is configured later from the Fabric side, in [03b-fabric-setup.md § Phase F2.1](./03b-fabric-setup.md#f21-grant-the-workspace-identity-blob-data-contributor). Skip it here.
 
 ### Phase 1 validation
 
 - [ ] All 6 Azure resources exist in the same RG and region
 - [ ] Key Vault contains: `di-endpoint`, `di-key`, `aif-endpoint`, `aif-key`, `search-endpoint`, `search-admin-key`
 - [ ] AI Search managed identity has both role assignments visible in Azure portal IAM
-- [ ] Fabric workspace + Lakehouse exist and you have Member/Admin role
+- [ ] Foundry resource has two deployments: `embedding` (text-embedding-3-large) and `chat` (gpt-4o)
 
 ---
 
-## Phase 2 — Ingestion attachment
-
-### 2.1 Attach the customer's document source to OneLake
-
-Pick one of these patterns based on the customer's source:
-
-| Source | Pattern | How |
-|---|---|---|
-| SharePoint document library | **OneLake shortcut** | Lakehouse → Get data → New shortcut → Microsoft 365 → SharePoint → pick site + library |
-| Azure Blob (different storage account) | **OneLake shortcut** | Lakehouse → Get data → New shortcut → Azure Data Lake Storage Gen2 |
-| ADLS Gen2 / S3 / GCS | **OneLake shortcut** | Same pattern, choose the right connector |
-| File share / mailbox / FTP | **Data Pipeline copy activity** (scheduled) | Set up a copy job that lands files into a `raw_landing/` folder in the Lakehouse |
-
-For demo: use a SharePoint document library shortcut (most common low-code source).
-
-### 2.2 Place a sample document set in the source
-
-Drop 5–10 representative sample documents into the source. These will drive the pipeline build and testing.
-
-> **Generic guidance:** sample diversity matters more than volume. Cover the different file types (PDF, DOCX), document lengths, and document types (policies, contracts, manuals, FAQs, etc.) the production corpus will contain.
-
-Confirm they appear under the OneLake shortcut path in the Lakehouse explorer.
-
-### 2.3 Create the control Delta table
-
-In the Lakehouse, open a **Notebook** (Spark or Python) and run:
-
-```python
-from pyspark.sql.types import StructType, StructField, StringType, LongType, IntegerType, TimestampType, BooleanType
-
-schema = StructType([
-    StructField("file_id", StringType(), False),
-    StructField("source_path", StringType(), True),
-    StructField("source_modified_ts", TimestampType(), True),
-    StructField("raw_blob_uri", StringType(), True),
-    StructField("chunk_blob_prefix", StringType(), True),
-    StructField("doc_type", StringType(), True),
-    StructField("byte_size", LongType(), True),
-    StructField("page_count", IntegerType(), True),
-    StructField("ingest_run_id", StringType(), True),
-    StructField("ingest_ts", TimestampType(), True),
-    StructField("ocr_status", StringType(), True),
-    StructField("ocr_completed_ts", TimestampType(), True),
-    StructField("chunk_status", StringType(), True),
-    StructField("chunk_count", IntegerType(), True),
-    StructField("chunk_completed_ts", TimestampType(), True),
-    StructField("index_status", StringType(), True),
-    StructField("last_error", StringType(), True),
-    StructField("tombstoned", BooleanType(), True),
-])
-
-empty = spark.createDataFrame([], schema)
-empty.write.format("delta").mode("overwrite").saveAsTable("control_table_files")
-```
-
-Confirm the table appears in the Lakehouse Tables list and is queryable from the SQL endpoint.
-
-### 2.4 Grant Fabric → Blob access
-
-From the Azure portal:
-
-1. Storage account → IAM → **Add role assignment** → **Storage Blob Data Contributor**
-2. Assignee: select the **Fabric workspace identity** (search for the workspace name in the principals picker; if your tenant uses service principals instead, select that)
-3. Save
-
-Validate from a Fabric notebook by writing a test file to the Blob:
-
-```python
-# replace with your storage account name
-blob_account = "stragdemoeus"
-container = "raw"
-# this uses Fabric workspace identity automatically
-df = spark.createDataFrame([("hello", 1)], ["msg", "n"])
-df.write.mode("overwrite").csv(f"abfss://{container}@{blob_account}.dfs.core.windows.net/_test/")
-```
-
-If this fails, the role assignment hasn't propagated yet — wait 5 minutes and retry.
-
-### Phase 2 validation
-
-- [ ] Source documents visible in the Lakehouse via shortcut or copy folder
-- [ ] `control_table_files` Delta table exists and is empty
-- [ ] Fabric workspace identity can read AND write to the Blob storage account from a notebook
-
----
-
-## Phase 3 — Fabric Data Pipeline
-
-This is the most complex phase. The pipeline drives the entire ingest flow: discover files → register → OCR → chunk → write → mark.
-
-### 3.1 Pipeline design
-
-The pipeline is one **Data Pipeline** with five sequential activities and one **Notebook** activity for chunking:
-
-```
-[1] Lookup new files (notebook or script activity)
-       ↓ emits list of file_ids not yet in control_table_files
-[2] ForEach file (with batched parallelism):
-    [2a] Copy raw file → Blob raw/ container (Copy data activity)
-    [2b] Update control table: insert row with status=pending (notebook or stored proc)
-    [2c] Call Document Intelligence prebuilt-read (HTTP activity)
-    [2d] Notebook: chunk extracted text → write one JSON per chunk to Blob chunks/
-    [2e] Update control table: status=succeeded, chunk_count=N
-[3] On error in any step: catch → update control table with last_error + status=failed
-```
-
-For low-code purity, prefer **Data Pipeline activities** for [1], [2a], [2c], [2b/e]. The chunker [2d] is the only step that needs a notebook (because chunking strategy is configurable).
-
-### 3.2 Build activity 1 — Lookup new files
-
-Add a **Notebook activity** (or **Script activity** if you prefer SQL). Notebook content:
-
-```python
-from pyspark.sql.functions import col
-
-# Read OneLake source path (from shortcut or copy folder)
-source_path = "Files/source_docs/"   # adjust to your shortcut location
-src = spark.read.format("binaryFile").load(source_path).select("path", "modificationTime", "length")
-src = src.withColumnRenamed("path", "source_path") \
-         .withColumnRenamed("modificationTime", "source_modified_ts") \
-         .withColumnRenamed("length", "byte_size")
-
-# Hash file_id = md5(source_path || source_modified_ts)
-from pyspark.sql.functions import md5, concat_ws
-src = src.withColumn("file_id", md5(concat_ws("|", col("source_path"), col("source_modified_ts").cast("string"))))
-
-# Anti-join against control table to find new files
-ctrl = spark.table("control_table_files").select("file_id")
-new_files = src.join(ctrl, on="file_id", how="left_anti")
-
-# Persist to a temp Delta table the pipeline ForEach can read
-new_files.write.format("delta").mode("overwrite").saveAsTable("_tmp_new_files")
-new_files.count()
-```
-
-The pipeline's next activity (ForEach) reads `_tmp_new_files` and iterates.
-
-### 3.3 Build activity 2a — Copy raw file to Blob
-
-In the pipeline:
-
-1. Add a **Copy data** activity inside a **ForEach** loop
-2. Source: OneLake path = `@item().source_path`
-3. Sink: Blob container `raw`, path = `@concat(item().file_id, '/', last(split(item().source_path,'/')))`
-4. Authentication on the sink: **Workspace identity** (the one you granted Blob Data Contributor)
-
-Capture the resulting blob URI into a pipeline variable for the next steps.
-
-### 3.4 Build activity 2c — Call Document Intelligence
-
-In the pipeline (inside the same ForEach iteration):
-
-1. Add a **Web activity** (HTTP) to call Document Intelligence
-2. URL: `@concat(<di_endpoint>, '/documentintelligence/documentModels/prebuilt-read:analyze?api-version=2024-07-31')`
-3. Method: `POST`
-4. Headers:
-   - `Ocp-Apim-Subscription-Key`: pull from Key Vault (use the **Azure Key Vault linked service** in Fabric)
-   - `Content-Type`: `application/json`
-5. Body: `{ "urlSource": "<the raw blob URI from 3.3, with a SAS or use managed-identity URL>" }`
-6. The async DI pattern: this returns an `operation-location` header. Add a **Until** loop that polls that URL with GET until status = `succeeded`, then captures the JSON result.
-
-Document Intelligence returns extracted text + page structure. Pipe this to the next activity.
-
-### 3.5 Build activity 2d — Chunking notebook
-
-Inside the same ForEach iteration, add a **Notebook activity**. Pass in `file_id`, the DI result JSON, and the target blob path.
-
-```python
-# Parameters injected from pipeline:
-# - file_id (str)
-# - di_result (json)  -- full DI response
-# - chunks_account (str)
-# - chunks_container (str)
-# - chunks_prefix (str)   e.g. f"{file_id}/"
-
-import json
-import tiktoken
-from azure.identity import DefaultAzureCredential
-from azure.storage.blob import BlobServiceClient
-
-CHUNK_TOKENS = 1000
-OVERLAP_TOKENS = 200
-ENCODING = tiktoken.encoding_for_model("gpt-4o")
-
-def chunk_pages(pages, max_tok=CHUNK_TOKENS, overlap=OVERLAP_TOKENS):
-    """Page-aware chunking with token-budget + overlap. Never splits mid-page."""
-    chunks = []
-    buf = []
-    buf_tok = 0
-    buf_pages = []
-    for page in pages:
-        page_text = page["content"]
-        page_no = page["pageNumber"]
-        page_tok = len(ENCODING.encode(page_text))
-        if buf_tok + page_tok > max_tok and buf:
-            chunks.append({"text": "\n\n".join(buf), "pages": buf_pages})
-            # carry overlap forward
-            buf = [buf[-1]] if overlap > 0 and buf else []
-            buf_pages = [buf_pages[-1]] if overlap > 0 and buf_pages else []
-            buf_tok = len(ENCODING.encode(buf[0])) if buf else 0
-        buf.append(page_text)
-        buf_pages.append(page_no)
-        buf_tok += page_tok
-    if buf:
-        chunks.append({"text": "\n\n".join(buf), "pages": buf_pages})
-    return chunks
-
-pages = di_result["analyzeResult"]["pages"]
-flat_pages = [{"pageNumber": p["pageNumber"],
-               "content": " ".join(line["content"] for line in p.get("lines", []))}
-              for p in pages]
-
-chunks = chunk_pages(flat_pages)
-
-cred = DefaultAzureCredential()
-svc = BlobServiceClient(account_url=f"https://{chunks_account}.blob.core.windows.net", credential=cred)
-container = svc.get_container_client(chunks_container)
-
-for i, c in enumerate(chunks):
-    payload = {
-        "id":         f"{file_id}-{i:04d}",
-        "doc_id":     file_id,
-        "chunk_id":   i,
-        "content":    c["text"],
-        "doc_type":   "generic",          # set this per your taxonomy
-        "source_uri": f"<raw blob uri>",  # pass through from pipeline
-        "page_start": c["pages"][0],
-        "page_end":   c["pages"][-1],
-        "ingest_ts":  "<pipeline run timestamp>",
-        "metadata":   "{}"
-    }
-    blob_name = f"{chunks_prefix}{file_id}-{i:04d}.json"
-    container.upload_blob(name=blob_name, data=json.dumps(payload), overwrite=True)
-
-print(f"Wrote {len(chunks)} chunks for {file_id}")
-```
-
-### 3.6 Build activity 2b / 2e — Control table upserts
-
-Two notebook (or Script) activities, one before and one after the chunking step:
-
-**Before (insert pending row):**
-
-```python
-from pyspark.sql.functions import current_timestamp, lit
-row = spark.createDataFrame(
-    [(file_id, source_path, source_modified_ts, raw_blob_uri, chunks_prefix, "generic",
-      byte_size, page_count, ingest_run_id, None, "pending", None, "pending", None, None, "pending", None, False)],
-    ["file_id","source_path","source_modified_ts","raw_blob_uri","chunk_blob_prefix","doc_type",
-     "byte_size","page_count","ingest_run_id","ingest_ts","ocr_status","ocr_completed_ts",
-     "chunk_status","chunk_count","chunk_completed_ts","index_status","last_error","tombstoned"]
-)
-row = row.withColumn("ingest_ts", current_timestamp())
-row.createOrReplaceTempView("_row")
-spark.sql("""
-  MERGE INTO control_table_files t
-  USING _row s
-  ON t.file_id = s.file_id
-  WHEN MATCHED THEN UPDATE SET *
-  WHEN NOT MATCHED THEN INSERT *
-""")
-```
-
-**After (mark succeeded):**
-
-```python
-spark.sql(f"""
-  UPDATE control_table_files
-  SET ocr_status='succeeded', ocr_completed_ts=current_timestamp(),
-      chunk_status='succeeded', chunk_count={chunk_count}, chunk_completed_ts=current_timestamp()
-  WHERE file_id='{file_id}'
-""")
-```
-
-### 3.7 Pipeline run
-
-1. Publish the pipeline
-2. **Run** manually with 1–2 sample files first
-3. Watch the activity outputs; fix issues iteratively
-4. Once a sample run is green end-to-end: schedule it (e.g. every 30 minutes) or leave on manual for demo
-
-### Phase 3 validation
-
-- [ ] Pipeline run completes with no failures on 5 sample documents
-- [ ] `control_table_files` has 5 rows with all status fields = `succeeded`
-- [ ] Blob `raw/` container has 5 original files
-- [ ] Blob `chunks/` container has multiple JSON chunk files per document
-- [ ] Sample chunk JSON inspected and well-formed
+## Phases 2 and 3 — Fabric setup
+
+The Fabric workspace, Lakehouse, OneLake shortcut, control Delta table, connections (Key Vault + Blob), pipeline notebooks, and the Data Pipeline itself are all manual and **identical for both the manual and the automated Azure path**.
+
+👉 **Follow [03b-fabric-setup.md](./03b-fabric-setup.md) end-to-end now**, then come back here to continue with [Phase 4 — AI Search index](#phase-4--ai-search-index).
+
+What 03b covers:
+
+| 03b Phase | What you build |
+|---|---|
+| F0 | Tenant & capacity prerequisites |
+| F1 | Workspace creation + capacity assignment |
+| F2 | Workspace identity + Blob Data Contributor grant |
+| F3 | Lakehouse creation |
+| F4 | OneLake shortcut to source documents (SharePoint / ADLS / S3 / etc.) |
+| F5 | Control `control_table_files` Delta table |
+| F6 | Key Vault + Blob connections in Fabric |
+| F7 | Pipeline notebooks (`nb_lookup_new_files`, `nb_chunk_and_upload`, `nb_update_control_table`) |
+| F8 | Data Pipeline `pl_ingest_docs` with five activities + on-error handler |
+| F9 | End-to-end validation on sample docs |
+| F10 | Pipeline schedule |
+
+**Do not proceed to Phase 4 below until 03b's validation checklist is fully checked** — Phase 4 requires chunk JSON files to be landing in Blob `chunks/` for the indexer to be testable end-to-end.
 
 ---
 
