@@ -60,11 +60,14 @@ az storage account create \
   --sku Standard_LRS \
   --kind StorageV2 \
   --min-tls-version TLS1_2 \
-  --allow-blob-public-access false
+  --allow-blob-public-access false \
+  --allow-shared-key-access false
 
 az storage container create --account-name $ST --name raw --auth-mode login
 az storage container create --account-name $ST --name chunks --auth-mode login
 ```
+
+> **`--allow-shared-key-access false`** disables the storage account access keys. Every reader and writer (AI Search indexer, Document Intelligence, Fabric pipeline, you) must authenticate with Entra ID via a managed identity / service principal / signed-in user. The container-creation commands above use `--auth-mode login` so they go through your Azure CLI identity rather than account keys.
 
 ### 1.4 Create Document Intelligence
 
@@ -75,7 +78,16 @@ In the Azure portal:
 3. Region: same as the rest
 4. Pricing tier: **Standard S0** (not Free — free is page-limited)
 5. Create
-6. After deployment: copy the **endpoint** and **key 1** to Key Vault as secrets `di-endpoint` and `di-key`
+6. After deployment: **Identity → System assigned → Status: On → Save**. Note the **Object (principal) ID** — you grant this Blob Data Reader in step 1.7 so DI can fetch private blobs via `urlSource`.
+7. **Networking / Resource management → Disable local authentication**. Or via CLI:
+   ```bash
+   az cognitiveservices account update \
+     --name di-rag-demo-eus --resource-group $RG \
+     --custom-domain di-rag-demo-eus \
+     --properties '{"disableLocalAuth": true}'
+   ```
+
+No keys are stored anywhere. Clients call DI with `Authorization: Bearer <entra-token>` (token resource: `https://cognitiveservices.azure.com/`) and a role assignment of **Cognitive Services User** on this resource.
 
 ### 1.5 Create Azure AI Foundry resource + OpenAI deployments
 
@@ -92,8 +104,16 @@ In the Azure portal:
    - For both: set capacity to 10K TPM for demo
    - (Optional) browse the Foundry catalog for non-OpenAI models if you plan to extend later; this pattern only requires the two OpenAI deployments above
 5. Confirm the OpenAI-compatible endpoint: **Endpoints** view shows `https://aif-rag-demo-eus.openai.azure.com/` — that's the value the AI Search vectorizer will use
+6. **Identity → System assigned → Status: On** (not required by this pattern's flows but enables future scenarios)
+7. **Disable local authentication** — same CLI pattern as 1.4:
+   ```bash
+   az cognitiveservices account update \
+     --name aif-rag-demo-eus --resource-group $RG \
+     --custom-domain aif-rag-demo-eus \
+     --properties '{"disableLocalAuth": true}'
+   ```
 
-Copy the Foundry resource's **OpenAI endpoint** and **key 1** to Key Vault as `aif-endpoint` and `aif-key`.
+No keys are stored anywhere. The AI Search integrated vectorizer authenticates via its system-assigned managed identity (granted **Cognitive Services User** on this resource in step 1.7).
 
 ### 1.6 Create AI Search
 
@@ -103,42 +123,88 @@ In the Azure portal:
 2. Same RG, region
 3. **Pricing tier: Standard (S1)** — semantic ranker is NOT available below this
 4. Replicas: 1, Partitions: 1
-5. After deployment: **Settings → Identity → System-assigned managed identity → On → Save** (note the object ID)
-6. **Settings → Keys → Manage admin keys**: copy the primary admin key
-7. **Settings → Semantic ranker**: confirm enabled (Standard tier includes a free quota; Free plan is acceptable for demo)
+5. **Networking** — leave Public network access enabled for demo; lock down with private endpoints for production
+6. **Identity → System assigned → Status: On → Save** (note the object ID — needed in step 1.7)
+7. **Keys** — set **API access control** to **Role-based access control** and disable local auth:
+   ```bash
+   az search service update \
+     --name srch-rag-demo-eus --resource-group $RG \
+     --auth-options aadOrApiKey \
+     --aad-auth-failure-mode http401WithBearerChallenge \
+     --disable-local-auth true
+   ```
+   (The `aadOrApiKey` option still controls the bearer-challenge configuration; `--disable-local-auth true` rejects all API keys regardless.)
+8. **Semantic ranker**: confirm enabled (Standard tier includes a free quota; Free plan is acceptable for demo)
 
-Save the AI Search **endpoint** and **admin key** to Key Vault as `search-endpoint` and `search-admin-key`.
+No admin or query keys are stored anywhere. All callers (your post-deploy work, Copilot Studio, app code) authenticate with Entra bearer tokens (resource: `https://search.azure.com/`).
 
 ### 1.7 RBAC wiring
 
-These are the critical role assignments. **Skip these and the integrated vectorizer will fail at index time.**
+With API keys disabled across Foundry, DI, AI Search, and Storage, **every** data-plane interaction depends on a role assignment. Skip any of these and the corresponding service call will return 401 or 403.
 
 ```bash
-SEARCH_OBJID=<paste the AI Search system-assigned MI object ID from step 1.6>
+# Identities
+SEARCH_OBJID=<AI Search system-assigned MI object ID from step 1.6>
+DI_OBJID=<Document Intelligence system-assigned MI object ID from step 1.4>
+ME_OBJID=$(az ad signed-in-user show --query id -o tsv)
+
+# Resource IDs
 AIF_RES_ID=$(az cognitiveservices account show --name aif-rag-demo-eus -g $RG --query id -o tsv)
+DI_RES_ID=$(az cognitiveservices account show --name di-rag-demo-eus -g $RG --query id -o tsv)
+SRCH_RES_ID=$(az search service show --name srch-rag-demo-eus -g $RG --query id -o tsv)
 ST_RES_ID=$(az storage account show --name $ST -g $RG --query id -o tsv)
 
-# AI Search → Foundry resource (integrated vectorizer access to OpenAI deployments)
+# 1. AI Search → Foundry (integrated vectorizer calls the embedding deployment)
 az role assignment create \
   --assignee-object-id $SEARCH_OBJID --assignee-principal-type ServicePrincipal \
-  --role "Cognitive Services OpenAI User" \
+  --role "Cognitive Services User" \
   --scope $AIF_RES_ID
 
-# AI Search → Blob (indexer reads chunks)
+# 2. AI Search → Blob (indexer pulls chunk JSON from chunks/)
 az role assignment create \
   --assignee-object-id $SEARCH_OBJID --assignee-principal-type ServicePrincipal \
   --role "Storage Blob Data Reader" \
   --scope $ST_RES_ID
+
+# 3. Document Intelligence → Blob (urlSource fetches raw/<file> via DI's own MI;
+#    required because shared-key access on Storage is disabled and you can't pass a SAS)
+az role assignment create \
+  --assignee-object-id $DI_OBJID --assignee-principal-type ServicePrincipal \
+  --role "Storage Blob Data Reader" \
+  --scope $ST_RES_ID
+
+# 4. You → AI Search (lets you create + manage the index, datasource, indexer via bearer
+#    token; lets you run sample queries during build/test)
+az role assignment create \
+  --assignee-object-id $ME_OBJID --assignee-principal-type User \
+  --role "Search Service Contributor" \
+  --scope $SRCH_RES_ID
+az role assignment create \
+  --assignee-object-id $ME_OBJID --assignee-principal-type User \
+  --role "Search Index Data Contributor" \
+  --scope $SRCH_RES_ID
+
+# 5. You → Storage (lets you upload / inspect blobs through Azure CLI / portal)
+az role assignment create \
+  --assignee-object-id $ME_OBJID --assignee-principal-type User \
+  --role "Storage Blob Data Contributor" \
+  --scope $ST_RES_ID
 ```
 
-Fabric workspace identity → Blob (Data Contributor) is configured later from the Fabric side, in [03b-fabric-setup.md § Phase F2.1](./03b-fabric-setup.md#f21-grant-the-workspace-identity-blob-data-contributor). Skip it here.
+> **Propagation:** Azure role assignments take up to **15 minutes** to be honored, especially cross-resource-type assignments (Search MI → Foundry, Search MI → Storage). If subsequent steps return 401 or 403, wait and retry before debugging further.
+
+Fabric workspace identity → Blob (Data Contributor) and Fabric workspace identity → Document Intelligence (Cognitive Services User) are configured later from the Fabric side once the workspace identity exists, in [03b-fabric-setup.md § Phase F2.1](./03b-fabric-setup.md#f21-grant-the-workspace-identity-the-required-roles). Skip them here.
 
 ### Phase 1 validation
 
 - [ ] All 6 Azure resources exist in the same RG and region
-- [ ] Key Vault contains: `di-endpoint`, `di-key`, `aif-endpoint`, `aif-key`, `search-endpoint`, `search-admin-key`
-- [ ] AI Search managed identity has both role assignments visible in Azure portal IAM
+- [ ] Foundry, Document Intelligence, and AI Search show **Local authentication: Disabled**
+- [ ] Storage account shows **Allow storage account key access: Disabled**
+- [ ] AI Search system-assigned MI has both role assignments visible in IAM (Cognitive Services User on Foundry, Storage Blob Data Reader on Storage)
+- [ ] Document Intelligence system-assigned MI has **Storage Blob Data Reader** on the storage account
+- [ ] You have **Search Service Contributor** + **Search Index Data Contributor** on the AI Search service
 - [ ] Foundry resource has two deployments: `embedding` (text-embedding-3-large) and `chat` (gpt-4o)
+- [ ] Key Vault exists and you have **Key Vault Secrets Officer** on it (used later if any secret-based fallback becomes necessary; this pattern stores no API keys in it)
 
 ---
 
@@ -160,7 +226,7 @@ What 03b covers:
 | F5 | Control `control_table_files` Delta table |
 | F6 | Key Vault + Blob connections in Fabric |
 | F7 | Pipeline notebooks (`nb_lookup_new_files`, `nb_chunk_and_upload`, `nb_update_control_table`) |
-| F8 | Data Pipeline `pl_ingest_docs` with five activities + on-error handler |
+| F8 | Data Pipelines: parent `pl_ingest_docs` (lookup + ForEach) and child `pl_process_file` (per-file Copy + DI + chunk + control updates). Two pipelines are required because Fabric does not allow `Until` inside `ForEach`. |
 | F9 | End-to-end validation on sample docs |
 | F10 | Pipeline schedule |
 
@@ -170,16 +236,26 @@ What 03b covers:
 
 ## Phase 4 — AI Search index
 
+> **Auth model.** Admin keys are disabled on the AI Search service (from Phase 1.6). Every REST call below must include an Entra bearer token:
+>
+> ```bash
+> TOKEN=$(az account get-access-token --resource https://search.azure.com --query accessToken -o tsv)
+> # then add the header to every PUT/POST/GET:
+> #   -H "Authorization: Bearer $TOKEN"
+> ```
+>
+> The samples below use a single `Authorization: Bearer <token>` header instead of `api-key:`. Your signed-in identity needs **Search Service Contributor** (for index/datasource/indexer PUT) + **Search Index Data Contributor** (for `/docs/search`), both granted in Phase 1.7.
+
 ### 4.1 Create the index
 
 In the AI Search portal → **Indexes → + Add index** (or use the REST API for full schema control).
 
 The REST API is easier for getting the integrated vectorizer right. Sample payload:
 
-```json
+```http
 PUT https://srch-rag-demo-eus.search.windows.net/indexes/idx-rag-documents?api-version=2024-07-01
 Content-Type: application/json
-api-key: <admin key>
+Authorization: Bearer <token from `az account get-access-token --resource https://search.azure.com`>
 
 {
   "name": "idx-rag-documents",
@@ -235,14 +311,16 @@ api-key: <admin key>
 }
 ```
 
-> **Critical:** the `vectorizers[0].azureOpenAIParameters.authIdentity` set to `null` means **use the service's system-assigned managed identity**. The role assignment from Phase 1.7 (Cognitive Services OpenAI User on the Foundry resource) is what makes this work. If you used a user-assigned identity instead, set the identity object here. The `resourceUri` uses the Foundry resource's OpenAI-compatible endpoint (`*.openai.azure.com`) — Foundry resources expose this for backwards-compatible tooling like the AI Search vectorizer.
+> **Critical:** the `vectorizers[0].azureOpenAIParameters.authIdentity` set to `null` means **use the service's system-assigned managed identity**. The role assignment from Phase 1.7 (Cognitive Services User on the Foundry resource) is what makes this work. If you used a user-assigned identity instead, set the identity object here. The `resourceUri` uses the Foundry resource's OpenAI-compatible endpoint (`*.openai.azure.com`) — Foundry resources expose this for backwards-compatible tooling like the AI Search vectorizer.
 
 ### 4.2 Create the data source
 
 Points the indexer at the Blob `chunks/` container.
 
-```json
+```http
 PUT https://srch-rag-demo-eus.search.windows.net/datasources/ds-chunks?api-version=2024-07-01
+Authorization: Bearer <token>
+Content-Type: application/json
 
 {
   "name": "ds-chunks",
@@ -252,12 +330,14 @@ PUT https://srch-rag-demo-eus.search.windows.net/datasources/ds-chunks?api-versi
 }
 ```
 
-Using the `ResourceId=...;` connection string enables **managed-identity authentication** — no key needed.
+Using the `ResourceId=...;` connection string enables **managed-identity authentication** — the indexer authenticates to Blob with its system-assigned MI (granted Storage Blob Data Reader in Phase 1.7). No storage account key is referenced or required.
 
 ### 4.3 Create the indexer
 
-```json
+```http
 PUT https://srch-rag-demo-eus.search.windows.net/indexers/ixr-chunks?api-version=2024-07-01
+Authorization: Bearer <token>
+Content-Type: application/json
 
 {
   "name": "ixr-chunks",
@@ -287,13 +367,18 @@ Note: `content_vector` is **not** in field mappings — the integrated vectorize
 ### 4.4 Run the indexer manually
 
 ```bash
-POST https://srch-rag-demo-eus.search.windows.net/indexers/ixr-chunks/run?api-version=2024-07-01
+TOKEN=$(az account get-access-token --resource https://search.azure.com --query accessToken -o tsv)
+
+curl -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  "https://srch-rag-demo-eus.search.windows.net/indexers/ixr-chunks/run?api-version=2024-07-01"
 ```
 
 Then watch status:
 
 ```bash
-GET https://srch-rag-demo-eus.search.windows.net/indexers/ixr-chunks/status?api-version=2024-07-01
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://srch-rag-demo-eus.search.windows.net/indexers/ixr-chunks/status?api-version=2024-07-01"
 ```
 
 A successful run shows `lastResult.status = "success"` and `itemsProcessed` matching the number of chunk JSONs in Blob.
@@ -302,8 +387,10 @@ A successful run shows `lastResult.status = "success"` and `itemsProcessed` matc
 
 Run a sample query that exercises hybrid + semantic ranker:
 
-```json
+```http
 POST https://srch-rag-demo-eus.search.windows.net/indexes/idx-rag-documents/docs/search?api-version=2024-07-01
+Authorization: Bearer <token>
+Content-Type: application/json
 
 {
   "search": "<a representative question for your corpus>",
@@ -356,7 +443,9 @@ Confirm:
 ### 5.2 Add AI Search as a knowledge source
 
 1. Inside the agent: **Knowledge → + Add knowledge → Azure AI Search**
-2. **Authentication:** Microsoft Entra (uses the connecting user's identity) **or** an admin key (simpler for demo)
+2. **Authentication:** **Microsoft Entra ID (recommended — required for this pattern)**. Admin / query key auth is shown in the UI but is **not usable here** because admin keys are disabled on the search service (Phase 1.6). With Entra auth, Copilot Studio uses either the connecting user's identity (interactive auth) or a stored credential connection (service principal) to call AI Search.
+   - **For demo with a small audience:** use your own identity. Grant each demo user **Search Index Data Reader** on the search service (or a security group containing them).
+   - **For broad / production deployment:** create a service principal, grant it **Search Index Data Reader** on the search service, and use a Power Platform **Custom Connector** or **Connection reference** to store its credentials — every user of the agent then resolves the same SP identity.
 3. **Search endpoint:** `https://srch-rag-demo-eus.search.windows.net`
 4. **Index name:** `idx-rag-documents`
 5. **Enable semantic search:** **ON** ← critical
@@ -413,9 +502,10 @@ Once all five phases validate green, proceed to [05-testing.md](./05-testing.md)
 - [ ] Pipeline scheduled (not just on-demand)
 - [ ] Indexer scheduled
 - [ ] Cost alerts configured on the resource group
-- [ ] Key Vault secrets documented + rotation plan
 - [ ] Backup / disaster-recovery plan written (at minimum: re-runnable pipeline from `raw/` blob)
 - [ ] Customer + Microsoft owners identified for ongoing operation
+- [ ] **Auth posture audited:** Foundry / DI / AI Search show **Local authentication: Disabled**; Storage shows **Allow storage account key access: Disabled**
+- [ ] **RBAC inventory exported:** the role assignments from Phase 1.7 documented per environment (these become the rotation surface in place of API keys)
 
 ---
 

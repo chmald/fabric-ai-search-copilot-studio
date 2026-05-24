@@ -38,7 +38,13 @@ resource storage 'Microsoft.Storage/storageAccounts@2024-01-01' = {
     allowBlobPublicAccess: false
     minimumTlsVersion: 'TLS1_2'
     supportsHttpsTrafficOnly: true
-    allowSharedKeyAccess: true
+    // Shared-key (account key) access is disabled — all data-plane access goes through
+    // Entra ID. The AI Search indexer authenticates via its system-assigned managed
+    // identity (Storage Blob Data Reader role); the Fabric workspace identity
+    // authenticates via Storage Blob Data Contributor; Document Intelligence reads the
+    // raw blob URLs via its system-assigned managed identity (Storage Blob Data
+    // Reader). User-delegated SAS tokens generated against AAD are still supported.
+    allowSharedKeyAccess: false
     networkAcls: {
       defaultAction: 'Allow'
       bypass: 'AzureServices'

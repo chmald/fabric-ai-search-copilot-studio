@@ -42,6 +42,14 @@
       "value": "standard",
       "_comment": "Standard (S1) MINIMUM — semantic ranker not available on Free or Basic. Use standard2 / standard3 for high query volume or large indexes."
     },
+    "deployerPrincipalId": {
+      "value": "",
+      "_comment": "Object ID of the identity running the post-deploy script. When set, the deployment grants Search Service Contributor + Search Index Data Contributor on the AI Search service (admin keys are disabled). Find your own value with: az ad signed-in-user show --query id -o tsv. For CI: the pipeline's service principal / workload identity object ID. Leave blank to assign the roles manually."
+    },
+    "deployerPrincipalType": {
+      "value": "User",
+      "_comment": "User (interactive az login) or ServicePrincipal (CI/CD federated workload identity)."
+    },
     "tags": {
       "value": {
         "workload": "rag",

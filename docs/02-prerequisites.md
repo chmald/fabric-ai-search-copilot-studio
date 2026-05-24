@@ -202,24 +202,35 @@ The pattern uses only the `prebuilt-read` model — no custom training, no Docum
 - **Access policy / RBAC mode** decided (RBAC strongly preferred for new deployments)
 - Granted **Key Vault Secrets Officer** (or equivalent) to the building user for the duration of the build
 
-Used as fallback for any credentials that cannot use managed identity (today: Copilot Studio's AI Search admin/query key).
+> **This pattern stores zero AI-service secrets in Key Vault.** Foundry, Document Intelligence, AI Search, and Storage all have local auth / shared-key access disabled — every cross-service call goes through Entra ID via managed identity. Key Vault is kept in the deployment as the standard place to put any secret that gets added later (e.g. credentials for a Snowflake / SharePoint Online / SQL Server connector you wire into the Fabric pipeline). If you delete the Key Vault module from `infra/main.bicep`, nothing in the default pattern breaks.
 
 ---
 
 ## 10 — RBAC role assignments (cheat sheet)
 
-These are the role assignments you will make during deployment. List them out in advance so you can request them in batch if Owner approvals are required.
+These are the role assignments required by the pattern's Entra-only auth posture. List them out in advance so you can request them in batch if Owner approvals are required.
+
+### Machine-to-machine (assigned in Bicep `modules/rbac.bicep` or in [03-deployment-manual.md § 1.7](./03-deployment-manual.md#17-rbac-wiring))
 
 | Principal | Role | Scope | Why |
 |---|---|---|---|
-| Fabric workspace identity (or service principal) | **Storage Blob Data Contributor** | Storage account | Write raw + chunk files |
-| Fabric workspace identity | **Cognitive Services User** | Document Intelligence resource | Call OCR |
-| Fabric workspace identity | **Cognitive Services OpenAI User** | Foundry resource | (Optional) direct OpenAI calls; skip if pipeline doesn't call OpenAI directly |
-| AI Search service managed identity | **Storage Blob Data Reader** | Storage account (or `chunks/` container) | Indexer pulls chunk JSON |
-| AI Search service managed identity | **Cognitive Services OpenAI User** | Foundry resource | **Integrated vectorizer auth** — critical |
-| Building user | **Key Vault Secrets Officer** | Key Vault | Manage secrets during build |
-| Building user | **Search Service Contributor** | AI Search | Create + manage indexes |
-| Building user | **Cognitive Services Contributor** | Foundry resource + Document Intelligence | Deploy models, view keys |
+| AI Search service managed identity | **Cognitive Services User** | Foundry resource | Integrated vectorizer authenticates to the embedding deployment with a bearer token — **critical** |
+| AI Search service managed identity | **Storage Blob Data Reader** | Storage account (or `chunks/` container) | Indexer pulls chunk JSON — **critical** |
+| Document Intelligence managed identity | **Storage Blob Data Reader** | Storage account (or `raw/` container) | DI fetches `urlSource` files — required because shared-key access on Storage is disabled |
+| Fabric workspace identity | **Storage Blob Data Contributor** | Storage account | Copy / chunk-upload activities write to `raw/` + `chunks/`. Assigned manually in [03b-fabric-setup.md § F2.1](./03b-fabric-setup.md#f21-grant-the-workspace-identity-the-required-roles) once the workspace identity exists |
+| Fabric workspace identity | **Cognitive Services User** | Document Intelligence resource | Pipeline Web activity authenticates to DI with bearer token — same F2.1 step |
+
+### Builder / deployer (assigned to the user or service principal running deploys)
+
+| Principal | Role | Scope | Why |
+|---|---|---|---|
+| Building user / deploy SP | **Search Service Contributor** | AI Search service | Create / update index, datasource, indexer via REST bearer token (admin keys are disabled) |
+| Building user / deploy SP | **Search Index Data Contributor** | AI Search service | Run sample queries against `/docs/search` during build + test |
+| Building user | **Storage Blob Data Contributor** | Storage account | Upload / inspect blobs through Azure CLI / portal during build |
+| Building user | **Cognitive Services Contributor** | Foundry resource + Document Intelligence | Deploy models, change settings, see Identity blade |
+| Building user | **Key Vault Secrets Officer** | Key Vault | Manage any secrets you add later for downstream connector credentials |
+
+> When using the automated path, set the `deployerPrincipalId` parameter in `infra/main.parameters.local.json` to your object ID; Bicep then assigns the two Search roles for you. The remaining builder roles still need to be granted manually (typically once per environment, not per deploy).
 
 ---
 
@@ -338,7 +349,8 @@ Storage:          st<workload><env><region>              e.g.  stragdemoeus  (lo
 Key Vault:        kv-<workload>-<env>-<region>           e.g.  kv-rag-demo-eus
 Fabric workspace: ws-<workload>-<env>                    e.g.  ws-rag-demo
 Lakehouse:        lh_<workload>_<env>                    e.g.  lh_rag_demo
-Pipeline:         pl_ingest_<workload>                   e.g.  pl_ingest_docs
+Pipeline:         pl_ingest_<workload>                   e.g.  pl_ingest_docs   (parent)
+Child pipeline:   pl_process_<workload-file-noun>        e.g.  pl_process_file  (called per file)
 Index:            idx-<workload>-documents               e.g.  idx-rag-documents
 Copilot agent:    agent-<workload>                       e.g.  agent-rag-kb
 ```

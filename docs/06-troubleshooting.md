@@ -15,11 +15,77 @@ Common failure modes and fixes for the RAG knowledge-base pattern. Organized by 
 | Index has 0 documents | Indexer failed, or chunks not landing in Blob | [§4](#4--ai-search-index--indexer) |
 | Indexer status = `transientFailure` repeatedly | Integrated vectorizer auth failure (Foundry role) | [§4.1](#41-vectorizer-auth-failure) |
 | `403 Forbidden` from indexer reading Blob | Search MI missing Storage Blob Data Reader | [§4.2](#42-indexer-cannot-read-blob) |
+| `401 Unauthorized` + `WWW-Authenticate: Bearer` from a REST call | API keys disabled — caller used `api-key` / `Ocp-Apim-Subscription-Key` instead of an Entra bearer token | [§0.1](#01-401-from-services-with-local-auth-disabled) |
+| `403` from Storage with "KeyBasedAuthenticationNotPermitted" | Storage shared-key access disabled; caller used an account key or key-based connection string | [§0.2](#02-403-keybasedauthenticationnotpermitted-on-storage) |
+| Copilot Studio knowledge source save fails with "key not valid" | Trying to use admin / query key on a service that has `disableLocalAuth=true` | [§5.7](#57-knowledge-source-save-fails-with-key-not-valid) |
 | Pipeline activity fails on OCR call | DI auth or wrong endpoint / API version | [§3.1](#31-document-intelligence-call-fails) |
 | Pipeline chunk activity fails | Notebook auth or dependency missing | [§3.2](#32-chunking-notebook-fails) |
 | Control table not updating | Notebook → Lakehouse permission issue | [§3.3](#33-control-table-stuck) |
 | OneLake shortcut shows no files | Shortcut permissions or refresh lag | [§2](#2--onelake--source-attachment) |
 | Cost spike | Fabric capacity left running, Foundry quota burned, indexer over-scheduled | [§6](#6--cost-and-quota) |
+
+---
+
+## 0 — Entra-only auth (local auth disabled)
+
+This pattern provisions Foundry, Document Intelligence, AI Search with `disableLocalAuth=true` and Storage with `allowSharedKeyAccess=false`. Most auth failures end up here.
+
+### 0.1 401 from services with local auth disabled
+
+**Symptom.** A REST call to AI Search / Document Intelligence / Foundry / Azure OpenAI returns `401 Unauthorized` and a `WWW-Authenticate: Bearer ...` header.
+
+**Cause.** The caller sent an `api-key` (AI Search) or `Ocp-Apim-Subscription-Key` (Cognitive Services) header instead of `Authorization: Bearer <token>`, and the service rejects API keys because `disableLocalAuth=true`.
+
+**Fix.** Replace the API-key header with a bearer token from the right resource scope:
+
+| Target service | Token resource scope |
+|---|---|
+| AI Search | `https://search.azure.com/.default` |
+| Document Intelligence / Foundry / Azure OpenAI | `https://cognitiveservices.azure.com/.default` |
+| Storage (data plane) | `https://storage.azure.com/.default` |
+
+Quick local test (PowerShell or bash):
+
+```bash
+# AI Search
+TOKEN=$(az account get-access-token --resource https://search.azure.com --query accessToken -o tsv)
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://<svc>.search.windows.net/indexes/idx-rag-documents/docs/\$count?api-version=2024-07-01"
+
+# Document Intelligence
+TOKEN=$(az account get-access-token --resource https://cognitiveservices.azure.com --query accessToken -o tsv)
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://<di>.cognitiveservices.azure.com/documentintelligence/info?api-version=2024-11-30"
+```
+
+If the bearer call also returns 401/403, the caller's identity is missing the required RBAC role — see [02-prerequisites.md § 10](./02-prerequisites.md#10--rbac-role-assignments-cheat-sheet) for the canonical role list.
+
+### 0.2 403 KeyBasedAuthenticationNotPermitted on Storage
+
+**Symptom.** A call to Blob (e.g. from `az storage blob upload`, an old SDK call with `--account-key`, an indexer datasource with an `AccountKey=...` connection string) fails with `403 KeyBasedAuthenticationNotPermitted`.
+
+**Cause.** The storage account has `allowSharedKeyAccess: false`. Account keys and key-based connection strings are rejected.
+
+**Fix.** Pick the auth that matches the caller:
+
+- **Azure CLI / interactive:** add `--auth-mode login` to `az storage` commands.
+- **AI Search datasource:** use `"connectionString": "ResourceId=/subscriptions/.../storageAccounts/<st>;"` — the indexer authenticates with its system-assigned MI (Storage Blob Data Reader required).
+- **Document Intelligence `urlSource`:** DI must have a managed identity with Storage Blob Data Reader on the account; the request is then a plain `https://<st>.blob.core.windows.net/raw/<file>` URL without a SAS.
+- **Fabric pipeline Copy activity:** the Blob connection must use **Organizational account** or **Service principal** auth, not **Account key**; the runtime identity (workspace identity or SP) needs Storage Blob Data Contributor.
+- **App code:** swap `BlobServiceClient(account_url, credential=AzureKeyCredential(key))` for `BlobServiceClient(account_url, credential=DefaultAzureCredential())`.
+
+### 0.3 Bicep deploy fails: "RoleAssignmentExists" or "AuthorizationFailed" on rbac module
+
+**Symptom.** First `az deployment sub create` after enabling `deployerPrincipalId` succeeds; second run fails on `rbac-deploy` with `RoleAssignmentExists`.
+
+**Cause.** The role-assignment resource uses a deterministic GUID derived from `(scope, principalId, roleDefinitionId)`. Re-running Bicep tries to create the same assignment, which is fine — but if the principal was previously assigned the role via a different mechanism (e.g. via `az role assignment create` with a fresh GUID), the deterministic-GUID assignment may conflict.
+
+**Fix.**
+
+- Remove the pre-existing manual assignment: `az role assignment delete --assignee <obj-id> --role "Search Service Contributor" --scope <svc-id>`
+- Re-deploy. The Bicep-managed assignment will land cleanly.
+
+If the failure is `AuthorizationFailed`, the deploying identity lacks **User Access Administrator** on the resource group — see [02-prerequisites.md § 1](./02-prerequisites.md#1--azure-subscription).
 
 ---
 
@@ -78,8 +144,9 @@ Common failure modes and fixes for the RAG knowledge-base pattern. Organized by 
 
 | Status | Common cause | Fix |
 |---|---|---|
-| 401 | Missing or wrong subscription key | Re-pull from Key Vault; confirm correct vault and secret name |
-| 403 | Key valid but resource access denied | Confirm DI resource is in the same tenant; check firewall rules on DI resource |
+| 401 (with `WWW-Authenticate: Bearer`) | This pattern disables local auth on DI; Web activity sent an `Ocp-Apim-Subscription-Key` header instead of using managed identity | In the Web activity, set **Authentication = System Assigned Managed Identity** and **Resource = `https://cognitiveservices.azure.com/`**. See [03b-fabric-setup.md § F8.6](./03b-fabric-setup.md#f86-activity-2c--call-document-intelligence-async-submit). |
+| 403 (from DI) | Workspace identity lacks **Cognitive Services User** on the DI resource | Grant the role per [03b-fabric-setup.md § F2.1](./03b-fabric-setup.md#f21-grant-the-workspace-identity-the-required-roles); wait up to 15 min for propagation |
+| 403 (from DI fetching `urlSource`) | DI's own managed identity lacks **Storage Blob Data Reader** on the storage account; required because shared-key access on Storage is disabled | Grant the role per [03-deployment-manual.md § 1.7 step 3](./03-deployment-manual.md#17-rbac-wiring) |
 | 404 | Wrong URL or model name | Confirm endpoint includes `/documentintelligence/...` and uses `prebuilt-read` |
 | 500 | DI service-side error | Retry; if persistent, check Azure status page; verify file is not corrupt and is < DI per-call size limit |
 
@@ -278,6 +345,19 @@ Manually run once to confirm health, then check scheduling settings.
 **Cause.** Tenant M365 admin has not enabled third-party agents in M365 Copilot.
 
 **Fix.** Same as above — admin must enable in M365 admin center.
+
+### 5.7 Knowledge source save fails with "key not valid"
+
+**Symptom.** Adding AI Search as a Copilot Studio knowledge source fails when you paste an admin/query key.
+
+**Cause.** This pattern disables local auth on AI Search (`disableLocalAuth=true`). The Keys blade still shows admin keys for backwards compatibility but the service rejects them at the data plane.
+
+**Fix.** In the knowledge source dialog, change **Authentication** to **Microsoft Entra ID**:
+
+- For a small / demo audience: the connecting user's identity is used; grant each user **Search Index Data Reader** on the search service.
+- For broad rollout: configure a Copilot Studio connection that uses a service principal with **Search Index Data Reader** — the agent then resolves the SP identity for every user.
+
+See [03-deployment-manual.md § 5.2](./03-deployment-manual.md#52-add-ai-search-as-a-knowledge-source) for the full configuration.
 
 ---
 

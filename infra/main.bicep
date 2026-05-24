@@ -10,8 +10,21 @@
 //   * Azure Document Intelligence (kind=FormRecognizer)
 //   * Azure AI Search Standard S1 (semantic ranker enabled, system-assigned MI)
 //   * RBAC role assignments:
-//        - AI Search MI -> Cognitive Services OpenAI User on Foundry (for integrated vectorizer)
-//        - AI Search MI -> Storage Blob Data Reader on Storage account (for indexer)
+//        - AI Search MI -> Cognitive Services User on Foundry (integrated vectorizer)
+//        - AI Search MI -> Storage Blob Data Reader on Storage (indexer pulls chunks/)
+//        - Document Intelligence MI -> Storage Blob Data Reader on Storage
+//          (DI fetches raw/<file> via urlSource using its own MI — required because
+//          shared-key access on Storage is disabled)
+//        - (Optional, when deployerPrincipalId is set) deployer ->
+//          Search Service Contributor + Search Index Data Contributor on AI Search
+//          so the post-deploy script can authenticate with a bearer token instead
+//          of admin keys (which are disabled).
+//
+// Auth posture:
+//   * disableLocalAuth=true on Foundry, Document Intelligence, AI Search
+//   * allowSharedKeyAccess=false on Storage
+//   All clients (vectorizer, indexer, Fabric pipeline, app code, scripts) authenticate
+//   with Entra ID bearer tokens via managed identity or service principal.
 //
 // Does NOT provision (handled by scripts/post_deploy_search.py):
 //   * AI Search index (vector + hybrid + semantic configuration)
@@ -78,6 +91,16 @@ param chatModelTpm int = 10
   'standard3'
 ])
 param searchSku string = 'standard'
+
+@description('Optional: object ID of the identity that will run the post-deploy script (scripts/post_deploy_search.py). When provided, the deployment grants Search Service Contributor + Search Index Data Contributor on the AI Search service so the script can authenticate with a bearer token. Find your own value with: az ad signed-in-user show --query id -o tsv. Leave blank to assign these roles manually.')
+param deployerPrincipalId string = ''
+
+@description('Principal type for deployerPrincipalId. Use User for an interactive az login identity (typical for first deploy), or ServicePrincipal for a CI/CD service principal or workload identity.')
+@allowed([
+  'User'
+  'ServicePrincipal'
+])
+param deployerPrincipalType string = 'User'
 
 @description('Tags applied to all resources for cost allocation + governance.')
 param tags object = {
@@ -178,8 +201,12 @@ module rbac 'modules/rbac.bicep' = {
   name: 'rbac-deploy'
   params: {
     searchPrincipalId: search.outputs.systemAssignedPrincipalId
+    docIntelPrincipalId: docIntel.outputs.systemAssignedPrincipalId
     storageAccountName: storage.outputs.name
     foundryAccountName: foundry.outputs.name
+    searchServiceName: search.outputs.name
+    deployerPrincipalId: deployerPrincipalId
+    deployerPrincipalType: deployerPrincipalType
   }
 }
 
@@ -222,4 +249,9 @@ output deploymentSummary object = {
   searchIndexName: 'idx-rag-documents'
   searchDataSourceName: 'ds-chunks'
   searchIndexerName: 'ixr-chunks'
+
+  // Auth posture — surfaced so tooling can branch correctly
+  authMode: 'entra-only'
+  localAuthDisabled: true
+  deployerHasSearchRoles: !empty(deployerPrincipalId)
 }

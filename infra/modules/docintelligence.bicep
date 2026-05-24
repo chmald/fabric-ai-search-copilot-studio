@@ -40,7 +40,10 @@ resource docIntel 'Microsoft.CognitiveServices/accounts@2024-10-01' = {
     networkAcls: {
       defaultAction: 'Allow'
     }
-    disableLocalAuth: false
+    // API keys disabled — Document Intelligence is called from the Fabric pipeline
+    // using the workspace identity with role "Cognitive Services User" on this
+    // resource (Entra bearer token, resource = https://cognitiveservices.azure.com/).
+    disableLocalAuth: true
   }
 }
 

@@ -64,7 +64,11 @@ resource foundry 'Microsoft.CognitiveServices/accounts@2024-10-01' = {
     networkAcls: {
       defaultAction: 'Allow'
     }
-    disableLocalAuth: false
+    // API keys are disabled — all clients (AI Search vectorizer, app code) must use
+    // Entra ID bearer tokens via managed identity / service principal. Grant the
+    // calling identity "Cognitive Services OpenAI User" (OpenAI model access) or
+    // "Cognitive Services User" (broader catalog) on this resource.
+    disableLocalAuth: true
   }
 }
 

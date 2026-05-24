@@ -60,18 +60,24 @@ Minimum values to set:
   "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
   "contentVersion": "1.0.0.0",
   "parameters": {
-    "location":          { "value": "eastus2" },
-    "workloadName":      { "value": "rag" },
-    "env":               { "value": "dev" },
-    "embeddingModelName":{ "value": "text-embedding-3-large" },
-    "embeddingModelTpm": { "value": 10 },
-    "chatModelName":     { "value": "gpt-4o" },
-    "chatModelTpm":      { "value": 10 }
+    "location":             { "value": "eastus2" },
+    "workloadName":         { "value": "rag" },
+    "env":                  { "value": "dev" },
+    "embeddingModelName":   { "value": "text-embedding-3-large" },
+    "embeddingModelTpm":    { "value": 10 },
+    "chatModelName":        { "value": "gpt-4o" },
+    "chatModelTpm":         { "value": 10 },
+    "deployerPrincipalId":  { "value": "<output of: az ad signed-in-user show --query id -o tsv>" },
+    "deployerPrincipalType":{ "value": "User" }
   }
 }
 ```
 
 `*.local.json` is `.gitignored` — your local parameter file with real values never ends up in the repo.
+
+> **`deployerPrincipalId` is important.** API keys are disabled on every Azure AI service this pattern provisions, so the post-deploy script in [Step 4](#step-4--configure-ai-search-post-deploy-script) authenticates with an Entra bearer token. Setting `deployerPrincipalId` to your object ID lets Bicep assign **Search Service Contributor** + **Search Index Data Contributor** automatically. Leave it blank if you want to assign those roles by hand (see [02-prerequisites.md § 10](./02-prerequisites.md#10--rbac-role-assignments-cheat-sheet)).
+>
+> For CI/CD: set `deployerPrincipalId` to the pipeline's service principal / federated workload identity object ID and `deployerPrincipalType` to `ServicePrincipal`.
 
 ---
 
@@ -136,6 +142,19 @@ python post_deploy_search.py --ids ../demo-ids.local.json
 ```
 
 The script reads the deployment outputs from `demo-ids.local.json` and issues REST calls against the AI Search service. It is **idempotent** — safe to re-run if the first attempt fails partway. Typical runtime: **30–60 seconds**.
+
+> **Auth model.** Admin keys are disabled on the AI Search service. The script authenticates with an Entra bearer token via `DefaultAzureCredential` — resolves to your `az login` user when run locally, or to the pipeline's workload identity in CI. The caller needs **Search Service Contributor** + **Search Index Data Contributor** on the search service. If you set `deployerPrincipalId` in [Step 1](#step-1--configure-parameters), Bicep granted these for you; otherwise assign them manually:
+>
+> ```bash
+> SRCH_RES_ID=$(az search service show --name <svc> -g <rg> --query id -o tsv)
+> ME_OBJID=$(az ad signed-in-user show --query id -o tsv)
+> az role assignment create --assignee-object-id $ME_OBJID --assignee-principal-type User \
+>   --role "Search Service Contributor"     --scope $SRCH_RES_ID
+> az role assignment create --assignee-object-id $ME_OBJID --assignee-principal-type User \
+>   --role "Search Index Data Contributor" --scope $SRCH_RES_ID
+> ```
+>
+> Wait up to **15 minutes** for the role assignment to propagate before re-running the script.
 
 Expected output:
 

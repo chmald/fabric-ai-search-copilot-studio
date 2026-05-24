@@ -72,12 +72,19 @@ resource search 'Microsoft.Search/searchServices@2024-03-01-preview' = {
     encryptionWithCmk: {
       enforcement: 'Unspecified'
     }
+    // authOptions retains the bearer-challenge configuration so unauthenticated
+    // requests receive a proper 401 with WWW-Authenticate header.
+    // disableLocalAuth=true rejects admin/query API keys; all callers must use
+    // Entra ID bearer tokens via the following roles:
+    //   * Search Service Contributor   — create/manage indexes, datasources, indexers
+    //   * Search Index Data Contributor — write documents to an index
+    //   * Search Index Data Reader     — read/query documents
     authOptions: {
       aadOrApiKey: {
         aadAuthFailureMode: 'http401WithBearerChallenge'
       }
     }
-    disableLocalAuth: false
+    disableLocalAuth: true
   }
 }
 

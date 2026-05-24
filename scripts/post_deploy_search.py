@@ -5,6 +5,20 @@ Bicep provisions the Search SERVICE; this script creates the index / data source
 The Search index types in ARM/Bicep do not cleanly express integrated vectorizer config +
 semantic configuration + indexer field mappings, so we use the REST control plane instead.
 
+Auth model
+==========
+Admin keys are DISABLED on the AI Search service (`disableLocalAuth: true` in Bicep).
+This script authenticates with an Entra ID bearer token via `DefaultAzureCredential`.
+
+The caller identity must have these roles on the AI Search service (assigned
+automatically when `deployerPrincipalId` is set on the Bicep deployment):
+
+  * Search Service Contributor    — create/update index, datasource, indexer
+  * Search Index Data Contributor — read $count, run sample queries, see indexer status
+
+When running locally, `DefaultAzureCredential` resolves to your `az login` user.
+In CI/CD, it resolves to the pipeline's federated workload identity / service principal.
+
 What this script does
 =====================
 1. Reads deployment outputs from --ids (default: demo-ids.local.json)
@@ -37,9 +51,11 @@ from pathlib import Path
 from typing import Any
 
 import requests
+from azure.core.credentials import AccessToken
 from azure.identity import DefaultAzureCredential
 
 SEARCH_API_VERSION = "2024-07-01"
+SEARCH_AAD_SCOPE = "https://search.azure.com/.default"
 
 
 # ---------- helpers ----------------------------------------------------------------
@@ -52,45 +68,64 @@ def load_ids(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def search_admin_key(credential: DefaultAzureCredential, search_service_name: str,
-                     subscription_id: str, resource_group: str) -> str:
-    """Pull a primary admin key via ARM (uses the caller's Azure identity).
+class SearchTokenProvider:
+    """Lazy + cached bearer token for the AI Search data plane.
 
-    AI Search supports AAD auth on the data plane, but the index/datasource/indexer
-    PUT endpoints require an admin key OR a search service contributor RBAC role.
-    Using the admin key path keeps this script independent of RBAC propagation timing.
+    Tokens are valid for ~1 hour; we refresh ~5 min before expiry.
     """
-    arm_token = credential.get_token("https://management.azure.com/.default").token
-    url = (f"https://management.azure.com/subscriptions/{subscription_id}"
-           f"/resourceGroups/{resource_group}/providers/Microsoft.Search"
-           f"/searchServices/{search_service_name}/listAdminKeys?api-version=2023-11-01")
-    r = requests.post(url, headers={"Authorization": f"Bearer {arm_token}"}, timeout=30)
+
+    def __init__(self, credential: DefaultAzureCredential) -> None:
+        self._credential = credential
+        self._token: AccessToken | None = None
+
+    def auth_header(self) -> dict[str, str]:
+        now = time.time()
+        if self._token is None or self._token.expires_on - now < 300:
+            self._token = self._credential.get_token(SEARCH_AAD_SCOPE)
+        return {"Authorization": f"Bearer {self._token.token}"}
+
+
+def _check_response(method: str, url: str, r: requests.Response) -> None:
+    if r.status_code in (200, 201, 202, 204):
+        return
+    if r.status_code in (401, 403):
+        hint = (
+            "\n[HINT] Auth failed. Confirm the caller has BOTH 'Search Service Contributor'\n"
+            "       and 'Search Index Data Contributor' on the AI Search service.\n"
+            "       The Bicep deployment grants these when -deployerPrincipalId is set.\n"
+            "       Manual grant:\n"
+            "         az role assignment create --assignee <your-object-id> \\\n"
+            "           --role 'Search Service Contributor' --scope <search-resource-id>\n"
+            "         az role assignment create --assignee <your-object-id> \\\n"
+            "           --role 'Search Index Data Contributor' --scope <search-resource-id>"
+        )
+    else:
+        hint = ""
+    print(f"[FAIL] {method} {url}\n  status {r.status_code}\n  body  {r.text}{hint}")
     r.raise_for_status()
-    return r.json()["primaryKey"]
 
 
-def search_put(search_endpoint: str, key: str, resource_kind: str, name: str,
-               body: dict[str, Any]) -> None:
+def search_put(search_endpoint: str, tokens: SearchTokenProvider, resource_kind: str,
+               name: str, body: dict[str, Any]) -> None:
     url = f"{search_endpoint}/{resource_kind}/{name}?api-version={SEARCH_API_VERSION}"
-    r = requests.put(url, headers={"api-key": key, "Content-Type": "application/json"},
-                     data=json.dumps(body), timeout=60)
-    if r.status_code not in (200, 201, 204):
-        print(f"[FAIL] PUT {url}\n  status {r.status_code}\n  body  {r.text}")
-        r.raise_for_status()
+    headers = {**tokens.auth_header(), "Content-Type": "application/json"}
+    r = requests.put(url, headers=headers, data=json.dumps(body), timeout=60)
+    _check_response("PUT", url, r)
 
 
-def search_get(search_endpoint: str, key: str, path: str) -> dict[str, Any]:
+def search_get(search_endpoint: str, tokens: SearchTokenProvider, path: str) -> dict[str, Any]:
     url = f"{search_endpoint}/{path}{'&' if '?' in path else '?'}api-version={SEARCH_API_VERSION}"
-    r = requests.get(url, headers={"api-key": key}, timeout=30)
-    r.raise_for_status()
+    r = requests.get(url, headers=tokens.auth_header(), timeout=30)
+    _check_response("GET", url, r)
     return r.json() if r.text else {}
 
 
-def search_post(search_endpoint: str, key: str, path: str, body: dict[str, Any]) -> dict[str, Any]:
+def search_post(search_endpoint: str, tokens: SearchTokenProvider, path: str,
+                body: dict[str, Any]) -> dict[str, Any]:
     url = f"{search_endpoint}/{path}{'&' if '?' in path else '?'}api-version={SEARCH_API_VERSION}"
-    r = requests.post(url, headers={"api-key": key, "Content-Type": "application/json"},
-                      data=json.dumps(body), timeout=60)
-    r.raise_for_status()
+    headers = {**tokens.auth_header(), "Content-Type": "application/json"}
+    r = requests.post(url, headers=headers, data=json.dumps(body), timeout=60)
+    _check_response("POST", url, r)
     return r.json() if r.text else {}
 
 
@@ -194,41 +229,41 @@ def indexer_payload(ids: dict[str, Any]) -> dict[str, Any]:
 # ---------- orchestration ---------------------------------------------------------
 
 
-def configure(ids: dict[str, Any], key: str) -> None:
+def configure(ids: dict[str, Any], tokens: SearchTokenProvider) -> None:
     endpoint = ids["searchEndpoint"]
 
     print(f"[..] Creating/updating index: {ids['searchIndexName']}")
-    search_put(endpoint, key, "indexes", ids["searchIndexName"], index_payload(ids))
+    search_put(endpoint, tokens, "indexes", ids["searchIndexName"], index_payload(ids))
     print(f"[OK] Index '{ids['searchIndexName']}' created (or updated).")
 
     print(f"[..] Creating/updating data source: {ids['searchDataSourceName']}")
-    search_put(endpoint, key, "datasources", ids["searchDataSourceName"], datasource_payload(ids))
+    search_put(endpoint, tokens, "datasources", ids["searchDataSourceName"], datasource_payload(ids))
     print(f"[OK] Data source '{ids['searchDataSourceName']}' created "
           f"(managed-identity connection to {ids['storageAccount']}/{ids['chunksContainer']}).")
 
     print(f"[..] Creating/updating indexer: {ids['searchIndexerName']}")
-    search_put(endpoint, key, "indexers", ids["searchIndexerName"], indexer_payload(ids))
+    search_put(endpoint, tokens, "indexers", ids["searchIndexerName"], indexer_payload(ids))
     print(f"[OK] Indexer '{ids['searchIndexerName']}' created (schedule: PT5M).")
 
 
-def run_indexer(ids: dict[str, Any], key: str) -> None:
+def run_indexer(ids: dict[str, Any], tokens: SearchTokenProvider) -> None:
     endpoint = ids["searchEndpoint"]
     print(f"[..] Triggering manual indexer run: {ids['searchIndexerName']}")
     url = f"{endpoint}/indexers/{ids['searchIndexerName']}/run?api-version={SEARCH_API_VERSION}"
-    r = requests.post(url, headers={"api-key": key}, timeout=30)
+    r = requests.post(url, headers=tokens.auth_header(), timeout=30)
     if r.status_code in (202, 204):
         print("[OK] Indexer run triggered. Status will be visible in the portal in ~30s.")
     else:
         print(f"[WARN] Indexer run returned {r.status_code}: {r.text}")
 
 
-def verify(ids: dict[str, Any], key: str) -> int:
+def verify(ids: dict[str, Any], tokens: SearchTokenProvider) -> int:
     endpoint = ids["searchEndpoint"]
     errors = 0
 
     # 1. Index exists + doc count
     try:
-        count = search_get(endpoint, key, f"indexes/{ids['searchIndexName']}/docs/$count?")
+        count = search_get(endpoint, tokens, f"indexes/{ids['searchIndexName']}/docs/$count?")
         if isinstance(count, dict):
             count_val = count.get("@odata.count", count.get("value", "?"))
         else:
@@ -250,7 +285,7 @@ def verify(ids: dict[str, Any], key: str) -> int:
             "top": 3,
             "captions": "extractive",
         }
-        result = search_post(endpoint, key, f"indexes/{ids['searchIndexName']}/docs/search?", body)
+        result = search_post(endpoint, tokens, f"indexes/{ids['searchIndexName']}/docs/search?", body)
         n = len(result.get("value", []))
         if n == 0:
             print(f"[OK] Sample query succeeded (0 results — expected on empty index).")
@@ -269,7 +304,7 @@ def verify(ids: dict[str, Any], key: str) -> int:
 
     # 3. Indexer status
     try:
-        status = search_get(endpoint, key, f"indexers/{ids['searchIndexerName']}/status?")
+        status = search_get(endpoint, tokens, f"indexers/{ids['searchIndexerName']}/status?")
         last = status.get("lastResult", {})
         s = last.get("status", "?")
         if s in ("success", "transientFailure"):
@@ -298,9 +333,11 @@ def main() -> int:
 
     ids = load_ids(args.ids)
     credential = DefaultAzureCredential()
+    tokens = SearchTokenProvider(credential)
 
-    # Some IDs (subscription, resource group) may not be in the deployment outputs;
-    # fall back to azure-cli for context if missing.
+    # subscriptionId is not strictly required for bearer-token data-plane calls, but the
+    # datasource ResourceId connection string needs it. Fall back to azure-cli context if
+    # the IDs file didn't capture it.
     if "subscriptionId" not in ids:
         try:
             from subprocess import check_output
@@ -316,22 +353,20 @@ def main() -> int:
                 "`az login` / `az account set --subscription <id>` first."
             )
 
-    key = search_admin_key(credential, ids["searchService"], ids["subscriptionId"], ids["resourceGroup"])
-
     if args.verify:
-        errors = verify(ids, key)
+        errors = verify(ids, tokens)
         if errors:
             print(f"\n[FAIL] {errors} verification check(s) failed.")
             return 1
         print("\n[OK] All verification checks passed.")
         return 0
 
-    configure(ids, key)
+    configure(ids, tokens)
 
     if args.run_indexer:
         # short delay so the indexer service has the new datasource committed
         time.sleep(5)
-        run_indexer(ids, key)
+        run_indexer(ids, tokens)
 
     return 0
 

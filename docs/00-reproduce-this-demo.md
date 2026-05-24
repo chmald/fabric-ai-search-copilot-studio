@@ -38,7 +38,8 @@
 │ Microsoft Fabric                                                        │
 │   Workspace: ws-rag-dev                                                 │
 │   ├─ Lakehouse:        lh_rag_dev (OneLake source + control table)      │
-│   └─ Data Pipeline:    pl_ingest_docs (OCR → chunk → write to Blob)     │
+│   ├─ Pipeline (parent): pl_ingest_docs (lookup + ForEach)               │
+│   └─ Pipeline (child):  pl_process_file (Copy → DI → chunk → Blob)      │
 └──────────────────────────────┬──────────────────────────────────────────┘
                                │ AI Search knowledge source               │
                                ▼
@@ -111,7 +112,7 @@ What 03b covers end-to-end (Phases F0–F10):
 | F5 | Control `control_table_files` Delta table |
 | F6 | Fabric connections to Key Vault and Blob Storage |
 | F7 | Three pipeline notebooks (lookup, chunk+upload, control-table upsert) |
-| F8 | Data Pipeline `pl_ingest_docs` (5 activities + on-error handler) |
+| F8 | Data Pipelines: parent `pl_ingest_docs` (lookup + ForEach) and child `pl_process_file` (per-file Copy + DI + chunk + control updates). Two pipelines are required because Fabric does not allow `Until` inside `ForEach`. |
 | F9 | End-to-end validation on sample docs |
 | F10 | Pipeline schedule |
 

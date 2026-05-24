@@ -12,7 +12,7 @@ The Fabric layer of this pattern is **always manual**. Neither the manual Azure 
 
 ```
 Fabric workspace (ws-rag-<env>)
-├── Workspace identity (auto-created service principal, used for Blob auth)
+├── Workspace identity (auto-created service principal, used for Blob + DI auth)
 ├── Connections
 │   └── Azure Blob Storage connection (writes raw/ + chunks/ via workspace identity)
 ├── Lakehouse: lh_rag_<env>
@@ -23,22 +23,29 @@ Fabric workspace (ws-rag-<env>)
 │       └── _tmp_new_files        ← per-run handoff table from Lookup → ForEach
 ├── Notebooks
 │   ├── nb_create_control_table   ← run once
-│   ├── nb_lookup_new_files       ← called from pipeline activity [1]
-│   ├── nb_chunk_and_upload       ← called from pipeline activity [2d]
-│   └── nb_update_control_table   ← called from pipeline activities [2b] and [2e]
-└── Data Pipeline: pl_ingest_docs
-    ├── [1]  Notebook activity     → nb_lookup_new_files (writes _tmp_new_files)
-    ├── [1′] Lookup activity       → read _tmp_new_files rows for the ForEach
-    ├── [2]  ForEach (over Lookup output):
-    │   ├── [2a]  Copy data        → OneLake source → Blob raw/
-    │   ├── [2b]  Notebook         → nb_update_control_table (status=pending)
-    │   ├── [2c₀] Web activity     → GET Key Vault secret (DI key) via workspace identity
-    │   ├── [2c]  Web activity     → Document Intelligence analyze (async submit)
-    │   ├── [2c′] Until + Web     → poll operation-location until status=succeeded
-    │   ├── [2d]  Notebook         → nb_chunk_and_upload (writes chunks/ JSON)
-    │   └── [2e]  Notebook         → nb_update_control_table (status=succeeded)
-    └── On-error handler          → nb_update_control_table (status=failed, last_error)
+│   ├── nb_lookup_new_files       ← called from parent pipeline activity [1]
+│   ├── nb_chunk_and_upload       ← called from child pipeline activity [C5]
+│   └── nb_update_control_table   ← called from child pipeline activities [C2], [C6], on-error
+├── Parent pipeline: pl_ingest_docs
+│   ├── [1]  Notebook activity     → nb_lookup_new_files (writes _tmp_new_files)
+│   ├── [1′] Lookup activity       → read _tmp_new_files rows for the ForEach
+│   └── [2]  ForEach over Lookup output:
+│       └── [2a] Invoke pipeline    → pl_process_file (one invocation per source file)
+└── Child pipeline:  pl_process_file (parameters per file)
+    ├── [C1] Copy data             → OneLake source → Blob raw/    (workspace-identity auth)
+    ├── [C2] Notebook              → nb_update_control_table (status=pending)
+    ├── [C3] Web activity          → Document Intelligence analyze (workspace-identity auth)
+    ├── [C4] Until + Web           → poll operation-location until status=succeeded
+    ├── [C5] Notebook              → nb_chunk_and_upload (writes chunks/ JSON)
+    ├── [C6] Notebook              → nb_update_control_table (status=succeeded)
+    └── On-error handler           → nb_update_control_table (status=failed, last_error)
 ```
+
+> **Why two pipelines?** Fabric Data Factory pipelines (like Azure Data Factory) do **not** allow nesting an `Until` activity inside a `ForEach` activity (or vice versa). The documented workaround is the **two-level pipeline pattern**: the parent pipeline iterates with `ForEach`, and each iteration calls a child pipeline that contains the `Until` loop. See [ForEach activity limitations and workarounds](https://learn.microsoft.com/azure/data-factory/control-flow-for-each-activity#limitations-and-workarounds) and [Nested activity embedding limitations](https://learn.microsoft.com/azure/data-factory/concepts-nested-activities#nested-activity-embedding-limitations). The child pipeline is invoked via the Fabric **Invoke pipeline activity** — see [Use the Invoke pipeline activity](https://learn.microsoft.com/fabric/data-factory/invoke-pipeline-activity).
+>
+> **Bonus benefit.** Pipeline variables are global to a pipeline run — a parallel `ForEach` would race on shared variables like `raw_blob_uri`. Splitting the per-file work into a child pipeline gives each invocation its own variable scope automatically.
+
+> **All auth is managed identity.** API keys are disabled across Azure Storage (`allowSharedKeyAccess=false`), Document Intelligence (`disableLocalAuth=true`), AI Search (`disableLocalAuth=true`), and Foundry (`disableLocalAuth=true`). The Fabric workspace identity is the principal that authenticates every cross-service call this pipeline makes. There are no secrets to store or rotate.
 
 ---
 
@@ -109,25 +116,36 @@ Behind the scenes, Fabric creates a service principal + app registration in Micr
 
 > **Trusted workspace access.** Because the workspace has an identity, OneLake shortcuts and pipeline activities running in this workspace can use **trusted workspace access** to reach firewall-protected Azure Data Lake Storage Gen2 / Blob accounts. This is the only path that works cleanly for production environments where the storage account has the public network disabled. See [Trusted workspace access](https://learn.microsoft.com/en-us/fabric/security/security-trusted-workspace-access).
 
-### F2.1 Grant the workspace identity Blob Data Contributor
+### F2.1 Grant the workspace identity the required roles
 
-The pipeline writes raw files to `raw/` and chunk JSON to `chunks/`. The identity needs **write** access on both.
+The pipeline writes raw files to `raw/` and chunk JSON to `chunks/`, and it calls Document Intelligence with a bearer token. With all API keys disabled, the workspace identity needs three role assignments — grant them now before pipeline-build steps that depend on them.
 
 From the **Azure portal** (or `az cli` — both shown):
 
 ```bash
+# Identities + scopes
+WS_OBJID=<workspace-identity-object-id>   # Microsoft Entra ID → Enterprise applications → search workspace name
 ST_RES_ID=$(az storage account show --name <storage-account> -g <rg> --query id -o tsv)
-# Find the workspace identity object ID — easiest via Azure portal:
-#   Microsoft Entra ID → Enterprise applications → search for the workspace name → Object ID
-WS_OBJID=<workspace-identity-object-id>
+DI_RES_ID=$(az cognitiveservices account show --name <di-resource> -g <rg> --query id -o tsv)
 
+# 1. Write raw/ and chunks/ from Copy and chunk-upload activities
 az role assignment create \
   --assignee-object-id $WS_OBJID --assignee-principal-type ServicePrincipal \
   --role "Storage Blob Data Contributor" \
   --scope $ST_RES_ID
+
+# 2. Call Document Intelligence prebuilt-read with a bearer token
+#    (Web activity uses Authentication = System Assigned Managed Identity →
+#     Resource = https://cognitiveservices.azure.com/)
+az role assignment create \
+  --assignee-object-id $WS_OBJID --assignee-principal-type ServicePrincipal \
+  --role "Cognitive Services User" \
+  --scope $DI_RES_ID
 ```
 
-> **Propagation:** Azure role assignments to Fabric workspace identities can take up to **15 minutes** to be honored end-to-end (Fabric token cache + Azure RBAC cache). If your first pipeline run fails with `403 Forbidden`, wait and retry before debugging further.
+> **Why "Cognitive Services User" and not "Cognitive Services Contributor"?** User grants data-plane read/invoke on the analyze endpoint. Contributor includes management-plane permissions (create / delete deployments) that the pipeline doesn't need.
+
+> **Propagation:** Azure role assignments to Fabric workspace identities can take up to **15 minutes** to be honored end-to-end (Fabric token cache + Azure RBAC cache). If your first pipeline run fails with `401 Unauthorized` or `403 Forbidden`, wait and retry before debugging further.
 
 ---
 
@@ -246,7 +264,7 @@ SELECT * FROM control_table_files;
 
 ## Phase F6 — Create the Blob connection
 
-Fabric pipelines authenticate to external services through **connections**. For this pattern you only need to pre-create **one connection** — Azure Blob Storage — for the Copy activity. The Document Intelligence key is read at runtime by a Web activity calling the Key Vault REST API directly (see [Phase F8.6](#f86-activity-2c--fetch-di-key-from-key-vault-web)); no Fabric-side Key Vault connection is required.
+Fabric pipelines authenticate to external services through **connections**. For this pattern you only need to pre-create **one connection** — Azure Blob Storage — for the Copy activity. Document Intelligence is called by a Web activity whose built-in authentication kind is **System Assigned Managed Identity** (Fabric resolves this to the workspace identity), so no DI connection or Key Vault reference is needed.
 
 Reference: [Connector overview](https://learn.microsoft.com/fabric/data-factory/connector-overview) and [Set up your Azure Blob Storage connection](https://learn.microsoft.com/fabric/data-factory/connector-azure-blob-storage).
 
@@ -255,7 +273,8 @@ Reference: [Connector overview](https://learn.microsoft.com/fabric/data-factory/
 1. **Fabric portal → top-right gear icon → Manage connections and gateways → Connections → + New**
 2. **Connection type:** **Azure Blob Storage**
 3. **Account name or URL:** `https://<storage-account>.blob.core.windows.net`
-4. **Authentication kind:** **Organizational account** (simplest path; uses the signed-in user identity for connection creation, then pipeline activities in identity-enabled workspaces resolve through the workspace identity) — or **Service principal** if you prefer explicit SP auth
+4. **Authentication kind:** **Organizational account** (simplest for build-time — you authenticate as yourself; pipeline runtime then resolves to the workspace identity because of [F2.1](#f21-grant-the-workspace-identity-the-required-roles)) — or **Service principal** for explicit SP auth.
+   - **Do not** select **Account key** — shared-key access is disabled on the storage account.
 5. **Connection name:** `blob-rag-<env>`
 6. **Create**
 
@@ -263,7 +282,9 @@ Reference: [Connector overview](https://learn.microsoft.com/fabric/data-factory/
 
 ### F6.2 (Optional) Azure Key Vault references for connection credentials
 
-**You do NOT need this for the DI key in this pattern** — the Web activity reads the secret at runtime via the Key Vault REST API (Phase F8.6). The pattern below is informational, for cases where you need to put an AKV-stored secret behind a *Fabric connection's* credential (e.g. a Snowflake / SQL Server connection with a password):
+**You do NOT need this pattern.** It's documented here for completeness because it sometimes comes up when extending the pattern to additional connectors that require a stored credential. With API keys disabled across all Azure AI services this pattern uses, no secret needs to be retrieved at runtime for the default flows.
+
+If you later add a Snowflake / SQL Server / etc. connection that requires a password, you can store that password in Key Vault and reference it:
 
 1. Gear icon → **Manage connections and gateways → Azure Key Vault references → + New**
 2. **Reference alias:** `akv-rag-<env>`
@@ -271,9 +292,9 @@ Reference: [Connector overview](https://learn.microsoft.com/fabric/data-factory/
 4. Authenticate with OAuth 2.0 (your account needs at least **Key Vault Secrets User** + **Key Vault Certificate User** on the vault)
 5. **Create**
 
-Then, when creating a *supported* connector that takes a credential (account key / SAS / basic / service-principal secret), use the **AKV reference** icon next to the secret field to point at the AKV reference + secret name. Full list of supported connectors and authentication types: [Configure Azure Key Vault references](https://learn.microsoft.com/fabric/data-factory/azure-key-vault-reference-configure#supported-connectors-and-authentication-types).
+Then in supported connectors that take a credential, use the **AKV reference** icon next to the secret field. Full list of supported connectors and authentication types: [Configure Azure Key Vault references](https://learn.microsoft.com/fabric/data-factory/azure-key-vault-reference-configure#supported-connectors-and-authentication-types).
 
-> **Limitation that drives this pattern's design.** AKV references **only populate credentials inside a Fabric *connection definition*** — they cannot inject a secret into a Web activity's custom request header (e.g. `Ocp-Apim-Subscription-Key`). For that, use the two-Web-activity pattern documented in F8.6 / F8.7 below: a first Web activity fetches the secret from the Key Vault REST API using workspace identity / managed identity auth, and a second Web activity binds the result into the DI request header. This is the same pattern documented for Azure Data Factory at [Use Azure Key Vault secrets in pipeline activities](https://learn.microsoft.com/azure/data-factory/how-to-use-azure-key-vault-secrets-pipeline-activities) and works unchanged in Fabric.
+> **Limitation.** AKV references **only populate credentials inside a Fabric *connection definition*** — they cannot inject a secret into a Web activity's custom request header. For this pattern that's fine: the Web activity that calls DI uses managed-identity authentication and never sees a key.
 
 ### F6.3 Validation — write a test file from a notebook
 
@@ -290,7 +311,7 @@ df.write.mode("overwrite").csv(
 print("OK — wrote to Blob via workspace identity.")
 ```
 
-If this throws `403 Forbidden`, the F2.1 role assignment hasn't propagated yet (wait up to 15 min) or the workspace identity isn't on the role. Re-check `Microsoft Entra ID → Enterprise applications → <workspace name> → Object ID` matches what was granted the role.
+If this throws `401 Unauthorized` or `403 Forbidden`, the F2.1 role assignment hasn't propagated yet (wait up to 15 min) or the workspace identity isn't on the role. Re-check `Microsoft Entra ID → Enterprise applications → <workspace name> → Object ID` matches what was granted the role.
 
 Clean up the test path after success:
 
@@ -537,7 +558,7 @@ notebookutils.notebook.exit(json.dumps({"file_id": file_id, "status": status}))
 
 ---
 
-## Phase F8 — Build the Data Pipeline
+## Phase F8 — Build the parent pipeline `pl_ingest_docs`
 
 1. Inside the workspace: **+ New item → Data pipeline** → name `pl_ingest_docs` → **Create**
 2. **Add activity → Notebook** (this is activity [1])
@@ -578,91 +599,133 @@ Drag a **ForEach** activity onto the canvas after `lookup_new_files_rows`. Conne
 | **Settings → Items** | `@activity('lookup_new_files_rows').output.value` |
 | **Settings → Sequential** | **Off** for parallelism; cap with **Batch count** = 4 for the demo (raise per capacity headroom) |
 
-Inside the ForEach, add the following activities in sequence:
+Inside the ForEach, the **only** activity is a single Invoke pipeline call to the per-file child pipeline:
 
-### F8.4 Activity [2a] — Copy data (OneLake source → Blob raw/)
+### F8.4 Activity [2a] — Invoke pipeline (call `pl_process_file`)
 
-Inside the ForEach, **Add activity → Copy data**.
+> **Why only one activity inside the ForEach?** Fabric pipelines do **not** allow an `Until` activity inside a `ForEach` (see the note in [What you'll build](#what-youll-build)). All per-file work — including the `Until` loop that polls Document Intelligence — lives in the child pipeline `pl_process_file`, which you'll build in [Phase F8b](#phase-f8b--build-the-child-pipeline-pl_process_file).
+
+You'll have to build the child pipeline first (or create an empty `pl_process_file` placeholder now, wire it up here, then come back to fill it in). The order below assumes you create the placeholder first.
+
+1. Inside the ForEach, **Add activity → Invoke pipeline** (the modern one, not "Invoke pipeline (Legacy)" — the modern activity supports cross-workspace calls and per-child run monitoring).
+2. **General → Name:** `invoke_process_file`
+3. **Settings:**
+   - **Type:** `Fabric`
+   - **Connection:** create a new connection or reuse one. Pick **Workspace identity** as the authentication kind — the workspace identity needs at least **Contributor** on this workspace to invoke pipelines (assigned automatically when the identity is created in the same workspace). See [Invoke pipeline activity — using Workspace Identity](https://learn.microsoft.com/fabric/data-factory/invoke-pipeline-activity).
+   - **Workspace:** `ws-rag-<env>`
+   - **Pipeline:** `pl_process_file`
+   - **Wait on completion:** **On** (so the parent ForEach reports per-file success/failure correctly)
+4. **Parameters** — bind these from the ForEach `@item()` and pipeline-level constants:
+
+| Child parameter | Value expression |
+|---|---|
+| `file_id` | `@item().file_id` |
+| `source_path` | `@item().source_path` |
+| `source_modified_ts` | `@item().source_modified_ts` |
+| `byte_size` | `@item().byte_size` |
+| `ingest_run_id` | `@pipeline().RunId` |
+| `storage_account` | `<storage-account>` (constant) |
+| `raw_container` | `raw` (constant) |
+| `chunks_container` | `chunks` (constant) |
+| `di_endpoint` | `<di-endpoint>` (constant, value from `demo-ids.local.json` → `azure.documentIntelligenceEndpoint`) |
+
+The ForEach's parallelism cap (F8.3 `Batch count`) now controls how many child-pipeline runs execute concurrently.
+
+---
+
+## Phase F8b — Build the child pipeline `pl_process_file`
+
+This pipeline runs **once per source file**. It contains the Copy, DI submit, Until polling, chunk-upload, and control-table-update activities that previously lived inside the parent's ForEach.
+
+1. Inside the workspace: **+ New item → Data pipeline** → name `pl_process_file` → **Create**
+2. Open the pipeline. In the empty canvas, select the **Parameters** tab (bottom pane) and add the following pipeline parameters — all string type unless noted:
+
+| Name | Type | Notes |
+|---|---|---|
+| `file_id` | string | |
+| `source_path` | string | OneLake source path |
+| `source_modified_ts` | string | ISO timestamp passed through to control table |
+| `byte_size` | int | |
+| `ingest_run_id` | string | parent's `@pipeline().RunId` |
+| `storage_account` | string | e.g. `stragdemoeus` |
+| `raw_container` | string | `raw` |
+| `chunks_container` | string | `chunks` |
+| `di_endpoint` | string | e.g. `https://di-rag-demo-eus.cognitiveservices.azure.com` |
+
+Then add a single **variable** for the raw-blob URI:
+
+| Variable | Type | Default value |
+|---|---|---|
+| `raw_blob_uri` | string | (leave blank) |
+
+Now add the activities:
+
+### F8b.1 Activity [C1] — Copy data (OneLake source → Blob raw/)
+
+**Add activity → Copy data**.
 
 | Field | Value |
 |---|---|
 | **General → Name** | `copy_raw_to_blob` |
 | **Source → Connection** | `lh_rag_<env>` (Lakehouse) |
 | **Source → Root folder** | `Files` |
-| **Source → File path** | `@replace(item().source_path, concat('abfss://...@onelake.dfs.fabric.microsoft.com/', '<workspaceId>/<lakehouseId>/'), '')` (or simpler: use the relative path Spark returned) |
+| **Source → File path** | `@pipeline().parameters.source_path` (or the relative path returned by the lookup notebook — see tip below) |
 | **Source → File format** | **Binary** (preserves bytes) |
-| **Sink → Connection** | `blob-rag-<env>` (from F6.2) |
-| **Sink → Container** | `raw` |
-| **Sink → File path** | `@concat(item().file_id, '/', last(split(item().source_path, '/')))` |
+| **Sink → Connection** | `blob-rag-<env>` (from F6.1) |
+| **Sink → Container** | `@pipeline().parameters.raw_container` |
+| **Sink → File path** | `@concat(pipeline().parameters.file_id, '/', last(split(pipeline().parameters.source_path, '/')))` |
 | **Sink → File format** | **Binary** |
 
-> **Tip.** The simplest way to set source File path correctly is to use the **Browse** picker in the Copy activity UI on a sample file, then templatize with `@item().source_path`. The exact path syntax depends on whether your Lakehouse uses schemas — verify against [Configure Lakehouse in a copy activity](https://learn.microsoft.com/fabric/data-factory/connector-lakehouse-copy-activity).
+> **Tip.** The simplest way to set source File path correctly is to use the **Browse** picker in the Copy activity UI on a sample file, then templatize with `@pipeline().parameters.source_path`. The exact path syntax depends on whether your Lakehouse uses schemas — verify against [Configure Lakehouse in a copy activity](https://learn.microsoft.com/fabric/data-factory/connector-lakehouse-copy-activity).
 
-After this activity, capture the resulting blob URI into a pipeline variable `raw_blob_uri`:
+### F8b.2 Activity [C1.5] — Set raw_blob_uri (Set variable)
 
-`@concat('https://<storage-account>.blob.core.windows.net/raw/', item().file_id, '/', last(split(item().source_path, '/')))`
+Immediately after the Copy succeeds, add a **Set variable** activity:
 
-### F8.5 Activity [2b] — Update control table (pending)
+| Field | Value |
+|---|---|
+| **General → Name** | `set_raw_blob_uri` |
+| **Variable name** | `raw_blob_uri` |
+| **Value** | `@concat('https://', pipeline().parameters.storage_account, '.blob.core.windows.net/', pipeline().parameters.raw_container, '/', pipeline().parameters.file_id, '/', last(split(pipeline().parameters.source_path, '/')))` |
 
-**Add activity → Notebook** after the Copy.
+> Setting a variable inside a child pipeline is safe (no cross-iteration races) because each Invoke-pipeline call is a separate pipeline run with its own variable scope — this is the second reason for the two-pipeline split.
+
+### F8b.3 Activity [C2] — Update control table (pending)
+
+**Add activity → Notebook** after `set_raw_blob_uri`.
 
 | Field | Value |
 |---|---|
 | **Name** | `mark_pending` |
 | **Notebook** | `nb_update_control_table` |
-| **Base parameters** | `file_id` = `@item().file_id`, `source_path` = `@item().source_path`, `source_modified_ts` = `@item().source_modified_ts`, `raw_blob_uri` = `@variables('raw_blob_uri')`, `chunks_prefix` = `@concat(item().file_id, '/')`, `byte_size` = `@item().byte_size`, `ingest_run_id` = `@pipeline().RunId`, `status` = `pending` |
+| **Base parameters** | `file_id` = `@pipeline().parameters.file_id`, `source_path` = `@pipeline().parameters.source_path`, `source_modified_ts` = `@pipeline().parameters.source_modified_ts`, `raw_blob_uri` = `@variables('raw_blob_uri')`, `chunks_prefix` = `@concat(pipeline().parameters.file_id, '/')`, `byte_size` = `@pipeline().parameters.byte_size`, `ingest_run_id` = `@pipeline().parameters.ingest_run_id`, `status` = `pending` |
 
-### F8.6 Activity [2c₀] — Fetch DI key from Key Vault (Web)
+### F8b.4 Activity [C3] — Call Document Intelligence (async submit)
 
-Web activities cannot consume an AKV reference inside a custom request header. The supported pattern is a small **Web** activity that calls the Key Vault REST API using the workspace identity, returning the secret value to be bound into the next request.
-
-Reference: [Use Azure Key Vault secrets in pipeline activities](https://learn.microsoft.com/azure/data-factory/how-to-use-azure-key-vault-secrets-pipeline-activities) (the ADF pattern; works unchanged in Fabric with workspace identity).
+With API keys disabled on Document Intelligence, the Web activity authenticates with **System Assigned Managed Identity** — in Fabric this resolves to the workspace identity, which has **Cognitive Services User** on the DI resource thanks to [F2.1](#f21-grant-the-workspace-identity-the-required-roles).
 
 **Add activity → Web** after `mark_pending`.
 
-| Field | Value |
-|---|---|
-| **Name** | `get_di_key` |
-| **URL** | `https://<your-keyvault-name>.vault.azure.net/secrets/di-key?api-version=7.5` |
-| **Method** | `GET` |
-| **Authentication** | **System Assigned Managed Identity** (in Fabric, this resolves to the workspace identity) |
-| **Resource** | `https://vault.azure.net` |
-| **Advanced → Secure output** | **On** (prevents the secret from being written to activity logs) |
-
-Grant the workspace identity **Key Vault Secrets User** on the vault if you haven't already:
-
-```bash
-KV_RES_ID=$(az keyvault show --name <kv-name> --query id -o tsv)
-az role assignment create \
-  --assignee-object-id <workspace-identity-object-id> --assignee-principal-type ServicePrincipal \
-  --role "Key Vault Secrets User" --scope $KV_RES_ID
-```
-
-The secret value is now accessible as `@activity('get_di_key').output.value` (Key Vault REST API wraps secrets in `{ "value": "...", "id": "..." }`).
-
-### F8.7 Activity [2c] — Call Document Intelligence (async submit)
-
-**Add activity → Web** after `get_di_key`.
-
-Reference: [Document Intelligence REST API quickstart](https://learn.microsoft.com/azure/ai-services/document-intelligence/quickstarts/get-started-sdks-rest-api?view=doc-intel-4.0.0&pivots=programming-language-rest-api).
+Reference: [Web activity (Fabric)](https://learn.microsoft.com/fabric/data-factory/web-activity) and [Document Intelligence REST API quickstart](https://learn.microsoft.com/azure/ai-services/document-intelligence/quickstarts/get-started-sdks-rest-api?view=doc-intel-4.0.0&pivots=programming-language-rest-api).
 
 | Field | Value |
 |---|---|
 | **Name** | `di_analyze_submit` |
-| **URL** | `@concat('<di-endpoint>', '/documentintelligence/documentModels/prebuilt-read:analyze?api-version=2024-11-30')` — replace `<di-endpoint>` with the value from `demo-ids.local.json` (`azure.documentIntelligence` resource's endpoint) |
+| **URL** | `@concat(pipeline().parameters.di_endpoint, '/documentintelligence/documentModels/prebuilt-read:analyze?api-version=2024-11-30')` |
 | **Method** | `POST` |
-| **Headers** | `Content-Type` = `application/json`<br/>`Ocp-Apim-Subscription-Key` = `@activity('get_di_key').output.value` |
+| **Headers** | `Content-Type` = `application/json` |
 | **Body** | `{"urlSource": "@{variables('raw_blob_uri')}"}` |
-| **Advanced → Secure input** | **On** (the key appears in the request definition; turning this on prevents it from being logged) |
+| **Authentication** | **System Assigned Managed Identity** |
+| **Resource** | `https://cognitiveservices.azure.com/` |
+| **Advanced → Secure input** | **On** (defence-in-depth even though there's no secret in the body) |
 
 The Document Intelligence `analyze` endpoint is **async**: the successful response is HTTP **202 Accepted** with an `Operation-Location` header containing the URL to poll. Capture it for the next step — expression: `@activity('di_analyze_submit').output.ADFWebActivityResponseHeaders['Operation-Location']` (header name case varies; `operation-location` is also valid).
 
-> **Note on `urlSource` access.** The `urlSource` URL is fetched server-side by Document Intelligence. For a private blob, either (a) sign the URL with a short-lived SAS before passing it here, or (b) enable Document Intelligence's managed identity and grant it **Storage Blob Data Reader** on the storage account — see [Managed identities for Document Intelligence](https://learn.microsoft.com/azure/ai-services/document-intelligence/authentication/managed-identities?view=doc-intel-4.0.0).
-> For the demo, the simplest path is generating a SAS in a prior notebook step or temporarily allowing public Blob read on `raw/` (acceptable only in dev/demo, never production).
+> **Note on `urlSource` access.** The `urlSource` URL is fetched server-side by Document Intelligence. Because shared-key access on the storage account is disabled and SAS tokens are not used by this pattern, **DI must authenticate to Blob with its own managed identity**. The Bicep `rbac.bicep` module grants DI's system-assigned MI **Storage Blob Data Reader** on the storage account automatically; if you provisioned manually, see [03-deployment-manual.md § 1.7 step 3](./03-deployment-manual.md#17-rbac-wiring) and [Managed identities for Document Intelligence](https://learn.microsoft.com/azure/ai-services/document-intelligence/authentication/managed-identities?view=doc-intel-4.0.0).
 
-### F8.8 Activity [2c′] — Until + Web (poll DI result)
+### F8b.5 Activity [C4] — Until + Web (poll DI result)
 
-The DI `analyze` op returns immediately with `Operation-Location`; you must poll it until `status = succeeded` (or `failed`).
+The DI `analyze` op returns immediately with `Operation-Location`; you must poll it until `status = succeeded` (or `failed`). This is the **reason this pipeline exists** — the Until activity cannot live inside the parent's ForEach, but inside this single-run child pipeline it has no nesting conflicts.
 
 1. **Add activity → Until** after `di_analyze_submit`. Name it `poll_di_result`.
 2. **Settings → Expression:** `@or(equals(activity('di_get_result').output.status, 'succeeded'), equals(activity('di_get_result').output.status, 'failed'))`
@@ -672,14 +735,15 @@ The DI `analyze` op returns immediately with `Operation-Location`; you must poll
    - **Web** activity `di_get_result`:
      - **URL:** `@activity('di_analyze_submit').output.ADFWebActivityResponseHeaders['Operation-Location']`
      - **Method:** `GET`
-     - **Headers:** `Ocp-Apim-Subscription-Key` = `@activity('get_di_key').output.value`
+     - **Authentication:** **System Assigned Managed Identity**
+     - **Resource:** `https://cognitiveservices.azure.com/`
      - **Advanced → Secure input:** **On**
 
 After the Until exits, the latest `di_get_result` output contains the full DI response under `.analyzeResult`. JSON-serialize it for the next step:
 
 - Pipeline expression: `@string(activity('di_get_result').output)` → bind to the `di_result_json` parameter of the chunk notebook.
 
-### F8.9 Activity [2d] — Chunk + upload
+### F8b.6 Activity [C5] — Chunk + upload
 
 **Add activity → Notebook** after `poll_di_result`.
 
@@ -687,13 +751,13 @@ After the Until exits, the latest `di_get_result` output contains the full DI re
 |---|---|
 | **Name** | `chunk_and_upload` |
 | **Notebook** | `nb_chunk_and_upload` |
-| **Base parameters** | `file_id` = `@item().file_id`<br/>`di_result_json` = `@string(activity('di_get_result').output)`<br/>`raw_blob_uri` = `@variables('raw_blob_uri')`<br/>`chunks_account` = `<storage-account>`<br/>`chunks_container` = `chunks`<br/>`chunks_prefix` = `@concat(item().file_id, '/')` |
+| **Base parameters** | `file_id` = `@pipeline().parameters.file_id`<br/>`di_result_json` = `@string(activity('di_get_result').output)`<br/>`raw_blob_uri` = `@variables('raw_blob_uri')`<br/>`chunks_account` = `@pipeline().parameters.storage_account`<br/>`chunks_container` = `@pipeline().parameters.chunks_container`<br/>`chunks_prefix` = `@concat(pipeline().parameters.file_id, '/')` |
 
 Capture the returned `chunk_count` for use in the next activity. The notebook exit value is a JSON string, so parse it:
 
 `@json(activity('chunk_and_upload').output.result.exitValue).chunk_count`
 
-### F8.10 Activity [2e] — Update control table (succeeded)
+### F8b.7 Activity [C6] — Update control table (succeeded)
 
 **Add activity → Notebook** after `chunk_and_upload`.
 
@@ -701,19 +765,21 @@ Capture the returned `chunk_count` for use in the next activity. The notebook ex
 |---|---|
 | **Name** | `mark_succeeded` |
 | **Notebook** | `nb_update_control_table` |
-| **Base parameters** | `file_id` = `@item().file_id`, `ingest_run_id` = `@pipeline().RunId`, `chunk_count` = `@json(activity('chunk_and_upload').output.result.exitValue).chunk_count`, `status` = `succeeded` |
+| **Base parameters** | `file_id` = `@pipeline().parameters.file_id`, `ingest_run_id` = `@pipeline().parameters.ingest_run_id`, `chunk_count` = `@json(activity('chunk_and_upload').output.result.exitValue).chunk_count`, `status` = `succeeded` |
 
-### F8.11 On-failure handler
+### F8b.8 On-failure handler
 
-On the **red (failure) arrow** of any of [2a]/[2c]/[2d], add a final **Notebook** activity `mark_failed`:
+On the **red (failure) arrow** of any of [C1] / [C3] / [C4] / [C5], add a final **Notebook** activity `mark_failed`:
 
 | Field | Value |
 |---|---|
 | **Name** | `mark_failed` |
 | **Notebook** | `nb_update_control_table` |
-| **Base parameters** | `file_id` = `@item().file_id`, `ingest_run_id` = `@pipeline().RunId`, `status` = `failed`, `last_error` = `@string(activity('<the-failing-activity>').error)` |
+| **Base parameters** | `file_id` = `@pipeline().parameters.file_id`, `ingest_run_id` = `@pipeline().parameters.ingest_run_id`, `status` = `failed`, `last_error` = `@string(activity('<the-failing-activity>').error)` |
 
-> For simplicity in the demo, attach `mark_failed` only to the `chunk_and_upload` failure arrow — that's the most common failure point. Production builds attach failure handlers to every step.
+> For simplicity in the demo, attach `mark_failed` only to the `chunk_and_upload` failure arrow — that's the most common failure point. Production builds attach failure handlers to every step. Because this is a child pipeline, the failure handler runs once per failing file rather than once per pipeline run.
+
+Because `mark_failed` is the last activity on a failure path, the child pipeline as a whole still reports a `Failed` status to the parent's Invoke-pipeline activity. That bubble-up is what makes the parent's ForEach iteration accurately reflect per-file success/failure in monitoring.
 
 ---
 
@@ -721,13 +787,14 @@ On the **red (failure) arrow** of any of [2a]/[2c]/[2d], add a final **Notebook*
 
 ### F9.1 Sample run
 
-1. Pipeline editor → **Save** → **Run**
-2. Watch the **Output** tab as each activity completes:
+1. Open the parent pipeline `pl_ingest_docs` → **Save** → **Run**
+2. Watch the **Output** tab of the parent run as each activity completes:
    - `lookup_new_files` → succeeded, returns `{"new_count": N}` in `exitValue`
    - `lookup_new_files_rows` → succeeded, row count = N
    - `foreach_new_file` → enters ForEach scope
-   - For each iteration: Copy → mark_pending → get_di_key → di_analyze_submit → poll_di_result (Until loop) → chunk_and_upload → mark_succeeded all succeed
-3. Total runtime for 5 sample files: typically **3–8 minutes** (DI OCR is the dominant cost)
+   - For each iteration: `invoke_process_file` → spawns one `pl_process_file` run
+3. Click into any `invoke_process_file` activity to drill down into its child run, or open the workspace **Monitor** view and filter by pipeline = `pl_process_file`. In each child run the activities should complete in order: `copy_raw_to_blob` → `set_raw_blob_uri` → `mark_pending` → `di_analyze_submit` → `poll_di_result` (Until loop, typically 5–20 iterations) → `chunk_and_upload` → `mark_succeeded`.
+4. Total runtime for 5 sample files: typically **3–8 minutes** (DI OCR is the dominant cost). Parallelism between files is governed by the parent ForEach's `Batch count`.
 
 ### F9.2 Confirm outputs
 
@@ -778,12 +845,14 @@ GET https://<search-svc>.search.windows.net/indexers/ixr-chunks/status?api-versi
 
 For demo, leave on manual trigger. For ongoing operation:
 
-1. Pipeline editor → **Schedule**
+1. Open the **parent** pipeline `pl_ingest_docs` → **Schedule**
 2. **Status:** On
 3. **Repeat:** Every 30 minutes (production batch) or every 5 minutes (low-latency demo, watch capacity cost)
 4. **Apply**
 
-Record the pipeline GUID in `demo-ids.local.json` under `fabric.pipelineId`.
+> **Only schedule the parent.** Child pipelines like `pl_process_file` are invoked on demand by the parent's ForEach — they must **not** have their own schedule (a stand-alone child run would have no `file_id` parameter and would fail immediately).
+
+Record both pipeline GUIDs in `demo-ids.local.json` under `fabric.parentPipelineId` (`pl_ingest_docs`) and `fabric.childPipelineId` (`pl_process_file`).
 
 ---
 
@@ -793,15 +862,18 @@ Record the pipeline GUID in `demo-ids.local.json` under `fabric.pipelineId`.
 - [ ] Capacity assigned to workspace (F-SKU, not trial in prod)
 - [ ] Workspace identity created and Active
 - [ ] Workspace identity granted **Storage Blob Data Contributor** on the storage account
-- [ ] Workspace identity granted **Key Vault Secrets User** on the Key Vault
+- [ ] Workspace identity granted **Cognitive Services User** on the Document Intelligence resource
+- [ ] Workspace identity has at least **Contributor** on the Fabric workspace (default for identities created in the same workspace; required for the parent's Invoke-pipeline activity)
 - [ ] Lakehouse `lh_rag_<env>` created with `control_table_files` table
 - [ ] OneLake shortcut at `Files/source_docs/` showing source documents
 - [ ] Blob connection `blob-rag-<env>` created and tested
 - [ ] Three notebooks (`nb_lookup_new_files`, `nb_chunk_and_upload`, `nb_update_control_table`) saved
-- [ ] Pipeline `pl_ingest_docs` runs end-to-end on sample documents
+- [ ] Child pipeline `pl_process_file` has all 9 pipeline parameters declared and runs successfully when invoked manually with sample parameter values
+- [ ] Parent pipeline `pl_ingest_docs` runs end-to-end and spawns one `pl_process_file` child run per source file
 - [ ] Control table populated; `raw/` and `chunks/` containers populated
 - [ ] AI Search indexer picks up new chunks within 5 min
-- [ ] Re-running the pipeline is a no-op (idempotency proved)
+- [ ] Re-running the parent pipeline is a no-op (idempotency proved — no child runs spawned)
+- [ ] Only `pl_ingest_docs` has a schedule — `pl_process_file` is left on "on demand" trigger only
 
 When all boxes are checked → return to [00-reproduce-this-demo.md § Part D](./00-reproduce-this-demo.md#part-d--build-the-copilot-studio-agent-manual--both-paths) to build the Copilot Studio agent.
 
@@ -818,6 +890,7 @@ Common Fabric-layer issues are catalogued in [06-troubleshooting.md](./06-troubl
 - **Same files re-processed every run** → [§ 3.4](./06-troubleshooting.md#34-pipeline-runs-duplicate-files)
 - **Fabric capacity cost spike** → [§ 6.1](./06-troubleshooting.md#61-fabric-capacity-cost-spike)
 - **Workspace identity Blob writes 403** → [§ 1.1 RBAC propagation lag](./06-troubleshooting.md#11-rbac-propagation-lag)
+- **"Activity of type 'Until' is not supported inside a 'ForEach' activity"** → you tried to nest Until inside ForEach. This is a fundamental Fabric / ADF limitation; the workaround is to move the Until-bearing block into a child pipeline and invoke it from the ForEach. This pattern already implements that split — [F8.4](#f84-activity-2a--invoke-pipeline-call-pl_process_file) + [Phase F8b](#phase-f8b--build-the-child-pipeline-pl_process_file). Reference: [ForEach activity limitations](https://learn.microsoft.com/azure/data-factory/control-flow-for-each-activity#limitations-and-workarounds).
 
 ---
 
@@ -848,6 +921,10 @@ Authoritative Microsoft Learn pages this guide tracks (verified against current 
 - [Configure Lakehouse in a copy activity](https://learn.microsoft.com/fabric/data-factory/connector-lakehouse-copy-activity)
 - [Web activity for REST API calls](https://learn.microsoft.com/fabric/data-factory/web-activity)
 - [Transform data by running a notebook (Notebook activity)](https://learn.microsoft.com/fabric/data-factory/notebook-activity)
+- [Use the Until activity to control execution flow](https://learn.microsoft.com/fabric/data-factory/until-activity)
+- [Use the Invoke pipeline activity to run another pipeline](https://learn.microsoft.com/fabric/data-factory/invoke-pipeline-activity)
+- [ForEach activity limitations and workarounds (ADF — applies to Fabric pipelines)](https://learn.microsoft.com/azure/data-factory/control-flow-for-each-activity#limitations-and-workarounds)
+- [Nested activities in ADF / Fabric — embedding limitations](https://learn.microsoft.com/azure/data-factory/concepts-nested-activities#nested-activity-embedding-limitations)
 - [Configure Azure Key Vault references (connection credentials)](https://learn.microsoft.com/fabric/data-factory/azure-key-vault-reference-configure)
 - [Use Azure Key Vault secrets in pipeline activities (Web activity pattern)](https://learn.microsoft.com/azure/data-factory/how-to-use-azure-key-vault-secrets-pipeline-activities)
 

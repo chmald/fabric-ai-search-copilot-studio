@@ -23,7 +23,8 @@
     "lakehouseId": "<lakehouse-guid>",
     "lakehouseName": "lh_rag_demo",
     "lakehouseSqlEndpoint": "<sql-endpoint-hostname>",
-    "pipelineId": "<data-pipeline-guid>"
+    "parentPipelineId": "<pl_ingest_docs-guid>",
+    "childPipelineId": "<pl_process_file-guid>"
   },
 
   "azure": {
