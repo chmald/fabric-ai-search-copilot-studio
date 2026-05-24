@@ -342,7 +342,7 @@ source_path = "Files/source_docs/"   # default; overridden by pipeline
 
 # Imports
 import json
-from pyspark.sql.functions import col, md5, concat_ws
+from pyspark.sql.functions import col, md5, concat_ws, regexp_replace
 
 # Discover files in the source (binaryFile reader recursively walks the folder)
 src = (
@@ -353,6 +353,17 @@ src = (
         .withColumnRenamed("path",             "source_path")
         .withColumnRenamed("modificationTime", "source_modified_ts")
         .withColumnRenamed("length",           "byte_size")
+)
+
+# binaryFile reader returns ABSOLUTE abfss URIs in source_path, e.g.
+#   abfss://<workspaceId>@onelake.dfs.fabric.microsoft.com/<lakehouseId>/Files/source_docs/<file>
+# The pipeline Copy activity binds @item().source_path as a path RELATIVE to the
+# Lakehouse Files/ root, so we strip the prefix here. Without this strip, the
+# Copy activity ends up looking for <lakehouseId>/Files/abfss:/<lakehouseId>/...
+# which 404s with PathNotFound — see 06-troubleshooting.md § 3.5.
+src = src.withColumn(
+    "source_path",
+    regexp_replace(col("source_path"), r"^.*/Files/", ""),
 )
 
 # Stable file_id = md5(source_path || source_modified_ts)
@@ -632,7 +643,7 @@ Inside the ForEach, **Add activity → Copy data**.
 | **General → Name** | `copy_raw_to_blob` |
 | **Source → Connection** | `lh_rag_<env>` (Lakehouse) |
 | **Source → Root folder** | `Files` |
-| **Source → File path** | `@item().source_path` (use the **Browse** picker on a sample file to confirm the exact syntax, then templatize) |
+| **Source → File path** | `@item().source_path` (this is a path **relative to the Files root**, e.g. `source_docs/<filename>` — the lookup notebook strips the absolute `abfss://...` prefix before writing to `_tmp_new_files`) |
 | **Source → File format** | **Binary** (preserves bytes) |
 | **Sink → Connection** | `blob-rag-<env>` (from F6.1) |
 | **Sink → Container** | `raw` |
@@ -640,6 +651,8 @@ Inside the ForEach, **Add activity → Copy data**.
 | **Sink → File format** | **Binary** |
 
 Reference: [Configure Lakehouse in a copy activity](https://learn.microsoft.com/fabric/data-factory/connector-lakehouse-copy-activity).
+
+> **If you see `PathNotFound`** with a path that contains `Files/abfss:/...`, the lookup notebook is writing absolute URIs to `_tmp_new_files` instead of relative paths. The `regexp_replace(...)` line in [F7.1](#f71-nb_lookup_new_files) is the fix — see also [06-troubleshooting.md § 3.5](./06-troubleshooting.md#35-copy-activity-fails-with-pathnotfound-and-an-abfss-uri-in-the-path).
 
 ### F8.5 Activity [2b] — Update control table (pending)
 
@@ -788,6 +801,7 @@ When all boxes are checked → return to [00-reproduce-this-demo.md § Part D](.
 Common Fabric-layer issues are catalogued in [06-troubleshooting.md](./06-troubleshooting.md):
 
 - **OneLake shortcut shows no files / can't be read** → [§ 2](./06-troubleshooting.md#2--onelake--source-attachment)
+- **`copy_raw_to_blob` fails with `PathNotFound` and an `abfss:/...` URI in the path** → [§ 3.5](./06-troubleshooting.md#35-copy-activity-fails-with-pathnotfound-and-an-abfss-uri-in-the-path) — `nb_lookup_new_files` is writing absolute abfss URIs instead of paths relative to `Files/`
 - **`nb_ocr_chunk_upload` 401/403 from Document Intelligence** → workspace identity missing **Cognitive Services User** on the DI resource ([F2.1](#f21-grant-the-workspace-identity-the-required-roles)) or 15-min RBAC propagation lag ([§ 1.1](./06-troubleshooting.md#11-rbac-propagation-lag))
 - **`nb_ocr_chunk_upload` import errors** → the `%pip install` cell didn't run (or ran against the wrong session). See [§ 3.2](./06-troubleshooting.md#32-chunking-notebook-fails)
 - **Control table never updates** → [§ 3.3](./06-troubleshooting.md#33-control-table-stuck)

@@ -184,6 +184,41 @@ For production: pin versions and consider a custom Fabric environment with these
 
 **Fix.** Switch the hash input to `(source_path, byte_size, content_md5)` if available. As a last resort, hash the file content (slower).
 
+### 3.5 Copy activity fails with `PathNotFound` and an `abfss:/...` URI in the path
+
+**Symptom.** The `copy_raw_to_blob` activity inside the ForEach fails with:
+
+```
+ErrorCode=UserErrorFileNotFound,...Lakehouse operation failed for: Operation returned an invalid status code 'NotFound'.
+Workspace: '<workspaceId>'.
+Path: '<lakehouseId>/Files/abfss:/<workspaceId>@onelake.dfs.fabric.microsoft.com/<lakehouseId>/Files/source_docs/<filename>'.
+ErrorCode: 'PathNotFound'.
+```
+
+Notice the path contains `Files/abfss:/...` — the abfss URI has been appended to the Lakehouse root instead of being used directly.
+
+**Cause.** `nb_lookup_new_files` is writing **absolute abfss URIs** into `_tmp_new_files.source_path`. Spark's `binaryFile` reader populates `path` with the full URI (`abfss://<workspaceId>@onelake.dfs.fabric.microsoft.com/<lakehouseId>/Files/source_docs/<file>`), but the pipeline Copy activity treats `@item().source_path` as a path **relative to its Lakehouse `Files/` Root folder**. Result: the activity asks the Lakehouse for `<lakehouseId>/Files/<entire-abfss-uri>`, which 404s.
+
+**Fix.** Strip the abfss prefix in the lookup notebook so `source_path` is relative to `Files/`:
+
+```python
+from pyspark.sql.functions import regexp_replace
+
+src = src.withColumn(
+    "source_path",
+    regexp_replace(col("source_path"), r"^.*/Files/", ""),
+)
+```
+
+This collapses values like `abfss://.../<lakehouseId>/Files/source_docs/x.pdf` to just `source_docs/x.pdf`. See [03b-fabric-setup.md § F7.1](./03b-fabric-setup.md#f71-nb_lookup_new_files) for the full notebook. After applying the fix, re-run `nb_lookup_new_files` (or the whole pipeline) so `_tmp_new_files` is rewritten with the corrected paths.
+
+**Verify** in the SQL analytics endpoint:
+
+```sql
+SELECT source_path FROM _tmp_new_files LIMIT 5;
+-- Should show e.g. 'source_docs/NDA-001.pdf', NOT 'abfss://...@onelake.dfs.fabric.microsoft.com/.../Files/source_docs/NDA-001.pdf'
+```
+
 ---
 
 ## 4 — AI Search index / indexer
