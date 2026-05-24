@@ -11,8 +11,15 @@ The Fabric layer of this pattern is **always manual**. Neither the manual Azure 
 ## What you'll build
 
 ```
+Azure side (one-time setup)
+├── Service principal: sp-rag-di-caller
+│     └── Cognitive Services User on Document Intelligence
+└── Key Vault secret: di-sp-secret  ← the SP's client secret
+
 Fabric workspace (ws-rag-<env>)
-├── Workspace identity (auto-created service principal, used for Blob + DI auth)
+├── Workspace identity (auto-created service principal)
+│     ├── Storage Blob Data Contributor on Storage (raw/, chunks/)
+│     └── Key Vault Secrets User on Key Vault (reads di-sp-secret)
 ├── Connections
 │   └── Azure Blob Storage connection (writes raw/ + chunks/ via workspace identity)
 ├── Lakehouse: lh_rag_<env>
@@ -25,14 +32,16 @@ Fabric workspace (ws-rag-<env>)
 │   ├── nb_create_control_table   ← run once
 │   ├── nb_lookup_new_files       ← called from pipeline activity [1]
 │   ├── nb_ocr_chunk_upload       ← called from pipeline activity [2c]:
-│   │                              calls Document Intelligence via Python SDK +
-│   │                              workspace identity, chunks the result, and
-│   │                              uploads chunk JSON to Blob — all in one notebook
+│   │                              MSAL→SP for DI auth, notebookutils→workspace
+│   │                              identity for Blob; chunks DI result and writes
+│   │                              chunk JSON to Blob
 │   └── nb_update_control_table   ← called from pipeline activities [2b], [2d], on-error
-└── Data Pipeline: pl_ingest_docs
-    ├── [1]  Notebook activity     → nb_lookup_new_files (writes _tmp_new_files)
-    ├── [1′] Lookup activity       → read _tmp_new_files rows for the ForEach
-    └── [2]  ForEach over Lookup output:
+└── Data Pipeline: pl_ingest_docs (parameters: storage_account, di_endpoint,
+    │                                            key_vault_name, di_sp_*, etc.)
+    ├── [1]   Notebook activity     → nb_lookup_new_files (writes _tmp_new_files)
+    ├── [1.5] Refresh SQL Endpoint  → force SQL endpoint to sync Delta metadata
+    ├── [1′]  Lookup activity       → read _tmp_new_files rows for the ForEach
+    └── [2]   ForEach over Lookup output:
         ├── [2a] Copy data             → OneLake source → Blob raw/  (workspace-identity auth)
         ├── [2b] Notebook              → nb_update_control_table (status=pending)
         ├── [2c] Notebook              → nb_ocr_chunk_upload (DI → chunks/ JSON)
@@ -45,9 +54,9 @@ Fabric workspace (ws-rag-<env>)
 > 1. **The Fabric Web activity has no `System Assigned Managed Identity` + `Resource` fields like ADF does.** It only takes a Connection from Manage connections and gateways, and the Web v2 connector's `Workspace identity` auth is currently supported in Dataflow Gen2 only, not in pipelines (see the [Web v2 connector overview](https://learn.microsoft.com/fabric/data-factory/connector-web-overview) and [ADF/Fabric connector parity](https://learn.microsoft.com/fabric/data-factory/connector-parity)).
 > 2. **You cannot nest `Until` inside `ForEach`** (see [ForEach activity limitations](https://learn.microsoft.com/azure/data-factory/control-flow-for-each-activity#limitations-and-workarounds)) — which is the natural pattern for polling Document Intelligence's async `analyze` operation from a pipeline activity.
 >
-> Both are avoided by calling Document Intelligence from a **notebook** using the official [`azure-ai-documentintelligence`](https://learn.microsoft.com/python/api/overview/azure/ai-documentintelligence-readme) SDK with `DefaultAzureCredential`, which resolves to the workspace identity inside Fabric notebooks. The SDK's long-running-operation poller handles waiting for OCR to finish internally, so the pipeline doesn't need an `Until` loop. Folding OCR + chunking + upload into one notebook also avoids spinning up Spark twice per file.
+> Both are avoided by calling Document Intelligence from a **notebook** using the official [`azure-ai-documentintelligence`](https://learn.microsoft.com/python/api/overview/azure/ai-documentintelligence-readme) SDK. Because [Fabric notebooks don't support `DefaultAzureCredential`](https://learn.microsoft.com/fabric/data-engineering/notebookutils/notebookutils-credentials#get-token) and `notebookutils.credentials.getToken` only exposes 4 audience keys (none for Cognitive Services), the notebook uses **MSAL with a dedicated service principal** (secret stored in Key Vault, fetched at runtime via the workspace identity) to authenticate to DI. For Blob, the notebook uses a small `TokenCredential` adapter that wraps `notebookutils.credentials.getToken('storage')`. The SDK's long-running-operation poller handles waiting for OCR to finish internally, so the pipeline doesn't need an `Until` loop.
 
-> **All auth is managed identity.** API keys are disabled across Azure Storage (`allowSharedKeyAccess=false`), Document Intelligence (`disableLocalAuth=true`), AI Search (`disableLocalAuth=true`), and Foundry (`disableLocalAuth=true`). The Fabric workspace identity is the principal that authenticates every cross-service call this pipeline makes. There are no secrets to store or rotate.
+> **All auth is managed identity (or SP for the one Entra resource Fabric can't reach).** API keys are disabled across Azure Storage (`allowSharedKeyAccess=false`), Document Intelligence (`disableLocalAuth=true`), AI Search (`disableLocalAuth=true`), and Foundry (`disableLocalAuth=true`). The Fabric workspace identity is the principal that authenticates Blob and Key Vault calls; the `sp-rag-di-caller` service principal is the principal that authenticates the DI call (its secret is stored in Key Vault rather than passed around). There are no API keys to store or rotate.
 
 ---
 
@@ -120,7 +129,7 @@ Behind the scenes, Fabric creates a service principal + app registration in Micr
 
 ### F2.1 Grant the workspace identity the required roles
 
-The pipeline writes raw files to `raw/` and chunk JSON to `chunks/`, and it calls Document Intelligence with a bearer token. With all API keys disabled, the workspace identity needs three role assignments — grant them now before pipeline-build steps that depend on them.
+The pipeline writes raw files to `raw/` and chunk JSON to `chunks/`, and it reads a small secret from Key Vault that the DI-caller service principal (see [F2.2](#f22-create-a-di-caller-service-principal-for-mssal-from-the-notebook)) uses to authenticate to Document Intelligence. With all API keys disabled, the workspace identity needs two role assignments — grant them now before pipeline-build steps that depend on them.
 
 From the **Azure portal** (or `az cli` — both shown):
 
@@ -128,7 +137,7 @@ From the **Azure portal** (or `az cli` — both shown):
 # Identities + scopes
 WS_OBJID=<workspace-identity-object-id>   # Microsoft Entra ID → Enterprise applications → search workspace name
 ST_RES_ID=$(az storage account show --name <storage-account> -g <rg> --query id -o tsv)
-DI_RES_ID=$(az cognitiveservices account show --name <di-resource> -g <rg> --query id -o tsv)
+KV_RES_ID=$(az keyvault show --name <key-vault-name> --query id -o tsv)
 
 # 1. Write raw/ and chunks/ from Copy and chunk-upload activities
 az role assignment create \
@@ -136,18 +145,61 @@ az role assignment create \
   --role "Storage Blob Data Contributor" \
   --scope $ST_RES_ID
 
-# 2. Call Document Intelligence prebuilt-read from a notebook with a bearer token
-#    (nb_ocr_chunk_upload uses DefaultAzureCredential, which resolves to the
-#     workspace identity inside Fabric notebooks)
+# 2. Read the DI-caller service-principal secret from Key Vault at notebook runtime
 az role assignment create \
   --assignee-object-id $WS_OBJID --assignee-principal-type ServicePrincipal \
-  --role "Cognitive Services User" \
-  --scope $DI_RES_ID
+  --role "Key Vault Secrets User" \
+  --scope $KV_RES_ID
 ```
 
-> **Why "Cognitive Services User" and not "Cognitive Services Contributor"?** User grants data-plane read/invoke on the analyze endpoint. Contributor includes management-plane permissions (create / delete deployments) that the pipeline doesn't need.
-
 > **Propagation:** Azure role assignments to Fabric workspace identities can take up to **15 minutes** to be honored end-to-end (Fabric token cache + Azure RBAC cache). If your first pipeline run fails with `401 Unauthorized` or `403 Forbidden`, wait and retry before debugging further.
+
+### F2.2 Create a DI-caller service principal (for MSAL from the notebook)
+
+Fabric notebooks **cannot** acquire a Microsoft Entra token for arbitrary Azure resources via the workspace identity — [`notebookutils.credentials.getToken`](https://learn.microsoft.com/fabric/data-engineering/notebookutils/notebookutils-credentials#get-token) only supports four audience keys (`storage`, `pbi`, `keyvault`, `kusto`), and Cognitive Services is not one of them. `DefaultAzureCredential()` is also explicitly unsupported in Fabric notebooks.
+
+For Document Intelligence (`https://cognitiveservices.azure.com/`), the supported path is **MSAL client-credentials with a dedicated service principal**, with the SP's client secret stored in Key Vault and fetched at notebook runtime via the workspace identity. This keeps API keys disabled on DI while staying within Fabric's notebook auth surface.
+
+1. **Create the service principal:**
+
+   ```bash
+   az ad sp create-for-rbac --name "sp-rag-di-caller" --years 1
+   # Output:
+   #   appId       = <client-id>      ← the SP's clientId (public)
+   #   password    = <client-secret>  ← the SP's secret  (treat as secret)
+   #   tenant      = <tenant-id>
+   ```
+
+   Note the `appId` and `tenant`. Copy the `password` to your clipboard — you'll store it in Key Vault next and it cannot be retrieved later.
+
+2. **Grant the SP `Cognitive Services User` on the Document Intelligence resource:**
+
+   ```bash
+   SP_OBJID=$(az ad sp show --id <client-id> --query id -o tsv)
+   DI_RES_ID=$(az cognitiveservices account show --name <di-resource> -g <rg> --query id -o tsv)
+
+   az role assignment create \
+     --assignee-object-id $SP_OBJID --assignee-principal-type ServicePrincipal \
+     --role "Cognitive Services User" \
+     --scope $DI_RES_ID
+   ```
+
+3. **Store the SP secret in Key Vault** under a name the notebook will reference (default: `di-sp-secret`):
+
+   ```bash
+   az keyvault secret set \
+     --vault-name <key-vault-name> \
+     --name di-sp-secret \
+     --value '<the-password-from-step-1>'
+   ```
+
+4. **Record the three values** you'll bind into pipeline parameters in [F8.0](#f80-declare-pipeline-parameters):
+
+   - `di_sp_tenant_id`   — the tenant guid from step 1
+   - `di_sp_client_id`   — the appId from step 1
+   - `di_sp_secret_name` — `di-sp-secret` (matches step 3)
+
+> **Why "Cognitive Services User" on the SP and not on the workspace identity?** Granting it on the workspace identity has no effect because the notebook cannot acquire a cognitiveservices token as the workspace identity — see the auth-key limitation in the previous paragraph. The role must be on the principal that the notebook actually authenticates as (the DI-caller SP via MSAL).
 
 ---
 
@@ -266,7 +318,7 @@ SELECT * FROM control_table_files;
 
 ## Phase F6 — Create the Blob connection
 
-Fabric pipelines authenticate to external services through **connections**. For this pattern you only need to pre-create **one connection** — Azure Blob Storage — for the Copy activity. Document Intelligence is called from a Fabric notebook (`nb_ocr_chunk_upload`) using the `azure-ai-documentintelligence` Python SDK + `DefaultAzureCredential`, which resolves to the workspace identity automatically — so no DI connection, no Key Vault reference, and no Web activity is required.
+Fabric pipelines authenticate to external services through **connections**. For this pattern you only need to pre-create **one connection** — Azure Blob Storage — for the Copy activity. Document Intelligence is called from a Fabric notebook (`nb_ocr_chunk_upload`) using the `azure-ai-documentintelligence` Python SDK with **MSAL + a dedicated service principal** (see [F2.2](#f22-create-a-di-caller-service-principal-for-mssal-from-the-notebook) and [F7.2](#f72-nb_ocr_chunk_upload)) — so no DI connection and no Web activity are required. The SP's secret lives in Key Vault and is fetched at notebook runtime via the workspace identity's Key Vault Secrets User role.
 
 Reference: [Connector overview](https://learn.microsoft.com/fabric/data-factory/connector-overview) and [Set up your Azure Blob Storage connection](https://learn.microsoft.com/fabric/data-factory/connector-azure-blob-storage).
 
@@ -396,7 +448,12 @@ notebookutils.notebook.exit(exit_payload)
 
 ### F7.2 `nb_ocr_chunk_upload`
 
-This notebook calls Document Intelligence, chunks the resulting text, and uploads chunk JSON to Blob — all in one Spark session per file. It uses the official [`azure-ai-documentintelligence`](https://learn.microsoft.com/python/api/overview/azure/ai-documentintelligence-readme) Python SDK with `DefaultAzureCredential`, which resolves to the workspace identity inside Fabric notebooks. The SDK's long-running-operation poller waits for DI's async `analyze` operation to finish, so the pipeline doesn't need an `Until` loop.
+This notebook calls Document Intelligence, chunks the resulting text, and uploads chunk JSON to Blob — all in one Spark session per file. It uses the official [`azure-ai-documentintelligence`](https://learn.microsoft.com/python/api/overview/azure/ai-documentintelligence-readme) Python SDK. The SDK's long-running-operation poller waits for DI's async `analyze` operation to finish, so the pipeline doesn't need an `Until` loop.
+
+**Auth model.** Fabric notebooks do **not** support `DefaultAzureCredential` and `notebookutils.credentials.getToken` only accepts four documented audience keys (`storage`, `pbi`, `keyvault`, `kusto`) — see the [auth callout in F2.2](#f22-create-a-di-caller-service-principal-for-mssal-from-the-notebook). The notebook therefore uses:
+
+- **Blob** → a custom `TokenCredential` wrapping `notebookutils.credentials.getToken('storage')` (workspace identity)
+- **Document Intelligence** → [MSAL](https://learn.microsoft.com/entra/msal/python/) client-credentials flow with the DI-caller service principal from F2.2, whose secret is read at runtime from Key Vault via `notebookutils.credentials.getSecret`
 
 Parameters expected:
 
@@ -406,45 +463,109 @@ Parameters expected:
 - `chunks_container` (string) — `chunks`
 - `chunks_prefix` (string) — typically `f"{file_id}/"`
 - `di_endpoint` (string) — e.g. `https://di-rag-demo-eus.cognitiveservices.azure.com`
+- `key_vault_name` (string) — e.g. `kv-rag-demo-eus`
+- `di_sp_tenant_id` (string) — from F2.2 step 1
+- `di_sp_client_id` (string) — from F2.2 step 1
+- `di_sp_secret_name` (string) — default `di-sp-secret`
 
 ```python
 # Parameters (overridden by pipeline)
-file_id          = ""
-raw_blob_uri     = ""
-chunks_account   = ""
-chunks_container = "chunks"
-chunks_prefix    = ""
-di_endpoint      = ""
+file_id           = ""
+raw_blob_uri      = ""
+chunks_account    = ""
+chunks_container  = "chunks"
+chunks_prefix     = ""
+di_endpoint       = ""
+key_vault_name    = ""
+di_sp_tenant_id   = ""
+di_sp_client_id   = ""
+di_sp_secret_name = "di-sp-secret"
 
 # Install required packages (cached in the session after first install)
-%pip install azure-ai-documentintelligence==1.0.0 azure-storage-blob==12.21.0 azure-identity==1.17.0 tiktoken==0.7.0 --quiet
+%pip install azure-ai-documentintelligence==1.0.0 azure-storage-blob==12.21.0 azure-core==1.30.2 msal==1.30.0 tiktoken==0.7.0 --quiet
 ```
 
 ```python
 import json
+import time
 import tiktoken
+import msal
 from azure.ai.documentintelligence import DocumentIntelligenceClient
 from azure.ai.documentintelligence.models import AnalyzeDocumentRequest
-from azure.identity import DefaultAzureCredential
+from azure.core.credentials import AccessToken, TokenCredential
 from azure.storage.blob import BlobServiceClient
 
-# Chunking knobs — adjust per corpus
-CHUNK_TOKENS    = 1000
-OVERLAP_TOKENS  = 200
-ENCODING        = tiktoken.encoding_for_model("gpt-4o")
+# ---------- 1. Custom TokenCredential bridging notebookutils → Azure SDK ------
+# Fabric notebooks don't support DefaultAzureCredential, so we provide a small
+# adapter that produces TokenCredential-shaped objects from a token-fetching
+# function. Azure SDK clients accept any object that implements get_token(scope).
 
-# 1. Call Document Intelligence with workspace-identity bearer token.
-#    DefaultAzureCredential resolves to the workspace identity in Fabric notebooks.
-#    .result() polls the async analyze operation internally until done.
-cred       = DefaultAzureCredential()
-di_client  = DocumentIntelligenceClient(endpoint=di_endpoint, credential=cred)
-poller     = di_client.begin_analyze_document(
+class _StaticTokenCredential(TokenCredential):
+    """Wraps a callable[() -> str] that returns a fresh Entra access token."""
+
+    def __init__(self, fetch_token):
+        self._fetch = fetch_token
+
+    def get_token(self, *scopes, **_kwargs):
+        token = self._fetch()
+        # AccessToken is a NamedTuple(token=str, expires_on=int). We don't know
+        # the real expiry; subtract a 5-minute safety margin from "now + 1h"
+        # which is the typical AAD token lifetime. SDKs that respect expiry will
+        # request a fresh token via _fetch when needed.
+        return AccessToken(token, int(time.time()) + 55 * 60)
+
+
+# ---------- 2. Blob credential = workspace identity via notebookutils --------
+blob_cred = _StaticTokenCredential(
+    lambda: notebookutils.credentials.getToken("storage")
+)
+
+
+# ---------- 3. DI credential = MSAL client-credentials with DI-caller SP -----
+# Read the SP client secret from Key Vault at runtime (the workspace identity
+# has Key Vault Secrets User from F2.1). Then use MSAL to acquire a token for
+# Cognitive Services on behalf of the SP.
+
+_kv_uri = f"https://{key_vault_name}.vault.azure.net/"
+_di_sp_secret = notebookutils.credentials.getSecret(_kv_uri, di_sp_secret_name)
+
+_msal_app = msal.ConfidentialClientApplication(
+    client_id=di_sp_client_id,
+    client_credential=_di_sp_secret,
+    authority=f"https://login.microsoftonline.com/{di_sp_tenant_id}",
+)
+
+def _di_token():
+    result = _msal_app.acquire_token_for_client(
+        scopes=["https://cognitiveservices.azure.com/.default"]
+    )
+    if "access_token" not in result:
+        raise RuntimeError(
+            f"MSAL failed to acquire DI token: "
+            f"{result.get('error')}: {result.get('error_description')}"
+        )
+    return result["access_token"]
+
+di_cred = _StaticTokenCredential(_di_token)
+
+
+# ---------- 4. Call Document Intelligence with the SP-derived bearer token ---
+# The SDK's begin_analyze_document().result() polls the async analyze operation
+# internally so the pipeline doesn't need an Until loop.
+
+di_client = DocumentIntelligenceClient(endpoint=di_endpoint, credential=di_cred)
+poller    = di_client.begin_analyze_document(
     model_id="prebuilt-read",
     body=AnalyzeDocumentRequest(url_source=raw_blob_uri),
 )
-di_result  = poller.result().as_dict()
+di_result = poller.result().as_dict()
 
-# 2. Page-aware chunker with token budget + overlap
+
+# ---------- 5. Page-aware chunker with token budget + overlap ---------------
+CHUNK_TOKENS   = 1000
+OVERLAP_TOKENS = 200
+ENCODING       = tiktoken.encoding_for_model("gpt-4o")
+
 def chunk_pages(pages, max_tok=CHUNK_TOKENS, overlap=OVERLAP_TOKENS):
     chunks = []
     buf, buf_pages, buf_tok = [], [], 0
@@ -464,7 +585,6 @@ def chunk_pages(pages, max_tok=CHUNK_TOKENS, overlap=OVERLAP_TOKENS):
         chunks.append({"text": "\n\n".join(buf), "pages": buf_pages})
     return chunks
 
-# DI 4.0 result schema: pages live under "pages" with "lines[].content"
 raw_pages = di_result.get("pages", [])
 flat_pages = [
     {
@@ -475,10 +595,11 @@ flat_pages = [
 ]
 chunks = chunk_pages(flat_pages)
 
-# 3. Upload one JSON per chunk to Blob chunks/<chunks_prefix>
+
+# ---------- 6. Upload one JSON per chunk to Blob via workspace identity ------
 svc = BlobServiceClient(
     account_url=f"https://{chunks_account}.blob.core.windows.net",
-    credential=cred,
+    credential=blob_cred,
 )
 container = svc.get_container_client(chunks_container)
 
@@ -501,9 +622,9 @@ for i, c in enumerate(chunks):
 notebookutils.notebook.exit(json.dumps({"chunk_count": len(chunks)}))
 ```
 
-> **Why this design over a pipeline Web activity?** See the ["Why no Web activity / Until / child pipeline?" callout](#what-youll-build). In short: the Fabric Web activity doesn't expose ADF's `System Assigned Managed Identity` + `Resource` configuration, so calling Entra-protected Cognitive Services endpoints with workspace identity is awkward from a pipeline activity. Calling the same endpoint from a notebook via `DefaultAzureCredential` is well-supported and the SDK transparently handles the async polling that would otherwise require an `Until` loop (which can't nest inside `ForEach`).
-
-> **Auth note for `DefaultAzureCredential` inside Fabric notebooks.** When run inside a Fabric notebook activity in a workspace with a workspace identity, `DefaultAzureCredential` resolves to the workspace identity automatically. This is why [F2.1](#f21-grant-the-workspace-identity-the-required-roles) (granting **Storage Blob Data Contributor** on Storage and **Cognitive Services User** on Document Intelligence) is the load-bearing step for this notebook to work without keys.
+> **Why MSAL for DI?** Document Intelligence requires a bearer token for the `https://cognitiveservices.azure.com/` audience, which is not one of the four [audience keys supported by `notebookutils.credentials.getToken`](https://learn.microsoft.com/fabric/data-engineering/notebookutils/notebookutils-credentials#get-token). The Fabric workspace identity also can't be used directly with MSAL because its client secret isn't exposed. We work around both constraints by registering a dedicated DI-caller service principal (F2.2), storing its secret in Key Vault, and having the notebook read that secret at runtime via the workspace identity's Key Vault Secrets User role.
+>
+> **Note on `urlSource` access.** The `urlSource` URL is fetched server-side by Document Intelligence. Because shared-key access on the storage account is disabled and SAS tokens are not used by this pattern, **DI must authenticate to Blob with its own managed identity**. The Bicep `rbac.bicep` module grants DI's system-assigned MI **Storage Blob Data Reader** on the storage account automatically; if you provisioned manually, see [03-deployment-manual.md § 1.7 step 3](./03-deployment-manual.md#17-rbac-wiring) and [Managed identities for Document Intelligence](https://learn.microsoft.com/azure/ai-services/document-intelligence/authentication/managed-identities?view=doc-intel-4.0.0).
 
 ### F7.3 `nb_update_control_table`
 
@@ -537,29 +658,62 @@ last_error         = None
 ```
 
 ```python
-from pyspark.sql.functions import current_timestamp
+from datetime import datetime, timezone
 
-# Build a single-row DataFrame
-row = spark.createDataFrame(
-    [(
-        file_id, source_path, source_modified_ts, raw_blob_uri, chunks_prefix,
-        "generic", byte_size, page_count, ingest_run_id, None,
-        status, None, status, chunk_count, None, status, last_error, False,
-    )],
-    [
-        "file_id","source_path","source_modified_ts","raw_blob_uri","chunk_blob_prefix",
-        "doc_type","byte_size","page_count","ingest_run_id","ingest_ts",
-        "ocr_status","ocr_completed_ts","chunk_status","chunk_count",
-        "chunk_completed_ts","index_status","last_error","tombstoned",
-    ],
-).withColumn("ingest_ts", current_timestamp())
+# ---------- coercion helpers --------------------------------------------------
+# Fabric pipeline base parameters arrive at the notebook as STRINGS by default,
+# so byte_size / page_count / chunk_count / timestamps need to be coerced before
+# we hand them to Spark. Empty strings come through when the pipeline expression
+# resolves to null.
 
-if status == "succeeded":
-    row = (
-        row.withColumn("ocr_completed_ts", current_timestamp())
-           .withColumn("chunk_completed_ts", current_timestamp())
-    )
+def _coerce_int(v):
+    if v is None or v == "" or v == "None":
+        return None
+    return int(v)
 
+def _coerce_ts(v):
+    if v is None or v == "" or v == "None":
+        return None
+    if isinstance(v, datetime):
+        return v
+    s = str(v).replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(s)
+    except ValueError:
+        return None
+
+# ---------- build the row using the TABLE's existing schema -------------------
+# spark.createDataFrame can't infer types from a row that's mostly None, which is
+# exactly the shape of a mark_pending row. Pull the schema from the existing
+# Delta table and pass it explicitly to side-step type inference entirely. This
+# fixes PySparkValueError: CANNOT_DETERMINE_TYPE.
+
+schema = spark.table("control_table_files").schema
+
+now          = datetime.now(timezone.utc)
+completed_ts = now if status == "succeeded" else None
+
+row_tuple = (
+    file_id,
+    source_path,
+    _coerce_ts(source_modified_ts),
+    raw_blob_uri,
+    chunks_prefix,
+    "generic",                  # doc_type
+    _coerce_int(byte_size),
+    _coerce_int(page_count),
+    ingest_run_id,
+    now,                        # ingest_ts
+    status,                     # ocr_status
+    completed_ts,               # ocr_completed_ts
+    status,                     # chunk_status
+    _coerce_int(chunk_count),
+    completed_ts,               # chunk_completed_ts
+    status,                     # index_status
+    last_error,
+    False,                      # tombstoned
+)
+row = spark.createDataFrame([row_tuple], schema)
 row.createOrReplaceTempView("_row")
 
 spark.sql("""
@@ -586,15 +740,23 @@ notebookutils.notebook.exit(json.dumps({"file_id": file_id, "status": status}))
 ## Phase F8 — Build the Data Pipeline
 
 1. Inside the workspace: **+ New item → Data pipeline** → name `pl_ingest_docs` → **Create**
-2. Open the pipeline. In the empty canvas, select the **Variables** tab (bottom pane) and add a single string variable:
+2. Open the pipeline.
 
-| Variable | Type | Default value |
+### F8.0 Declare pipeline parameters
+
+Select the **Parameters** tab (bottom pane) and add the following — all string type. These eliminate hard-coded values from individual activity expressions and make the pipeline portable across environments by editing a single place.
+
+| Name | Default value (example) | Used by |
 |---|---|---|
-| `raw_blob_uri` | string | (leave blank) |
-
-> **Why a pipeline variable inside a parallel ForEach?** Setting a pipeline variable from inside a parallel ForEach can race — the variable is global to the pipeline run, not scoped per iteration. **This pattern avoids the race** by computing the per-iteration blob URI inline (`@concat(...)`) directly into each downstream activity's parameters rather than via `Set variable`. The `raw_blob_uri` variable above is declared only so that older versions of the pipeline JSON validate; it isn't written to at runtime in the default design below. If you prefer the readability of a Set variable activity, set the ForEach's `Sequential = On` to serialize iterations (at a cost of throughput).
-
-Now add the activities:
+| `storage_account` | `stragdemoeus` | Copy sink (F8.5), `mark_pending` (F8.6), `ocr_chunk_upload` (F8.7) |
+| `raw_container` | `raw` | Copy sink (F8.5), `mark_pending` (F8.6), `ocr_chunk_upload` (F8.7) |
+| `chunks_container` | `chunks` | `ocr_chunk_upload` (F8.7) |
+| `di_endpoint` | `https://di-rag-demo-eus.cognitiveservices.azure.com` | `ocr_chunk_upload` (F8.7) |
+| `key_vault_name` | `kv-rag-demo-eus` | `ocr_chunk_upload` (F8.7) |
+| `di_sp_tenant_id` | `<tenant-guid-from-F2.2>` | `ocr_chunk_upload` (F8.7) |
+| `di_sp_client_id` | `<client-id-from-F2.2>` | `ocr_chunk_upload` (F8.7) |
+| `di_sp_secret_name` | `di-sp-secret` | `ocr_chunk_upload` (F8.7) |
+| `source_folder` | `Files/source_docs/` | `lookup_new_files` (F8.1) |
 
 ### F8.1 Activity [1] — Lookup new files (Notebook)
 
@@ -602,15 +764,30 @@ Now add the activities:
 |---|---|
 | **General → Name** | `lookup_new_files` |
 | **Settings → Notebook** | `nb_lookup_new_files` |
-| **Settings → Base parameters** | `source_path` = `Files/source_docs/` |
+| **Settings → Base parameters** | `source_path` = `@pipeline().parameters.source_folder` |
 
 Reference: [Transform data by running a notebook (Fabric)](https://learn.microsoft.com/fabric/data-factory/notebook-activity).
 
-### F8.2 Activity [1′] — Lookup (read `_tmp_new_files` for the ForEach)
+### F8.2 Activity [1.5] — Refresh SQL Endpoint
+
+> **Required** because the Lookup activity in [F8.3](#f83-activity-1-lookup-read-_tmp_new_files-for-the-foreach) reads `_tmp_new_files` via the Lakehouse SQL analytics endpoint, but `nb_lookup_new_files` wrote that table through Spark. The SQL endpoint syncs Delta metadata via a **background process** — syncs can lag seconds to minutes behind Spark writes ([SQL analytics endpoint metadata sync](https://learn.microsoft.com/fabric/data-engineering/sql-analytics-endpoint-metadata-sync)). Without this refresh, the first run will Lookup zero rows and the ForEach will iterate zero times, even though `nb_lookup_new_files` just wrote N rows. Microsoft's first documented [common scenario for this activity](https://learn.microsoft.com/fabric/data-factory/refresh-sql-endpoint-activity#common-scenarios) is exactly this case: *"Refreshing the SQL endpoint after a Notebook writes transformed data to a Lakehouse."*
+
+Drag a **Refresh SQL Endpoint** activity after `lookup_new_files`. Connect with the green (success) arrow.
+
+| Field | Value |
+|---|---|
+| **General → Name** | `refresh_sql_endpoint` |
+| **Settings → Connection** | create or reuse a Fabric workspace connection |
+| **Settings → Workspace** | `ws-rag-<env>` |
+| **Settings → SQL Endpoint** | the SQL analytics endpoint for `lh_rag_<env>` (named the same as the lakehouse) |
+
+A `NotRun` outcome here is **OK** — it means there's nothing new to sync since the last refresh, which can happen on idempotent re-runs.
+
+### F8.3 Activity [1′] — Lookup (read `_tmp_new_files` for the ForEach)
 
 The notebook persisted the new-file list to `_tmp_new_files`. A pipeline **Lookup** activity reads it back as a typed row array the ForEach can iterate.
 
-Drag a **Lookup** activity after `lookup_new_files`. Connect with the green (success) arrow.
+Drag a **Lookup** activity after `refresh_sql_endpoint`. Connect with the green (success) arrow.
 
 | Field | Value |
 |---|---|
@@ -622,7 +799,7 @@ Drag a **Lookup** activity after `lookup_new_files`. Connect with the green (suc
 
 The output is then bound as `@activity('lookup_new_files_rows').output.value` (an array).
 
-### F8.3 Activity [2] — ForEach over new files
+### F8.4 Activity [2] — ForEach over new files
 
 Drag a **ForEach** activity onto the canvas after `lookup_new_files_rows`. Connect them with the green (success) arrow.
 
@@ -634,7 +811,7 @@ Drag a **ForEach** activity onto the canvas after `lookup_new_files_rows`. Conne
 
 Inside the ForEach, add the following four activities in sequence:
 
-### F8.4 Activity [2a] — Copy data (OneLake source → Blob raw/)
+### F8.5 Activity [2a] — Copy data (OneLake source → Blob raw/)
 
 Inside the ForEach, **Add activity → Copy data**.
 
@@ -646,7 +823,7 @@ Inside the ForEach, **Add activity → Copy data**.
 | **Source → File path** | `@item().source_path` (this is a path **relative to the Files root**, e.g. `source_docs/<filename>` — the lookup notebook strips the absolute `abfss://...` prefix before writing to `_tmp_new_files`) |
 | **Source → File format** | **Binary** (preserves bytes) |
 | **Sink → Connection** | `blob-rag-<env>` (from F6.1) |
-| **Sink → Container** | `raw` |
+| **Sink → Container** | `@pipeline().parameters.raw_container` |
 | **Sink → File path** | `@concat(item().file_id, '/', last(split(item().source_path, '/')))` |
 | **Sink → File format** | **Binary** |
 
@@ -654,7 +831,7 @@ Reference: [Configure Lakehouse in a copy activity](https://learn.microsoft.com/
 
 > **If you see `PathNotFound`** with a path that contains `Files/abfss:/...`, the lookup notebook is writing absolute URIs to `_tmp_new_files` instead of relative paths. The `regexp_replace(...)` line in [F7.1](#f71-nb_lookup_new_files) is the fix — see also [06-troubleshooting.md § 3.5](./06-troubleshooting.md#35-copy-activity-fails-with-pathnotfound-and-an-abfss-uri-in-the-path).
 
-### F8.5 Activity [2b] — Update control table (pending)
+### F8.6 Activity [2b] — Update control table (pending)
 
 **Add activity → Notebook** after the Copy.
 
@@ -662,11 +839,11 @@ Reference: [Configure Lakehouse in a copy activity](https://learn.microsoft.com/
 |---|---|
 | **Name** | `mark_pending` |
 | **Notebook** | `nb_update_control_table` |
-| **Base parameters** | `file_id` = `@item().file_id`, `source_path` = `@item().source_path`, `source_modified_ts` = `@item().source_modified_ts`, `raw_blob_uri` = `@concat('https://<storage-account>.blob.core.windows.net/raw/', item().file_id, '/', last(split(item().source_path, '/')))`, `chunks_prefix` = `@concat(item().file_id, '/')`, `byte_size` = `@item().byte_size`, `ingest_run_id` = `@pipeline().RunId`, `status` = `pending` |
+| **Base parameters** | `file_id` = `@item().file_id`<br/>`source_path` = `@item().source_path`<br/>`source_modified_ts` = `@item().source_modified_ts`<br/>`raw_blob_uri` = `@concat('https://', pipeline().parameters.storage_account, '.blob.core.windows.net/', pipeline().parameters.raw_container, '/', item().file_id, '/', last(split(item().source_path, '/')))`<br/>`chunks_prefix` = `@concat(item().file_id, '/')`<br/>`byte_size` = `@item().byte_size`<br/>`ingest_run_id` = `@pipeline().RunId`<br/>`status` = `pending` |
 
-### F8.6 Activity [2c] — OCR + chunk + upload (Notebook)
+### F8.7 Activity [2c] — OCR + chunk + upload (Notebook)
 
-This activity is where Document Intelligence is called. Because DI is invoked from a notebook via the `azure-ai-documentintelligence` SDK + `DefaultAzureCredential`, there is **no Web activity and no Until polling** in the pipeline at all — the SDK's long-running-operation poller handles waiting for OCR to finish.
+This activity is where Document Intelligence is called. The notebook ([F7.2](#f72-nb_ocr_chunk_upload)) uses MSAL with the DI-caller service principal (secret read from Key Vault at runtime) to authenticate to DI, and a notebookutils-backed `TokenCredential` for Blob. The DI SDK's long-running-operation poller handles the async wait internally — no `Until` activity needed.
 
 **Add activity → Notebook** after `mark_pending`.
 
@@ -674,13 +851,11 @@ This activity is where Document Intelligence is called. Because DI is invoked fr
 |---|---|
 | **Name** | `ocr_chunk_upload` |
 | **Notebook** | `nb_ocr_chunk_upload` |
-| **Base parameters** | `file_id` = `@item().file_id`<br/>`raw_blob_uri` = `@concat('https://<storage-account>.blob.core.windows.net/raw/', item().file_id, '/', last(split(item().source_path, '/')))`<br/>`chunks_account` = `<storage-account>`<br/>`chunks_container` = `chunks`<br/>`chunks_prefix` = `@concat(item().file_id, '/')`<br/>`di_endpoint` = `<di-endpoint>` (e.g. `https://di-rag-demo-eus.cognitiveservices.azure.com`) |
+| **Base parameters** | `file_id` = `@item().file_id`<br/>`raw_blob_uri` = `@concat('https://', pipeline().parameters.storage_account, '.blob.core.windows.net/', pipeline().parameters.raw_container, '/', item().file_id, '/', last(split(item().source_path, '/')))`<br/>`chunks_account` = `@pipeline().parameters.storage_account`<br/>`chunks_container` = `@pipeline().parameters.chunks_container`<br/>`chunks_prefix` = `@concat(item().file_id, '/')`<br/>`di_endpoint` = `@pipeline().parameters.di_endpoint`<br/>`key_vault_name` = `@pipeline().parameters.key_vault_name`<br/>`di_sp_tenant_id` = `@pipeline().parameters.di_sp_tenant_id`<br/>`di_sp_client_id` = `@pipeline().parameters.di_sp_client_id`<br/>`di_sp_secret_name` = `@pipeline().parameters.di_sp_secret_name` |
 
 The notebook returns `{"chunk_count": N}` as its exit value. The next activity parses it with `@json(activity('ocr_chunk_upload').output.result.exitValue).chunk_count`.
 
-> **Why the raw_blob_uri expression is repeated.** Setting a pipeline variable inside a parallel ForEach is unsafe (variables are pipeline-global, not iteration-scoped). Inlining the expression makes each iteration self-contained.
-
-### F8.7 Activity [2d] — Update control table (succeeded)
+### F8.8 Activity [2d] — Update control table (succeeded)
 
 **Add activity → Notebook** after `ocr_chunk_upload`.
 
@@ -690,7 +865,7 @@ The notebook returns `{"chunk_count": N}` as its exit value. The next activity p
 | **Notebook** | `nb_update_control_table` |
 | **Base parameters** | `file_id` = `@item().file_id`, `ingest_run_id` = `@pipeline().RunId`, `chunk_count` = `@json(activity('ocr_chunk_upload').output.result.exitValue).chunk_count`, `status` = `succeeded` |
 
-### F8.8 On-failure handler
+### F8.9 On-failure handler
 
 On the **red (failure) arrow** of any of [2a] / [2c], add a final **Notebook** activity `mark_failed`:
 
@@ -711,6 +886,7 @@ On the **red (failure) arrow** of any of [2a] / [2c], add a final **Notebook** a
 1. Open the pipeline `pl_ingest_docs` → **Save** → **Run**
 2. Watch the **Output** tab as each activity completes:
    - `lookup_new_files` → succeeded, returns `{"new_count": N}` in `exitValue`
+   - `refresh_sql_endpoint` → `Success` or `NotRun` (both are OK)
    - `lookup_new_files_rows` → succeeded, row count = N
    - `foreach_new_file` → enters ForEach scope
    - For each iteration: `copy_raw_to_blob` → `mark_pending` → `ocr_chunk_upload` → `mark_succeeded` all succeed
@@ -782,11 +958,15 @@ Record the pipeline GUID in `demo-ids.local.json` under `fabric.pipelineId`.
 - [ ] Capacity assigned to workspace (F-SKU, not trial in prod)
 - [ ] Workspace identity created and Active
 - [ ] Workspace identity granted **Storage Blob Data Contributor** on the storage account
-- [ ] Workspace identity granted **Cognitive Services User** on the Document Intelligence resource
+- [ ] Workspace identity granted **Key Vault Secrets User** on the Key Vault (for reading the DI-caller SP secret)
+- [ ] DI-caller service principal (`sp-rag-di-caller`) created
+- [ ] DI-caller SP granted **Cognitive Services User** on the Document Intelligence resource
+- [ ] DI-caller SP secret stored in Key Vault as `di-sp-secret`
 - [ ] Lakehouse `lh_rag_<env>` created with `control_table_files` table
 - [ ] OneLake shortcut at `Files/source_docs/` showing source documents
 - [ ] Blob connection `blob-rag-<env>` created and tested
 - [ ] Three notebooks (`nb_lookup_new_files`, `nb_ocr_chunk_upload`, `nb_update_control_table`) saved and runnable manually with sample parameter values
+- [ ] Pipeline `pl_ingest_docs` has the 9 pipeline parameters from [F8.0](#f80-declare-pipeline-parameters) declared with environment-correct defaults
 - [ ] Pipeline `pl_ingest_docs` runs end-to-end on sample documents
 - [ ] Control table populated; `raw/` and `chunks/` containers populated
 - [ ] AI Search indexer picks up new chunks within 5 min
@@ -802,9 +982,11 @@ Common Fabric-layer issues are catalogued in [06-troubleshooting.md](./06-troubl
 
 - **OneLake shortcut shows no files / can't be read** → [§ 2](./06-troubleshooting.md#2--onelake--source-attachment)
 - **`copy_raw_to_blob` fails with `PathNotFound` and an `abfss:/...` URI in the path** → [§ 3.5](./06-troubleshooting.md#35-copy-activity-fails-with-pathnotfound-and-an-abfss-uri-in-the-path) — `nb_lookup_new_files` is writing absolute abfss URIs instead of paths relative to `Files/`
-- **`nb_ocr_chunk_upload` 401/403 from Document Intelligence** → workspace identity missing **Cognitive Services User** on the DI resource ([F2.1](#f21-grant-the-workspace-identity-the-required-roles)) or 15-min RBAC propagation lag ([§ 1.1](./06-troubleshooting.md#11-rbac-propagation-lag))
-- **`nb_ocr_chunk_upload` import errors** → the `%pip install` cell didn't run (or ran against the wrong session). See [§ 3.2](./06-troubleshooting.md#32-chunking-notebook-fails)
+- **Lookup activity returns zero rows on first run** even though `nb_lookup_new_files` wrote N rows → [§ 3.6](./06-troubleshooting.md#36-lookup-activity-returns-zero-rows-after-a-spark-write) — SQL analytics endpoint sync lag; add a Refresh SQL Endpoint activity ([F8.2](#f82-activity-15--refresh-sql-endpoint))
+- **`nb_ocr_chunk_upload` fails with `ImportError: cannot import name 'DefaultAzureCredential'` or auth errors against DI** → [§ 3.7](./06-troubleshooting.md#37-nb_ocr_chunk_upload-cant-authenticate-to-document-intelligence) — Fabric notebooks don't support `DefaultAzureCredential`; use the MSAL+SP pattern in [F7.2](#f72-nb_ocr_chunk_upload)
+- **`nb_ocr_chunk_upload` import errors on `%pip install`** → [§ 3.2](./06-troubleshooting.md#32-chunking-notebook-fails) — the install cell didn't run or session is stale
 - **Control table never updates** → [§ 3.3](./06-troubleshooting.md#33-control-table-stuck)
+- **`mark_pending` / `mark_succeeded` fails with `PySparkValueError: CANNOT_DETERMINE_TYPE`** → [§ 3.3.1](./06-troubleshooting.md#331-nb_update_control_table-fails-with-pysparkvalueerror-cannot_determine_type) — `nb_update_control_table` is letting PySpark infer the schema from a mostly-None row; pull the schema from the table instead
 - **Same files re-processed every run** → [§ 3.4](./06-troubleshooting.md#34-pipeline-runs-duplicate-files)
 - **Fabric capacity cost spike** → [§ 6.1](./06-troubleshooting.md#61-fabric-capacity-cost-spike) (consider enabling High concurrency mode for the pipeline; see [F10](#phase-f10--schedule-the-pipeline))
 - **Workspace identity Blob writes 403** → [§ 1.1 RBAC propagation lag](./06-troubleshooting.md#11-rbac-propagation-lag)
@@ -839,6 +1021,8 @@ Authoritative Microsoft Learn pages this guide tracks (verified against current 
 - [Configure Lakehouse in a copy activity](https://learn.microsoft.com/fabric/data-factory/connector-lakehouse-copy-activity)
 - [Transform data by running a notebook (Notebook activity)](https://learn.microsoft.com/fabric/data-factory/notebook-activity)
 - [Notebook activity high-concurrency mode for pipelines](https://learn.microsoft.com/fabric/data-factory/notebook-activity#configure-notebook-settings)
+- [Refresh SQL Endpoint activity](https://learn.microsoft.com/fabric/data-factory/refresh-sql-endpoint-activity)
+- [SQL analytics endpoint metadata sync](https://learn.microsoft.com/fabric/data-engineering/sql-analytics-endpoint-metadata-sync)
 - [Web activity (Fabric) — connection-based, no inline MI/Resource fields](https://learn.microsoft.com/fabric/data-factory/web-activity)
 - [Web v2 connector — auth supported in Dataflow Gen2 only, not pipelines](https://learn.microsoft.com/fabric/data-factory/connector-web-overview)
 - [ADF/Fabric REST connector parity (no system-assigned MI in Fabric REST)](https://learn.microsoft.com/fabric/data-factory/connector-parity)
@@ -849,7 +1033,9 @@ Authoritative Microsoft Learn pages this guide tracks (verified against current 
 **Notebook utilities**
 
 - [NotebookUtils (former MSSparkUtils) for Fabric](https://learn.microsoft.com/fabric/data-engineering/notebook-utilities)
+- [NotebookUtils credentials utilities](https://learn.microsoft.com/fabric/data-engineering/notebookutils/notebookutils-credentials) (note: only 4 audience keys for `getToken`; `DefaultAzureCredential` not supported)
 - [NotebookUtils notebook run and orchestration](https://learn.microsoft.com/fabric/data-engineering/notebookutils/notebookutils-notebook-run)
+- [MSAL for Python](https://learn.microsoft.com/entra/msal/python/) (used by `nb_ocr_chunk_upload` to acquire the DI bearer token via the DI-caller service principal)
 
 **Document Intelligence**
 

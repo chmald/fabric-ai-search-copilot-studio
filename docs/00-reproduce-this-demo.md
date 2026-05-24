@@ -111,7 +111,7 @@ What 03b covers end-to-end (Phases F0–F10):
 | F5 | Control `control_table_files` Delta table |
 | F6 | Fabric connections to Key Vault and Blob Storage |
 | F7 | Three pipeline notebooks (lookup, chunk+upload, control-table upsert) |
-| F8 | Data Pipeline `pl_ingest_docs` — lookup notebook → Lookup → ForEach (Copy + mark_pending + `nb_ocr_chunk_upload` + mark_succeeded). Document Intelligence is called from the OCR notebook via `DefaultAzureCredential` + workspace identity, so no Web activity, no Until polling, and no child pipeline are needed. |
+| F8 | Data Pipeline `pl_ingest_docs` — lookup notebook → Refresh SQL Endpoint → Lookup → ForEach (Copy + mark_pending + `nb_ocr_chunk_upload` + mark_succeeded). Document Intelligence is called from the OCR notebook via MSAL + a DI-caller service principal (secret in Key Vault, fetched by the workspace identity); no Web activity, no Until polling, and no child pipeline are needed. |
 | F9 | End-to-end validation on sample docs |
 | F10 | Pipeline schedule |
 

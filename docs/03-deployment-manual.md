@@ -226,7 +226,7 @@ What 03b covers:
 | F5 | Control `control_table_files` Delta table |
 | F6 | Key Vault + Blob connections in Fabric |
 | F7 | Pipeline notebooks (`nb_lookup_new_files`, `nb_ocr_chunk_upload`, `nb_update_control_table`) |
-| F8 | Data Pipeline `pl_ingest_docs` — lookup notebook → Lookup → ForEach (Copy + mark_pending + `nb_ocr_chunk_upload` + mark_succeeded). DI is called from the OCR notebook via `DefaultAzureCredential` + workspace identity. |
+| F8 | Data Pipeline `pl_ingest_docs` — lookup notebook → Refresh SQL Endpoint → Lookup → ForEach (Copy + mark_pending + `nb_ocr_chunk_upload` + mark_succeeded). DI is called from the OCR notebook via MSAL + a DI-caller service principal (secret in Key Vault). |
 | F9 | End-to-end validation on sample docs |
 | F10 | Pipeline schedule |
 

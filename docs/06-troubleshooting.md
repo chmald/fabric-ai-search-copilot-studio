@@ -144,7 +144,7 @@ If the failure is `AuthorizationFailed`, the deploying identity lacks **User Acc
 
 | Status | Common cause | Fix |
 |---|---|---|
-| 401 (with `WWW-Authenticate: Bearer`) | This pattern disables local auth on DI; a client tried to call DI without a bearer token (or with an `Ocp-Apim-Subscription-Key` header). | The DI call should run from `nb_ocr_chunk_upload`, which uses the `azure-ai-documentintelligence` Python SDK + `DefaultAzureCredential` (resolves to the workspace identity in Fabric notebooks). See [03b-fabric-setup.md § F7.2](./03b-fabric-setup.md#f72-nb_ocr_chunk_upload). The Fabric Web activity is **not** used for DI in this pattern because it has no `System Assigned Managed Identity` + `Resource` configuration like ADF does. |
+| 401 (with `WWW-Authenticate: Bearer`) | This pattern disables local auth on DI; a client tried to call DI without a bearer token (or with an `Ocp-Apim-Subscription-Key` header). | The DI call runs from `nb_ocr_chunk_upload`, which uses MSAL + the DI-caller service principal (secret fetched from Key Vault by the workspace identity) to get a bearer token for `https://cognitiveservices.azure.com/.default`. See [03b-fabric-setup.md § F7.2](./03b-fabric-setup.md#f72-nb_ocr_chunk_upload) and [§ 3.7](#37-nb_ocr_chunk_upload-cant-authenticate-to-document-intelligence). Fabric notebooks don't support `DefaultAzureCredential` and `notebookutils.credentials.getToken` has no `cognitiveservices` audience key — hence the MSAL+SP detour. |
 | 403 (from DI) | Workspace identity lacks **Cognitive Services User** on the DI resource | Grant the role per [03b-fabric-setup.md § F2.1](./03b-fabric-setup.md#f21-grant-the-workspace-identity-the-required-roles); wait up to 15 min for propagation |
 | 403 (from DI fetching `urlSource`) | DI's own managed identity lacks **Storage Blob Data Reader** on the storage account; required because shared-key access on Storage is disabled | Grant the role per [03-deployment-manual.md § 1.7 step 3](./03-deployment-manual.md#17-rbac-wiring) |
 | 404 | Wrong URL or model name | Confirm endpoint includes `/documentintelligence/...` and uses `prebuilt-read` |
@@ -175,6 +175,48 @@ For production: pin versions and consider a custom Fabric environment with these
 - Lakehouse SQL endpoint cached results — query via the Lakehouse explorer to see actual state
 
 **Fix.** Run the update notebook standalone with hardcoded values to confirm it works. Add explicit `print` of resulting row to the notebook output for observability.
+
+### 3.3.1 `nb_update_control_table` fails with `PySparkValueError: CANNOT_DETERMINE_TYPE`
+
+**Symptom.** The `mark_pending` (or `mark_succeeded` / `mark_failed`) notebook activity fails with:
+
+```
+Notebook execution failed at Notebook service with http status code - '200',
+please check the Run logs on Notebook, additional details -
+'Error name - PySparkValueError, Error value -
+[CANNOT_DETERMINE_TYPE] Some of types cannot be determined after inferring.'
+```
+
+**Cause.** `nb_update_control_table` was building its single-row DataFrame with `spark.createDataFrame([(...)], [<column-names>])` and letting PySpark infer the schema. For `mark_pending`, most numeric and timestamp columns are `None` (no `chunk_count`, `page_count`, `ocr_completed_ts`, `chunk_completed_ts`, `last_error` yet), and Spark cannot determine column types from a row of nulls.
+
+Compounded by: Fabric pipeline base parameters arrive at the notebook as **strings** by default, so `byte_size` and `source_modified_ts` are string-typed when they hit `createDataFrame`, conflicting with the Delta table's `LongType` / `TimestampType`.
+
+**Fix.** Pull the schema from the existing `control_table_files` Delta table and pass it explicitly to `createDataFrame`, and coerce string parameters into proper int / datetime values first. The current [F7.3 `nb_update_control_table`](./03b-fabric-setup.md#f73-nb_update_control_table) reflects this fix — copy that cell wholesale into the notebook. Key fragment:
+
+```python
+from datetime import datetime, timezone
+
+def _coerce_int(v):
+    if v is None or v == "" or v == "None":
+        return None
+    return int(v)
+
+def _coerce_ts(v):
+    if v is None or v == "" or v == "None":
+        return None
+    if isinstance(v, datetime):
+        return v
+    try:
+        return datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+# Pull the schema from the table so Spark doesn't try to infer it from a mostly-None row
+schema = spark.table("control_table_files").schema
+row = spark.createDataFrame([row_tuple], schema)
+```
+
+After re-saving the notebook, re-run the failed pipeline.
 
 ### 3.4 Pipeline runs duplicate files
 
@@ -218,6 +260,40 @@ This collapses values like `abfss://.../<lakehouseId>/Files/source_docs/x.pdf` t
 SELECT source_path FROM _tmp_new_files LIMIT 5;
 -- Should show e.g. 'source_docs/NDA-001.pdf', NOT 'abfss://...@onelake.dfs.fabric.microsoft.com/.../Files/source_docs/NDA-001.pdf'
 ```
+
+### 3.6 Lookup activity returns zero rows after a Spark write
+
+**Symptom.** First pipeline run: `nb_lookup_new_files` reports `new_count = 5` in its exit value, but the next `lookup_new_files_rows` Lookup activity returns `value: []` (zero rows). The ForEach iterates zero times. On the **second** pipeline run a few minutes later, the same Lookup suddenly returns the 5 rows from the first run.
+
+**Cause.** `nb_lookup_new_files` writes `_tmp_new_files` via Spark to the Lakehouse Delta store. The Lookup activity reads from the same lakehouse but via its **SQL analytics endpoint**, which syncs Delta metadata via a [background process](https://learn.microsoft.com/fabric/data-engineering/sql-analytics-endpoint-metadata-sync). The sync can lag seconds to minutes behind the Spark write, so an immediate downstream Lookup misses the freshly written rows.
+
+**Fix.** Insert a [Refresh SQL Endpoint activity](https://learn.microsoft.com/fabric/data-factory/refresh-sql-endpoint-activity) between the lookup notebook and the Lookup activity. See [03b-fabric-setup.md § F8.2](./03b-fabric-setup.md#f82-activity-15--refresh-sql-endpoint).
+
+The activity returns `Success` after a sync, or `NotRun` if there's nothing to sync since the last refresh (both are OK). A `Failure` outcome under lock contention is a [known issue](https://learn.microsoft.com/fabric/data-factory/refresh-sql-endpoint-activity#why-does-my-sql-endpoint-refresh-fail-when-underlying-data-is-locked) — but in our case the lookup notebook has already finished and released its writer locks by the time this activity runs, so contention is rare.
+
+### 3.7 `nb_ocr_chunk_upload` can't authenticate to Document Intelligence
+
+**Symptom.** One of:
+
+- `ImportError: cannot import name 'DefaultAzureCredential' from 'azure.identity'`, or the constructor hangs / fails at runtime
+- Authentication errors against Document Intelligence (`ClientAuthenticationError`, `401 Unauthorized`, "managed identity not found")
+- `notebookutils.credentials.getToken('cognitiveservices')` (or `'https://cognitiveservices.azure.com/'`) raises "unsupported audience"
+
+**Cause.** Per the Microsoft Learn [NotebookUtils credentials docs](https://learn.microsoft.com/fabric/data-engineering/notebookutils/notebookutils-credentials#get-token):
+
+> "Fabric notebooks don't support `DefaultAzureCredential` directly."
+
+And `notebookutils.credentials.getToken` exposes only **four** audience keys: `storage`, `pbi`, `keyvault`, `kusto`. There is no key for Cognitive Services (the audience needed to call Document Intelligence). The Fabric workspace identity also doesn't expose its client secret, so MSAL with the workspace identity isn't possible either.
+
+**Fix.** Use the MSAL + DI-caller service principal pattern documented in [03b-fabric-setup.md § F7.2](./03b-fabric-setup.md#f72-nb_ocr_chunk_upload) and [F2.2](./03b-fabric-setup.md#f22-create-a-di-caller-service-principal-for-mssal-from-the-notebook):
+
+1. Create a dedicated service principal (`sp-rag-di-caller`) and grant it **Cognitive Services User** on the DI resource.
+2. Store the SP's client secret in Key Vault under `di-sp-secret`.
+3. Grant the Fabric workspace identity **Key Vault Secrets User** on the Key Vault.
+4. In the notebook, read the SP secret via `notebookutils.credentials.getSecret(kv_uri, 'di-sp-secret')`, then use MSAL `ConfidentialClientApplication.acquire_token_for_client()` with scope `https://cognitiveservices.azure.com/.default` to get a DI bearer token.
+5. Wrap that token in a small `TokenCredential` adapter and pass to `DocumentIntelligenceClient(endpoint=..., credential=adapter)`.
+
+For Blob access from the same notebook, wrap `notebookutils.credentials.getToken('storage')` in the same `TokenCredential` adapter — workspace identity works there because `storage` IS one of the four supported audience keys.
 
 ---
 
