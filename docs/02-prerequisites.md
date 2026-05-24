@@ -349,8 +349,7 @@ Storage:          st<workload><env><region>              e.g.  stragdemoeus  (lo
 Key Vault:        kv-<workload>-<env>-<region>           e.g.  kv-rag-demo-eus
 Fabric workspace: ws-<workload>-<env>                    e.g.  ws-rag-demo
 Lakehouse:        lh_<workload>_<env>                    e.g.  lh_rag_demo
-Pipeline:         pl_ingest_<workload>                   e.g.  pl_ingest_docs   (parent)
-Child pipeline:   pl_process_<workload-file-noun>        e.g.  pl_process_file  (called per file)
+Pipeline:         pl_ingest_<workload>                   e.g.  pl_ingest_docs
 Index:            idx-<workload>-documents               e.g.  idx-rag-documents
 Copilot agent:    agent-<workload>                       e.g.  agent-rag-kb
 ```

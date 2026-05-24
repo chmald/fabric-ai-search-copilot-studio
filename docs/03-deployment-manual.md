@@ -225,8 +225,8 @@ What 03b covers:
 | F4 | OneLake shortcut to source documents (SharePoint / ADLS / S3 / etc.) |
 | F5 | Control `control_table_files` Delta table |
 | F6 | Key Vault + Blob connections in Fabric |
-| F7 | Pipeline notebooks (`nb_lookup_new_files`, `nb_chunk_and_upload`, `nb_update_control_table`) |
-| F8 | Data Pipelines: parent `pl_ingest_docs` (lookup + ForEach) and child `pl_process_file` (per-file Copy + DI + chunk + control updates). Two pipelines are required because Fabric does not allow `Until` inside `ForEach`. |
+| F7 | Pipeline notebooks (`nb_lookup_new_files`, `nb_ocr_chunk_upload`, `nb_update_control_table`) |
+| F8 | Data Pipeline `pl_ingest_docs` — lookup notebook → Lookup → ForEach (Copy + mark_pending + `nb_ocr_chunk_upload` + mark_succeeded). DI is called from the OCR notebook via `DefaultAzureCredential` + workspace identity. |
 | F9 | End-to-end validation on sample docs |
 | F10 | Pipeline schedule |
 
