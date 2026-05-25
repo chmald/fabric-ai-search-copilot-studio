@@ -1,6 +1,6 @@
 # 00 — Reproduce this demo
 
-> **Audience.** Someone who wants to clone this repo and stand up the full RAG knowledge-base demo against a fresh Azure subscription + Fabric tenant + Copilot Studio environment. Each Part below is a discrete checkpoint — finish A before starting B, etc. The deep-dive runbooks ([03-deployment-manual.md](03-deployment-manual.md), [03b-fabric-setup.md](03b-fabric-setup.md), [04-deployment-automated.md](04-deployment-automated.md), [05-testing.md](05-testing.md), [06-troubleshooting.md](06-troubleshooting.md)) are linked from the specific steps that consume them rather than duplicated here.
+> **Audience.** Someone who wants to clone this repo and stand up the full RAG knowledge-base demo against a fresh Azure subscription + Fabric tenant + Copilot Studio environment. Each Part below is a discrete checkpoint — finish A before starting B, etc. The deep-dive runbooks ([03-deployment-manual.md](03-deployment-manual.md), [03b-fabric-setup.md](03b-fabric-setup.md), [03c-copilot-studio-setup.md](03c-copilot-studio-setup.md), [04-deployment-automated.md](04-deployment-automated.md), [05-testing.md](05-testing.md), [06-troubleshooting.md](06-troubleshooting.md)) are linked from the specific steps that consume them rather than duplicated here.
 
 > **Time budget.** First-time stand-up: roughly **4–6 hours** end-to-end for the manual path, **2–3 hours** for the Bicep-automated path (which still requires manual Fabric + Copilot Studio steps). Time is dominated by waits on quota / model deployment propagation and Copilot Studio publishing approvals. Subsequent reproductions in the same tenant: **under 1 hour** for the automated path.
 
@@ -75,7 +75,7 @@ Two paths produce the same end-state:
 | **A1. Manual / portal + CLI** | Learning the architecture; one-off demo labs; first time you touch this pattern | [03-deployment-manual.md](./03-deployment-manual.md) |
 | **A2. Automated / Bicep** | Repeated deployments; CI/CD; multiple environments (dev/prod); production stand-up | [04-deployment-automated.md](./04-deployment-automated.md) |
 
-Both paths skip Fabric workspace creation and Copilot Studio agent configuration in their respective deep-dives — Fabric is **always manual** (no Bicep / IaC surface today) and lives in its own document ([03b-fabric-setup.md](./03b-fabric-setup.md)); Copilot Studio is covered below in Part D. Both are identical regardless of which Azure path you chose in A1 / A2.
+Both paths skip Fabric workspace creation and Copilot Studio agent configuration in their respective deep-dives — each is **always manual** (no Bicep / IaC surface exists today) and each has its own dedicated document: Fabric in [03b-fabric-setup.md](./03b-fabric-setup.md), Copilot Studio in [03c-copilot-studio-setup.md](./03c-copilot-studio-setup.md). Both layers are identical regardless of which Azure path you chose in A1 / A2.
 
 ---
 
@@ -127,31 +127,25 @@ What 03b covers end-to-end (Phases F0–F10):
 
 ## Part D — Build the Copilot Studio agent (manual — both paths)
 
-Copilot Studio agents are not expressible in Bicep (Power Platform, not Azure). Follow [03-deployment-manual.md § Phase 5](./03-deployment-manual.md):
+Copilot Studio agents are not expressible in Bicep (Power Platform, not Azure). The full step-by-step is in its own document: **[03c-copilot-studio-setup.md](./03c-copilot-studio-setup.md)**.
 
-### D1. Create the agent + bind the knowledge source
+What 03c covers end-to-end (Phases C0–C6):
 
-1. Copilot Studio → **Create → Agent** → name `agent-rag-kb`
-2. **Knowledge → + Add knowledge → Azure AI Search**
-3. **Search endpoint:** `https://srch-rag-<env>-<region>.search.windows.net`
-4. **Index name:** `idx-rag-documents`
-5. **Enable semantic search:** **ON** ← critical
-6. **Title field:** `doc_id`, **URL field:** `source_uri`, **Content field:** `content`
-7. **Generative AI → Settings → Knowledge source = AI Search**, **Generative answers: Enabled**
-
-### D2. Test in the agent canvas
-
-Use the **Test** pane to ask a few questions across factual / semantic / multi-doc / out-of-corpus categories per [05-testing.md § E2](./05-testing.md).
-
-### D3. Publish to Teams + M365 Copilot
-
-1. **Publish → Channels → Microsoft Teams** (admin approval if not already cleared)
-2. **Publish → Channels → Microsoft 365 Copilot** (admin approval if not already cleared)
+| 03c Phase | What you build |
+|---|---|
+| C0 | Tenant + licensing prerequisites, channel-publishing approvals |
+| C1 | Agent creation, instructions / system prompt |
+| C2 | AI Search knowledge source binding (Entra auth, schema field mapping, semantic search) |
+| C3 | Generative answers configuration (knowledge-grounded, general-knowledge off) |
+| C4 | Test pane validation across factual / paraphrased / multi-doc / out-of-corpus questions |
+| C5 | Channel publishing: Microsoft Teams + Microsoft 365 Copilot |
+| C6 | End-user validation from Teams + M365 Copilot |
 
 ### Part D validation
 
-- [ ] Test pane returns grounded answers with citations to Blob source files
-- [ ] Teams channel published; agent reachable in Teams chat
+- [ ] Knowledge source bound to `idx-rag-documents` and showing **Status: Ready** ([03c § C2](./03c-copilot-studio-setup.md#phase-c2--bind-the-ai-search-knowledge-source))
+- [ ] Test pane returns grounded answers with citations to Blob source files ([03c § C4](./03c-copilot-studio-setup.md#phase-c4--test-in-the-agent-canvas))
+- [ ] Teams channel published; agent reachable in Teams chat as a normal user
 - [ ] M365 Copilot channel published; agent appears in M365 Copilot agent gallery
 - [ ] End-to-end: question in Teams → answer with clickable citation → opens raw file in Blob
 

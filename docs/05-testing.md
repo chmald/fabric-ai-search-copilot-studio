@@ -1,6 +1,6 @@
 # 05 — Testing
 
-End-to-end test plan for the RAG knowledge-base pattern. Run these tests after Phase 5 validation in [03-deployment-manual.md](./03-deployment-manual.md) **or** [04-deployment-automated.md](./04-deployment-automated.md) passes — the two deployment paths converge to the same end-state.
+End-to-end test plan for the RAG knowledge-base pattern. Run these tests after [03-deployment-manual.md](./03-deployment-manual.md) (or [04-deployment-automated.md](./04-deployment-automated.md)) Phase 4 validation passes **and** the Copilot Studio agent in [03c-copilot-studio-setup.md](./03c-copilot-studio-setup.md) is built — the manual and automated Azure paths converge to the same end-state, and Fabric ([03b](./03b-fabric-setup.md)) + Copilot Studio ([03c](./03c-copilot-studio-setup.md)) layer on top identically for both.
 
 > **Purpose.** Catch regressions early, prove retrieval quality before customer demo, and provide a repeatable evaluation harness that travels with the pattern to new deployments.
 

@@ -50,9 +50,10 @@ See [docs/01-architecture.md](./docs/01-architecture.md) for the full design nar
 | [docs/00-reproduce-this-demo.md](./docs/00-reproduce-this-demo.md) | **Start here.** Single-page orchestrator with Parts A–F + time budget + end-state diagram |
 | [docs/01-architecture.md](./docs/01-architecture.md) | Full reference architecture: diagram, components, data flow, trust boundaries, decisions |
 | [docs/02-prerequisites.md](./docs/02-prerequisites.md) | Subscriptions, licensing, RBAC, model availability + regional matrix, quotas, naming conventions |
-| [docs/03-deployment-manual.md](./docs/03-deployment-manual.md) | Manual / portal + CLI walkthrough — **Azure platform layer only** (Phase 1, 4, 5); best for first-time learning |
+| [docs/03-deployment-manual.md](./docs/03-deployment-manual.md) | Manual / portal + CLI walkthrough — **Azure platform layer only** (Phase 1 foundation, Phase 4 AI Search index); best for first-time learning |
 | [docs/03b-fabric-setup.md](./docs/03b-fabric-setup.md) | **Fabric setup (always manual)** — workspace, identity, Lakehouse, OneLake shortcut, control table, connections, ingest pipeline. Required after either Azure deployment path. |
-| [docs/04-deployment-automated.md](./docs/04-deployment-automated.md) | Automated path — Bicep + post-deploy script + ADO pipeline for the **Azure layer**; Fabric still uses 03b |
+| [docs/03c-copilot-studio-setup.md](./docs/03c-copilot-studio-setup.md) | **Copilot Studio setup (always manual)** — agent creation, AI Search knowledge source, generative answers, Teams + M365 Copilot publishing. Final step after Azure + Fabric. |
+| [docs/04-deployment-automated.md](./docs/04-deployment-automated.md) | Automated path — Bicep + post-deploy script + ADO pipeline for the **Azure layer**; Fabric still uses 03b, Copilot Studio still uses 03c |
 | [docs/05-testing.md](./docs/05-testing.md) | Functional tests, retrieval quality, semantic-ranker validation, end-to-end demo script |
 | [docs/06-troubleshooting.md](./docs/06-troubleshooting.md) | Common failure modes and fixes |
 | `infra/main.bicep` + `infra/modules/*.bicep` | Bicep IaC for all Azure resources (RG, KV, Storage, Foundry + model deployments, Doc Intelligence, AI Search, RBAC) |
@@ -121,7 +122,7 @@ Two paths produce the same end-state for the **Azure platform layer**:
 | **Manual** — portal + CLI walkthrough | Learning the architecture; one-off demo labs; first time with this pattern | [docs/03-deployment-manual.md](./docs/03-deployment-manual.md) |
 | **Automated** — Bicep + post-deploy script | Repeated deployments; CI/CD; dev + prod environment parity | [docs/04-deployment-automated.md](./docs/04-deployment-automated.md) |
 
-**Both paths require [docs/03b-fabric-setup.md](./docs/03b-fabric-setup.md) for the Fabric layer**, which is always manual — Fabric workspaces, Lakehouses, OneLake shortcuts, and Data Pipelines have no Bicep/Terraform surface today. Similarly, **Copilot Studio agent configuration** is always manual (Power Platform, not Azure). [docs/00-reproduce-this-demo.md](./docs/00-reproduce-this-demo.md) is the orchestrator that walks all three (Azure platform → Fabric → Copilot Studio) through Parts A–F.
+**Both paths require [docs/03b-fabric-setup.md](./docs/03b-fabric-setup.md) for the Fabric layer and [docs/03c-copilot-studio-setup.md](./docs/03c-copilot-studio-setup.md) for the Copilot Studio agent**. Both Fabric and Copilot Studio are always manual — Fabric workspaces, Lakehouses, OneLake shortcuts, and Data Pipelines have no Bicep/Terraform surface today, and Copilot Studio is Power Platform (not Azure) with no IaC surface. [docs/00-reproduce-this-demo.md](./docs/00-reproduce-this-demo.md) is the orchestrator that walks all three layers (Azure platform → Fabric → Copilot Studio) through Parts A–F.
 
 ---
 

@@ -49,14 +49,7 @@ Fabric workspace (ws-rag-<env>)
         └── On-error handler           → nb_update_control_table (status=failed, last_error)
 ```
 
-> **Why no Web activity / Until / child pipeline?** Two real Fabric constraints shape this design:
->
-> 1. **The Fabric Web activity has no `System Assigned Managed Identity` + `Resource` fields like ADF does.** It only takes a Connection from Manage connections and gateways, and the Web v2 connector's `Workspace identity` auth is currently supported in Dataflow Gen2 only, not in pipelines (see the [Web v2 connector overview](https://learn.microsoft.com/fabric/data-factory/connector-web-overview) and [ADF/Fabric connector parity](https://learn.microsoft.com/fabric/data-factory/connector-parity)).
-> 2. **You cannot nest `Until` inside `ForEach`** (see [ForEach activity limitations](https://learn.microsoft.com/azure/data-factory/control-flow-for-each-activity#limitations-and-workarounds)) — which is the natural pattern for polling Document Intelligence's async `analyze` operation from a pipeline activity.
->
-> Both are avoided by calling Document Intelligence from a **notebook** using the official [`azure-ai-documentintelligence`](https://learn.microsoft.com/python/api/overview/azure/ai-documentintelligence-readme) SDK. Because [Fabric notebooks don't support `DefaultAzureCredential`](https://learn.microsoft.com/fabric/data-engineering/notebookutils/notebookutils-credentials#get-token) and `notebookutils.credentials.getToken` only exposes 4 audience keys (none for Cognitive Services), the notebook uses **MSAL with a dedicated service principal** (secret stored in Key Vault, fetched at runtime via the workspace identity) to authenticate to DI. For Blob, the notebook uses a small `TokenCredential` adapter that wraps `notebookutils.credentials.getToken('storage')`. The SDK's long-running-operation poller handles waiting for OCR to finish internally, so the pipeline doesn't need an `Until` loop.
-
-> **All auth is managed identity (or SP for the one Entra resource Fabric can't reach).** API keys are disabled across Azure Storage (`allowSharedKeyAccess=false`), Document Intelligence (`disableLocalAuth=true`), AI Search (`disableLocalAuth=true`), and Foundry (`disableLocalAuth=true`). The Fabric workspace identity is the principal that authenticates Blob and Key Vault calls; the `sp-rag-di-caller` service principal is the principal that authenticates the DI call (its secret is stored in Key Vault rather than passed around). There are no API keys to store or rotate.
+**Design rationale at a glance.** Document Intelligence is called from a notebook (not a pipeline Web activity) and the pipeline contains no `Until` loop — both choices work around real Fabric constraints documented in [Appendix A.1](#a1-no-web-activity-until-or-child-pipeline). The auth model uses Fabric's workspace identity for Blob + Key Vault and a dedicated service principal (`sp-rag-di-caller`) for Document Intelligence — explained in [Appendix A.2](#a2-msal--service-principal-for-document-intelligence). All Azure services have local-key auth disabled; there are no API keys to store or rotate.
 
 ---
 
@@ -199,7 +192,7 @@ For Document Intelligence (`https://cognitiveservices.azure.com/`), the supporte
    - `di_sp_client_id`   — the appId from step 1
    - `di_sp_secret_name` — `di-sp-secret` (matches step 3)
 
-> **Why "Cognitive Services User" on the SP and not on the workspace identity?** Granting it on the workspace identity has no effect because the notebook cannot acquire a cognitiveservices token as the workspace identity — see the auth-key limitation in the previous paragraph. The role must be on the principal that the notebook actually authenticates as (the DI-caller SP via MSAL).
+> **Why this role goes on the SP, not the workspace identity** → [Appendix A.2](#a2-msal--service-principal-for-document-intelligence).
 
 ---
 
@@ -472,18 +465,9 @@ exit_payload = json.dumps({
 notebookutils.notebook.exit(exit_payload)
 ```
 
-> **`notebookutils.notebook.exit(value)`** is the current Fabric API for returning data from a notebook activity. The legacy `mssparkutils` namespace still works for backwards compatibility but is being retired — always use `notebookutils` for new code. The value passed to `exit()` **must be a string**; serialize complex data with `json.dumps(...)` and parse on the consumer side. See [NotebookUtils notebook run and orchestration](https://learn.microsoft.com/fabric/data-engineering/notebookutils/notebookutils-notebook-run#exit-a-notebook).
+> **`notebookutils.notebook.exit(value)`** returns a single string from a notebook activity (use `json.dumps(...)` for structured data). The legacy `mssparkutils` namespace still works but is being retired. See [NotebookUtils notebook run and orchestration](https://learn.microsoft.com/fabric/data-engineering/notebookutils/notebookutils-notebook-run#exit-a-notebook).
 >
-> **Why a staging Delta table instead of returning the file list inline?** The notebook activity's `exitValue` is a single string, and Spark `Row` objects (with timestamps, nested types) don't round-trip cleanly through `json.dumps`. The conventional Fabric pipeline pattern is: have the notebook persist row data to a Delta table, then run a **Lookup activity** ([Phase F8.2](#f82-activity-1-lookup-read-_tmp_new_files-for-the-foreach)) against that table to feed the ForEach. This also keeps file metadata typed and queryable for debugging.
->
-> **Retry semantics.** The lookup deliberately picks up **both** brand-new files **and** any row in `control_table_files` where `ocr_status`, `chunk_status`, or `index_status` is `'failed'` (unless `tombstoned = true`). The downstream `mark_pending` activity uses `MERGE … WHEN MATCHED THEN UPDATE`, so a retry simply flips the existing row from `failed` → `pending` → `succeeded`/`failed` on the next run — no manual cleanup required. To **permanently** stop retrying a specific file (e.g. a corrupt PDF that will never OCR), tombstone it:
->
-> ```sql
-> -- Run in a notebook attached to the lakehouse, or via the SQL analytics endpoint
-> UPDATE control_table_files SET tombstoned = true WHERE file_id = '<file_id>';
-> ```
->
-> The exit payload now reports `{"new_count": N, "retry_count": M, "total": N+M}` so you can see at a glance from the pipeline monitoring view how many of each category the run picked up. See [06-troubleshooting.md § 3.11](./06-troubleshooting.md#311-failed-files-are-not-retried-on-the-next-pipeline-run) for the full retry / recovery flow.
+> **Retry behavior.** The lookup picks up brand-new files **and** any row in `control_table_files` where any per-stage status is `'failed'` (unless `tombstoned = true`). `mark_pending` uses `MERGE … WHEN MATCHED THEN UPDATE`, so retries flip the existing row through `pending` → `succeeded`/`failed` automatically. The exit payload reports `{"new_count": N, "retry_count": M, "total": N+M}`. Full operating playbook (manual retry, tombstoning a corrupt file, bulk reprocess): [06-troubleshooting.md § 3.11](./06-troubleshooting.md#311-failed-files-are-not-retried-on-the-next-pipeline-run). Background on the staging-table design: [Appendix A.3](#a3-staging-delta-table-for-the-foreach-handoff).
 
 ### F7.2 `nb_ocr_chunk_upload`
 
@@ -669,9 +653,9 @@ for i, c in enumerate(chunks):
 notebookutils.notebook.exit(json.dumps({"chunk_count": len(chunks)}))
 ```
 
-> **Why MSAL for DI?** Document Intelligence requires a bearer token for the `https://cognitiveservices.azure.com/` audience, which is not one of the four [audience keys supported by `notebookutils.credentials.getToken`](https://learn.microsoft.com/fabric/data-engineering/notebookutils/notebookutils-credentials#get-token). The Fabric workspace identity also can't be used directly with MSAL because its client secret isn't exposed. We work around both constraints by registering a dedicated DI-caller service principal (F2.2), storing its secret in Key Vault, and having the notebook read that secret at runtime via the workspace identity's Key Vault Secrets User role.
+> **`urlSource` access requires DI's own managed identity** to have **Storage Blob Data Reader** on the storage account (shared-key access is disabled). The Bicep `rbac.bicep` module grants this automatically; manual deployments wire it in [03-deployment-manual.md § 1.7 step 3](./03-deployment-manual.md#17-rbac-wiring). If you see `InvalidContent: Could not download the file` at runtime, see [06-troubleshooting.md § 3.9](./06-troubleshooting.md#39-document-intelligence-invalidcontent-could-not-download-the-file).
 >
-> **Note on `urlSource` access.** The `urlSource` URL is fetched server-side by Document Intelligence. Because shared-key access on the storage account is disabled and SAS tokens are not used by this pattern, **DI must authenticate to Blob with its own managed identity**. The Bicep `rbac.bicep` module grants DI's system-assigned MI **Storage Blob Data Reader** on the storage account automatically; if you provisioned manually, see [03-deployment-manual.md § 1.7 step 3](./03-deployment-manual.md#17-rbac-wiring) and [Managed identities for Document Intelligence](https://learn.microsoft.com/azure/ai-services/document-intelligence/authentication/managed-identities?view=doc-intel-4.0.0).
+> Rationale for the MSAL + SP auth model (rather than using the workspace identity directly): [Appendix A.2](#a2-msal--service-principal-for-document-intelligence).
 
 ### F7.3 `nb_update_control_table`
 
@@ -1019,7 +1003,7 @@ Record the pipeline GUID in `demo-ids.local.json` under `fabric.pipelineId`.
 - [ ] AI Search indexer picks up new chunks within 5 min
 - [ ] Re-running the pipeline is a no-op (idempotency proved — ForEach iterates zero times)
 
-When all boxes are checked → return to [00-reproduce-this-demo.md § Part D](./00-reproduce-this-demo.md#part-d--build-the-copilot-studio-agent-manual--both-paths) to build the Copilot Studio agent.
+When all boxes are checked → continue to [03c-copilot-studio-setup.md](./03c-copilot-studio-setup.md) to build the Copilot Studio agent on top of the populated AI Search index.
 
 ---
 
@@ -1042,6 +1026,68 @@ Common Fabric-layer issues are catalogued in [06-troubleshooting.md](./06-troubl
 - **Fabric capacity cost spike** → [§ 6.1](./06-troubleshooting.md#61-fabric-capacity-cost-spike) (consider enabling High concurrency mode for the pipeline; see [F10](#phase-f10--schedule-the-pipeline))
 - **Workspace identity Blob writes 403** → [§ 1.1 RBAC propagation lag](./06-troubleshooting.md#11-rbac-propagation-lag)
 - **"Activity of type 'Until' is not supported inside a 'ForEach' activity"** → this pattern deliberately uses no `Until` activity at all. If you've added one and hit this error, fold the polled operation into a Fabric notebook instead (as `nb_ocr_chunk_upload` does for Document Intelligence). Reference: [ForEach activity limitations](https://learn.microsoft.com/azure/data-factory/control-flow-for-each-activity#limitations-and-workarounds).
+
+---
+
+## Appendix A — Design notes
+
+Background on the non-obvious shape choices in this pipeline. None of these are required reading to build it — they explain **why** the build steps look the way they do, for reviewers and future maintainers.
+
+### A.1 No Web activity, Until, or child pipeline
+
+The natural ADF-style pattern for calling Document Intelligence from a pipeline would be: **Web activity** to submit the analyze job → **Until** loop to poll for completion → **Web activity** to fetch the result. None of that works in Fabric Data Factory today:
+
+| Constraint | Detail | Reference |
+|---|---|---|
+| Fabric Web activity has **no inline MI + Resource fields** | The Fabric Web activity only takes a connection from **Manage connections and gateways**. The Web v2 connector's `Workspace identity` auth is supported in Dataflow Gen2 only, not in pipelines, so there is no way to call an MI-protected endpoint that doesn't have a pre-configured connection. | [Web v2 connector overview](https://learn.microsoft.com/fabric/data-factory/connector-web-overview), [ADF/Fabric connector parity](https://learn.microsoft.com/fabric/data-factory/connector-parity) |
+| `Until` cannot nest inside `ForEach` | A documented Fabric/ADF limitation. Polling per-file from inside the per-file ForEach is therefore impossible at the pipeline-control-flow level. | [ForEach limitations](https://learn.microsoft.com/azure/data-factory/control-flow-for-each-activity#limitations-and-workarounds), [Nested activity embedding limitations](https://learn.microsoft.com/azure/data-factory/concepts-nested-activities#nested-activity-embedding-limitations) |
+| Invoke-pipeline workaround adds complexity | A child pipeline can host the Until loop, but it doubles the activity count, complicates parameter passing, and obscures the per-file failure attribution. |  |
+
+**The fix used here.** Call Document Intelligence from a Fabric **notebook** ([F7.2](#f72-nb_ocr_chunk_upload)) using the [`azure-ai-documentintelligence`](https://learn.microsoft.com/python/api/overview/azure/ai-documentintelligence-readme) SDK. The SDK's `begin_analyze_document().result()` polls the async operation internally, so the pipeline doesn't need an `Until` loop at all. The OCR call, chunking, and chunk upload happen in a single Spark session per file.
+
+### A.2 MSAL + service principal for Document Intelligence
+
+Fabric notebooks have two hard auth constraints that shape the DI auth pattern:
+
+1. **`DefaultAzureCredential` is not supported.** See [NotebookUtils credentials](https://learn.microsoft.com/fabric/data-engineering/notebookutils/notebookutils-credentials#get-token).
+2. **`notebookutils.credentials.getToken(audience)` accepts only four documented audiences**: `storage`, `pbi`, `keyvault`, `kusto`. Cognitive Services is not on the list, so the workspace identity cannot directly mint a DI bearer token from a notebook.
+
+The workspace identity also cannot be used with MSAL — its client secret isn't exposed to notebook code.
+
+**The fix.** Register a dedicated service principal `sp-rag-di-caller` ([F2.2](#f22-create-a-di-caller-service-principal-for-mssal-from-the-notebook)) and grant it **Cognitive Services User** on the Document Intelligence resource. The SP's client secret is stored in Key Vault, and the notebook reads it at runtime using `notebookutils.credentials.getSecret` (which works because the workspace identity has **Key Vault Secrets User** on the vault — granted in [F2.1](#f21-grant-the-workspace-identity-the-required-roles)). The notebook then uses [MSAL's `ConfidentialClientApplication`](https://learn.microsoft.com/entra/msal/python/) to acquire a token for `https://cognitiveservices.azure.com/.default`.
+
+> The role assignment must be on the **SP**, not on the workspace identity — the workspace identity is never the principal that calls DI.
+
+### A.3 Staging Delta table for the ForEach handoff
+
+The natural shape would be: notebook returns the new-file list inline → ForEach iterates the returned array. That doesn't work cleanly in Fabric:
+
+- The notebook activity's `exitValue` is a **single string**. Complex shapes have to round-trip through `json.dumps`.
+- Spark `Row` objects with timestamps and nested types don't serialize cleanly with `json.dumps` and lose typing on the consumer side.
+
+**The fix.** `nb_lookup_new_files` writes the file list to a Delta table `_tmp_new_files`, then a pipeline **Lookup** activity ([F8.3](#f83-activity-1-lookup-read-_tmp_new_files-for-the-foreach)) reads the table and feeds the typed row array to the ForEach. Side benefits:
+
+- The table is queryable from the SQL analytics endpoint — easy to inspect what the last run picked up.
+- The Lookup activity natively returns the row array as `@activity('...').output.value`, which the ForEach's `Items` expression consumes directly.
+- The notebook can still return a small JSON summary via `notebookutils.notebook.exit(...)` for logging / monitoring.
+
+The one operational gotcha is SQL-endpoint sync lag (Delta writes via Spark take seconds-to-minutes to surface in the SQL endpoint), which is why the pipeline has a **Refresh SQL Endpoint** activity between the notebook and the Lookup ([F8.2](#f82-activity-15--refresh-sql-endpoint)). See [06-troubleshooting.md § 3.6](./06-troubleshooting.md#36-lookup-activity-returns-zero-rows-after-a-spark-write).
+
+### A.4 Retry model for failed files
+
+`nb_lookup_new_files` returns **two categories** of files: brand-new (not in `control_table_files`) and retry-eligible (in the table but with any per-stage status = `'failed'` and `tombstoned != true`). This is a deliberate choice over the simpler "left-anti join on file_id" pattern, because that simpler version silently skips failed files forever.
+
+The retry path piggybacks on the existing `MERGE … WHEN MATCHED THEN UPDATE` in `mark_pending` / `mark_succeeded` ([F7.3](#f73-nb_update_control_table)) — a retry simply overwrites the failed row through `pending` → `succeeded`/`failed` on the next run. No schema migration, no separate "retry queue" table. Permanent skips use the `tombstoned` boolean.
+
+Full operating playbook (manual one-off retry, bulk re-process after a fix, tombstoning corrupt files): [06-troubleshooting.md § 3.11](./06-troubleshooting.md#311-failed-files-are-not-retried-on-the-next-pipeline-run).
+
+### A.5 Document Intelligence reaches Blob via its own MI
+
+DI's `urlSource` parameter tells the service to **fetch the blob server-side** from the URL the notebook passes. Because the storage account has `allowSharedKeyAccess=false` and this pattern does not use SAS tokens, that fetch has to authenticate with **DI's own system-assigned managed identity** — there is no key or token in the URL to fall back to.
+
+The Bicep `rbac.bicep` module grants the DI MI **Storage Blob Data Reader** on the storage account automatically; manual deployments wire it in [03-deployment-manual.md § 1.7 step 3](./03-deployment-manual.md#17-rbac-wiring). Without this role, DI returns `InvalidContent: Could not download the file from the given URL` — see [06-troubleshooting.md § 3.9](./06-troubleshooting.md#39-document-intelligence-invalidcontent-could-not-download-the-file).
+
+If the storage account firewall is locked down (private endpoints or `defaultAction: Deny`), the role grant alone isn't enough — DI also needs a trusted-services bypass or a shared private endpoint. See [Managed identities for Document Intelligence — Private storage account access](https://learn.microsoft.com/azure/ai-services/document-intelligence/authentication/managed-identities#private-storage-account-access).
 
 ---
 

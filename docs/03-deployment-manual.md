@@ -1,29 +1,40 @@
-# 03 — Deployment (Manual / Portal + CLI) — Azure platform layer
+# 03 — Azure platform layer — Manual deployment (portal + CLI)
 
 Step-by-step manual build of the **Azure platform layer** of the RAG knowledge-base pattern. Assumes all of [02-prerequisites.md](./02-prerequisites.md) is complete.
 
-> **Scope.** This document covers **only the Azure resources** in the pattern (RG, Key Vault, Storage, Document Intelligence, Azure AI Foundry, AI Search, RBAC, AI Search index/datasource/indexer, Copilot Studio agent). The **Fabric layer (workspace, Lakehouse, OneLake shortcut, control table, ingest pipeline) is always manual regardless of deployment path** and has its own dedicated walkthrough: **[03b-fabric-setup.md](./03b-fabric-setup.md)**.
+> **What this document is.** A no-IaC, click-through walkthrough that provisions the **Azure resources** in the pattern (RG, Key Vault, Storage, Document Intelligence, Azure AI Foundry + 2 model deployments, AI Search, RBAC, and the AI Search index / data source / indexer). The same Azure end-state is reproducible with [Bicep](./04-deployment-automated.md) — use this manual path when you want to learn the components hands-on or for one-off demo labs; use Bicep for repeatable / CI deployments.
 
-> **Two deployment paths exist.** This document is the **manual / portal-driven** path for the Azure layer — best for learning component-by-component, demo labs, and one-off builds. For repeatable / CI-driven Azure deployments use **[04-deployment-automated.md](./04-deployment-automated.md)** instead, which provisions the same Azure resources via Bicep + a post-deploy script.
+> **What this document is NOT.** It does **not** cover the Fabric ingestion pipeline or the Copilot Studio agent. Both of those layers are always manual (no IaC surface exists for them today) and have their own dedicated runbooks:
 >
-> Both paths produce the **same Azure end-state** and both feed into the same Fabric setup in [03b-fabric-setup.md](./03b-fabric-setup.md) and the same Copilot Studio configuration in [Phase 5](#phase-5--copilot-studio-agent) below.
+> - **Fabric** (workspace, identity, Lakehouse, OneLake shortcut, control table, ingest pipeline) → [03b-fabric-setup.md](./03b-fabric-setup.md)
+> - **Copilot Studio** (agent, AI Search knowledge source binding, channel publishing) → [03c-copilot-studio-setup.md](./03c-copilot-studio-setup.md)
+>
+> The full end-to-end build sequence — Azure (this doc or Bicep) → Fabric → Copilot Studio — is orchestrated by [00-reproduce-this-demo.md](./00-reproduce-this-demo.md).
 
 > **Build order matters.** Phases are sequential because each depends on artifacts from the prior phase. Within a phase, steps are also sequential unless explicitly marked parallel-safe.
 
 ---
 
-## Phase overview
+## Where this fits in the overall build
+
+| Layer | Owner | Doc | Automatable? |
+|---|---|---|---|
+| **Azure platform** (RG, KV, Storage, DI, Foundry, AI Search, RBAC, index/indexer) | This doc | **03 (this doc, manual)** or [04 (Bicep)](./04-deployment-automated.md) | Yes — via Bicep + post-deploy Python script |
+| **Fabric workspace + ingest pipeline** | Fabric tenant admin + builder | [03b-fabric-setup.md](./03b-fabric-setup.md) | No — Fabric workspaces / Lakehouses / pipelines have no Bicep / ARM provider today |
+| **Copilot Studio agent + publishing** | Power Platform admin + builder | [03c-copilot-studio-setup.md](./03c-copilot-studio-setup.md) | No — Power Platform, not Azure |
+
+## Phase overview (this doc)
 
 | Phase | What you build | ~Time | Validation at end |
 |---|---|---|---|
 | **1** | **Azure foundation:** RG + Key Vault + Blob + Document Intelligence + Azure AI Foundry + 2 model deployments + AI Search + RBAC | 60–90 min | All Azure resources deployed; identities + RBAC set |
-| **— Fabric setup —** | Follow [03b-fabric-setup.md](./03b-fabric-setup.md) → Fabric workspace + Lakehouse + control table + OneLake shortcut + ingest pipeline | 2–3 hours | Pipeline produces chunk JSON files in Blob `chunks/` container |
 | **4** | **AI Search index:** schema, integrated vectorizer, hybrid + semantic configuration; indexer pointed at Blob `chunks/` | 45–60 min | Indexer run succeeds; sample query returns chunks with semantic captions |
-| **5** | **Copilot Studio agent:** knowledge source = AI Search; publish to Teams + M365 Copilot | 30–45 min | End-to-end: ask a question in Teams → get a grounded answer with citation |
 
-> **Why phases 2 and 3 are missing.** They are the Fabric layer and live in [03b-fabric-setup.md](./03b-fabric-setup.md). Phase numbering for the Azure-side phases is preserved across versions so existing cross-references (testing, troubleshooting, orchestrator) continue to resolve.
+In between Phase 1 and Phase 4 you switch to **[03b-fabric-setup.md](./03b-fabric-setup.md)** to build the Fabric ingest pipeline (which produces the chunk JSON files in Blob `chunks/` that the Phase 4 indexer consumes). After Phase 4 validates, switch to **[03c-copilot-studio-setup.md](./03c-copilot-studio-setup.md)** to build the agent on top of the populated index.
 
-**Total demo build (Azure + Fabric + Copilot Studio): roughly 4–6 hours of hands-on time.**
+> **Why phases 2, 3, and 5 are not in this document.** They are the Fabric layer (§03b) and Copilot Studio layer (§03c) respectively. Phase numbering for the Azure-side phases is preserved across versions so existing cross-references (testing, troubleshooting, orchestrator) continue to resolve.
+
+**Total Azure-only manual build: roughly 2–3 hours of hands-on time.** Full demo (Azure + Fabric + Copilot Studio): **4–6 hours** — see [00-reproduce-this-demo.md](./00-reproduce-this-demo.md) for the orchestrated time budget.
 
 ---
 
@@ -212,23 +223,7 @@ Fabric workspace identity → Blob (Data Contributor) and Fabric workspace ident
 
 The Fabric workspace, Lakehouse, OneLake shortcut, control Delta table, connections (Key Vault + Blob), pipeline notebooks, and the Data Pipeline itself are all manual and **identical for both the manual and the automated Azure path**.
 
-👉 **Follow [03b-fabric-setup.md](./03b-fabric-setup.md) end-to-end now**, then come back here to continue with [Phase 4 — AI Search index](#phase-4--ai-search-index).
-
-What 03b covers:
-
-| 03b Phase | What you build |
-|---|---|
-| F0 | Tenant & capacity prerequisites |
-| F1 | Workspace creation + capacity assignment |
-| F2 | Workspace identity + Blob Data Contributor grant |
-| F3 | Lakehouse creation |
-| F4 | OneLake shortcut to source documents (SharePoint / ADLS / S3 / etc.) |
-| F5 | Control `control_table_files` Delta table |
-| F6 | Key Vault + Blob connections in Fabric |
-| F7 | Pipeline notebooks (`nb_lookup_new_files`, `nb_ocr_chunk_upload`, `nb_update_control_table`) |
-| F8 | Data Pipeline `pl_ingest_docs` — lookup notebook → Refresh SQL Endpoint → Lookup → ForEach (Copy + mark_pending + `nb_ocr_chunk_upload` + mark_succeeded). DI is called from the OCR notebook via MSAL + a DI-caller service principal (secret in Key Vault). |
-| F9 | End-to-end validation on sample docs |
-| F10 | Pipeline schedule |
+👉 **Follow [03b-fabric-setup.md](./03b-fabric-setup.md) end-to-end now**, then come back here to continue with [Phase 4 — AI Search index](#phase-4--ai-search-index). The 10 Fabric phases (F0–F10) cover tenant prerequisites, workspace + identity, Lakehouse, OneLake shortcut, control table, connections, pipeline notebooks, the `pl_ingest_docs` Data Pipeline, end-to-end validation, and pipeline scheduling.
 
 **Do not proceed to Phase 4 below until 03b's validation checklist is fully checked** — Phase 4 requires chunk JSON files to be landing in Blob `chunks/` for the indexer to be testable end-to-end.
 
@@ -426,81 +421,22 @@ Confirm:
 
 ---
 
-## Phase 5 — Copilot Studio agent
+## Next: build the Copilot Studio agent
 
-### 5.1 Create the agent
+The Azure platform layer is complete. The remaining step is to build the **Copilot Studio agent** on top of the populated AI Search index. Copilot Studio is Power Platform (not Azure) and is **always manual** regardless of which Azure deployment path you took.
 
-1. Open **Copilot Studio**
-2. **Create → Agent**
-3. Provide a **name** and **description** (generic-friendly: "Knowledge Assistant for <Domain>")
-4. **Instructions / system prompt** — a starter:
-
-   > You are a knowledge assistant grounded on the customer's document corpus.
-   > Answer concisely and cite the source document for every factual claim.
-   > If the knowledge source does not contain enough information to answer
-   > confidently, say so and offer to escalate.
-
-### 5.2 Add AI Search as a knowledge source
-
-1. Inside the agent: **Knowledge → + Add knowledge → Azure AI Search**
-2. **Authentication:** **Microsoft Entra ID (recommended — required for this pattern)**. Admin / query key auth is shown in the UI but is **not usable here** because admin keys are disabled on the search service (Phase 1.6). With Entra auth, Copilot Studio uses either the connecting user's identity (interactive auth) or a stored credential connection (service principal) to call AI Search.
-   - **For demo with a small audience:** use your own identity. Grant each demo user **Search Index Data Reader** on the search service (or a security group containing them).
-   - **For broad / production deployment:** create a service principal, grant it **Search Index Data Reader** on the search service, and use a Power Platform **Custom Connector** or **Connection reference** to store its credentials — every user of the agent then resolves the same SP identity.
-3. **Search endpoint:** `https://srch-rag-demo-eus.search.windows.net`
-4. **Index name:** `idx-rag-documents`
-5. **Enable semantic search:** **ON** ← critical
-6. **Title field:** `doc_id` (or a friendly name field if you add one)
-7. **URL field:** `source_uri` (this enables citation linkback)
-8. **Content field:** `content`
-9. Save
-
-### 5.3 Configure generative answers
-
-1. **Generative AI → Settings**
-2. Set **Knowledge source** = the AI Search source you just added
-3. Generative answers: **Enabled**
-4. (Optional) Set fallback behavior when no knowledge is found
-
-### 5.4 Test inside Copilot Studio
-
-Use the **Test** pane on the right to ask questions:
-
-- A direct factual question that should hit a single chunk
-- A semantic / paraphrased question
-- A multi-document question
-- A question deliberately outside the corpus (test fallback)
-
-Confirm answers include **citations** that link back to the original document in Blob.
-
-### 5.5 Publish to Teams
-
-1. **Publish → Channels → Microsoft Teams**
-2. Add your tenant
-3. (One-time) Power Platform admin approves the deployment
-4. Install the agent in Teams via the generated link
-
-### 5.6 Publish to M365 Copilot
-
-1. **Publish → Channels → Microsoft 365 Copilot**
-2. (One-time) M365 admin enables the agent in the M365 Copilot agent gallery
-3. Locate the agent in **M365 Copilot → Agents** in any M365 host (Word, Outlook, Teams, copilot.microsoft.com)
-
-### Phase 5 validation
-
-- [ ] Test pane returns grounded answers with citations
-- [ ] Teams channel published and reachable from a Teams chat
-- [ ] M365 Copilot channel published and reachable in the agent gallery
-- [ ] End-to-end: question in Teams → answer with clickable citation → opens raw file in Blob
+👉 **Continue to [03c-copilot-studio-setup.md](./03c-copilot-studio-setup.md)** for agent creation, AI Search knowledge source binding, generative-answers configuration, and Teams + M365 Copilot channel publishing.
 
 ---
 
-## Post-deployment checklist
+## Post-deployment checklist (Azure layer)
 
-Once all five phases validate green, proceed to [05-testing.md](./05-testing.md) to run the full test suite.
+Once Phases 1 + 4 validate green and Fabric ([03b](./03b-fabric-setup.md)) + Copilot Studio ([03c](./03c-copilot-studio-setup.md)) are complete, proceed to [05-testing.md](./05-testing.md) to run the full test suite.
 
-- [ ] All Phase 1–5 validation boxes checked
-- [ ] Pipeline scheduled (not just on-demand)
-- [ ] Indexer scheduled
+- [ ] All Phase 1 + Phase 4 validation boxes checked
+- [ ] Fabric pipeline scheduled (not just on-demand) — see [03b § F10](./03b-fabric-setup.md#phase-f10--schedule-the-pipeline)
+- [ ] AI Search indexer scheduled (set in [§ 4.3](#43-create-the-indexer) above with `"interval": "PT5M"`)
+- [ ] Copilot Studio agent published to Teams + M365 Copilot — see [03c § C5](./03c-copilot-studio-setup.md#phase-c5--publish-to-channels)
 - [ ] Cost alerts configured on the resource group
 - [ ] Backup / disaster-recovery plan written (at minimum: re-runnable pipeline from `raw/` blob)
 - [ ] Customer + Microsoft owners identified for ongoing operation
@@ -509,4 +445,4 @@ Once all five phases validate green, proceed to [05-testing.md](./05-testing.md)
 
 ---
 
-*Last updated: 2026-05-21*
+*Last updated: 2026-05-24*
