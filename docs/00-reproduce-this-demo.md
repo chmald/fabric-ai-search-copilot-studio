@@ -46,7 +46,7 @@
 │ Copilot Studio                                                          │
 │   Agent: agent-rag-kb                                                   │
 │   ├─ Knowledge: idx-rag-documents (Azure AI Search, semantic search ON) │
-│   └─ Channels:  Microsoft Teams + M365 Copilot                          │
+│   └─ Channels:  Teams and Microsoft 365 Copilot (single combined channel) │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -135,18 +135,19 @@ What 03c covers end-to-end (Phases C0–C6):
 |---|---|
 | C0 | Tenant + licensing prerequisites, channel-publishing approvals |
 | C1 | Agent creation, instructions / system prompt |
-| C2 | AI Search knowledge source binding (Entra auth, schema field mapping, semantic search) |
-| C3 | Generative answers configuration (knowledge-grounded, general-knowledge off) |
+| C2 | AI Search knowledge source binding via a Power Platform data connection (Entra ID Integrated or Service principal — never Access Key); vector index `idx-rag-documents` |
+| C3 | Grounding configuration — turn **Allow the AI to use its own general knowledge** off (Overview page) and **Allow ungrounded responses** off (Generative AI settings) |
 | C4 | Test pane validation across factual / paraphrased / multi-doc / out-of-corpus questions |
-| C5 | Channel publishing: Microsoft Teams + Microsoft 365 Copilot |
+| C5 | Publish the agent and add the **Teams and Microsoft 365 Copilot** channel (single combined channel); set Availability options for the right audience |
 | C6 | End-user validation from Teams + M365 Copilot |
 
 ### Part D validation
 
-- [ ] Knowledge source bound to `idx-rag-documents` and showing **Status: Ready** ([03c § C2](./03c-copilot-studio-setup.md#phase-c2--bind-the-ai-search-knowledge-source))
+- [ ] Knowledge source bound to `idx-rag-documents` via **Microsoft Entra ID Integrated** or **Service principal** (not Access Key) and showing **Status: Ready** ([03c § C2](./03c-copilot-studio-setup.md#phase-c2--bind-the-ai-search-knowledge-source))
+- [ ] Both **Allow the AI to use its own general knowledge** and **Allow ungrounded responses** are **Off** ([03c § C3](./03c-copilot-studio-setup.md#phase-c3--configure-grounding-behavior))
 - [ ] Test pane returns grounded answers with citations to Blob source files ([03c § C4](./03c-copilot-studio-setup.md#phase-c4--test-in-the-agent-canvas))
-- [ ] Teams channel published; agent reachable in Teams chat as a normal user
-- [ ] M365 Copilot channel published; agent appears in M365 Copilot agent gallery
+- [ ] Agent published; **Teams and Microsoft 365 Copilot** channel added with **Make agent available in Microsoft 365 Copilot** selected
+- [ ] Agent reachable in Teams chat AND in Microsoft 365 Copilot as a normal user (not just the builder)
 - [ ] End-to-end: question in Teams → answer with clickable citation → opens raw file in Blob
 
 ---

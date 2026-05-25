@@ -16,11 +16,15 @@ Power Platform environment (default or named)
     ├── Instructions / system prompt
     ├── Knowledge sources
     │     └── Azure AI Search → idx-rag-documents
-    │         (Entra ID auth → caller's identity OR stored SP connection)
-    ├── Generative answers: ON (knowledge source bound)
-    └── Published channels
-        ├── Microsoft Teams
-        └── Microsoft 365 Copilot
+    │         (Power Platform data connection → Entra ID Integrated
+    │          OR Service principal — NEVER Access Key)
+    ├── Grounding settings
+    │     ├── Allow the AI to use its own general knowledge: OFF
+    │     └── Allow ungrounded responses: OFF
+    └── Channels
+        └── Teams and Microsoft 365 Copilot   (single combined channel;
+                                             toggle inside controls
+                                             M365 Copilot vs Teams-only)
 ```
 
 The agent uses **Copilot Studio's native AI Search knowledge source** for retrieval — Copilot Studio's runtime handles query rewriting, retrieval, ranking, generative answering, and citation rendering. No Foundry agent runtime, no custom orchestrator, no application code is required.
@@ -43,25 +47,38 @@ Reference: [Copilot Studio licensing](https://learn.microsoft.com/microsoft-copi
 
 ### C0.2 Channel publishing approvals
 
-Both Teams and M365 Copilot publishing routes require **tenant-admin approval the first time** an agent is published. Initiate the approvals **before** you start the build — they take 1–2 business days.
+This pattern uses Copilot Studio's combined **Teams and Microsoft 365 Copilot** channel — a single channel surface that publishes the agent to both Microsoft Teams and the Microsoft 365 Copilot agent gallery (with an in-channel toggle to opt out of M365 Copilot if you want Teams only).
 
-| Channel | Admin action | Reference |
-|---|---|---|
-| **Microsoft Teams** | M365 admin enables **Power Platform / Copilot Studio agent submission** in the Teams admin center | [Add the agent to Teams](https://learn.microsoft.com/microsoft-copilot-studio/publication-add-bot-to-microsoft-teams) |
-| **Microsoft 365 Copilot** | M365 admin enables agents in the **M365 admin center → Integrated apps → Copilot agents** view; agent appears in the M365 Copilot agent gallery only after the agent is published + approved | [Publish to Microsoft 365 Copilot](https://learn.microsoft.com/microsoft-copilot-studio/publication-add-bot-to-microsoft-copilot) |
+Distributing to the whole organization requires **admin approval the first time** — plan ahead because it can take 1–2 business days for an admin to review and approve. Initiate the approvals before you start the build.
+
+| Distribution option | Admin approval | Where it appears | When to use |
+|---|---|---|---|
+| **Just you** | Not required | Personal agent list in Teams + Microsoft 365 Copilot | Demo / pilot for the builder only |
+| **Show to my teammates and shared users** | Not required (but you must explicitly share the agent with the users / security groups) | **Built with Power Platform** section of the Teams app store + the user's Microsoft 365 Copilot agent list | Small audience demo |
+| **Show to everyone in my org** | **Required** — admin reviews in Microsoft 365 admin center, then approves in the Teams admin center's [Manage apps](https://learn.microsoft.com/microsoftteams/submit-approve-custom-apps) page | **Built for your org** section of the Teams app store + the Microsoft 365 Copilot **Built by your org** agent store section | Production rollout |
+
+In addition to the per-agent approval, your tenant must already allow Power Platform apps in the Teams admin center ([Manage Power Platform apps in Teams](https://learn.microsoft.com/microsoftteams/manage-power-platform-apps)). Confirm with your admin if you're not sure.
+
+Reference: [Connect and configure an agent for Teams and Microsoft 365](https://learn.microsoft.com/microsoft-copilot-studio/publication-add-bot-to-microsoft-teams), [Publish agents for Microsoft 365 Copilot](https://learn.microsoft.com/microsoft-365/copilot/extensibility/publish).
 
 For demo builds with a small audience you can use the **Test pane only** path and skip channel publishing entirely.
 
 ### C0.3 AI Search access pattern
 
-The agent's AI Search knowledge source authenticates with **Entra ID** (admin / query keys are disabled on the AI Search service from Phase 1.6 of the manual deploy or the equivalent Bicep). Two patterns are supported:
+The agent's AI Search knowledge source authenticates via a Copilot Studio **data connection** (Power Platform connection) — you cannot point Copilot Studio at the AI Search endpoint directly without a connection.
 
-| Pattern | Use when | What to set up |
+Because admin / query keys are disabled on the AI Search service in this pattern (from Phase 1.6 of the manual deploy or the equivalent Bicep), the connection **must use one of the Microsoft Entra ID auth types**, not an access key:
+
+| Connection auth type (verbatim from the Copilot Studio UI) | Use when | What to set up |
 |---|---|---|
-| **Caller's identity** (interactive) | Demo with a small audience; pilot phase; every user has a direct Entra account | Grant each user (or a security group) **Search Index Data Reader** on the AI Search service |
-| **Stored service-principal connection** | Broad / production deployment; users may not have direct AI Search RBAC | Create a service principal, grant it **Search Index Data Reader** on the search service, store its credentials in a **Power Platform connection reference** or a **custom connector** |
+| **Microsoft Entra ID Integrated** | Demo with a small audience; pilot phase; every user has a direct Entra account and is willing to consent on first use | Grant each user (or a security group) **Search Index Data Reader** on the AI Search service. The connection resolves to the calling user's identity at runtime. |
+| **Service principal (Microsoft Entra ID application)** | Broad / production deployment; users may not have direct AI Search RBAC; you want all users to resolve to one stable identity | Create a service principal, grant it **Search Index Data Reader** on the search service. The connection stores the SP's tenant ID, client ID, and client secret (in Power Platform's secret vault). |
+| ~~Access Key~~ | Never (in this pattern) | Disabled on the AI Search service. Selecting this fails. |
+| ~~Client Certificate Auth~~ | Out of scope for this pattern | — |
 
-The "Caller's identity" path is the default and works out of the box for demo. Switch to the SP path when you go to production. Reference: [Connect to Azure AI Search](https://learn.microsoft.com/microsoft-copilot-studio/knowledge-add-azure-ai-search).
+Reference: [Add Azure AI Search as a knowledge source](https://learn.microsoft.com/microsoft-copilot-studio/knowledge-azure-ai-search).
+
+> **Connection lifecycle caveat.** Power Platform data connections live at the **environment** level — not per-agent. A misconfigured AI Search connection can break the AI Search add-knowledge dialog **for every agent in the environment** with no in-product way to delete it. Stick to the supported Entra auth types above. If you hit a broken-connection state, see [Troubleshooting pointers](#troubleshooting-pointers).
 
 ---
 
@@ -84,7 +101,7 @@ The "Caller's identity" path is the default and works out of the box for demo. S
 
 The agent opens to its **Overview** tab. Record the agent's display name and the environment GUID in `demo-ids.local.json` under `copilotStudio.agentName` / `copilotStudio.environmentId`.
 
-> **Why "agent" not "copilot"?** Microsoft has unified the term: what used to be called "Copilot Studio copilots" are now called "agents." The product UI uses both interchangeably in transition; in this doc we use **agent** to align with the current Microsoft Learn vocabulary.
+> **Terminology note.** Microsoft Copilot Studio (and Microsoft Learn) now uses **agent** consistently across the UI and docs — the legacy term *copilot* still appears in some older docs and SDK names, but everywhere it matters in the build (Channels page, Agents list, Microsoft 365 admin center → Agents) the surface is **agent**. This doc uses **agent** throughout.
 
 ---
 
@@ -92,51 +109,86 @@ The agent opens to its **Overview** tab. Record the agent's display name and the
 
 ### C2.1 Add the knowledge source
 
-1. In the agent: **Knowledge** (left nav) → **+ Add knowledge**
-2. Choose **Azure AI Search**
-3. **Connection / Authentication kind:**
-   - **For demo (caller's identity):** select your own Microsoft Entra account from the **Authenticate as** dropdown. The first time you bind, Copilot Studio prompts for consent — accept.
-   - **For production (service principal):** click **+ New connection** → select a **stored Azure AI Search connection** that references the SP, or create one in **Power Apps → Connections → + New connection → Azure AI Search**. Enter the SP's tenant ID, client ID, and client secret (stored in Power Platform's secret vault, not in plain text).
-4. **Search endpoint:** `https://srch-rag-<env>-<region>.search.windows.net` (look up exact name in `demo-ids.local.json`)
-5. **Index name:** `idx-rag-documents`
-6. **Continue**
+1. In the agent, open the **Overview** page (or the **Knowledge** page — either entry point works).
+2. Select **Add knowledge**. The **Add knowledge** dialog opens.
+3. In the dialog, select the **Featured** tab.
+4. Select **Azure AI Search**.
+5. Select **Create new connection**. The connection dialog opens.
+6. **Authentication type:** select one of the Entra options from [C0.3](#c03-ai-search-access-pattern):
+   - **Microsoft Entra ID Integrated** — then sign in with your Entra account when prompted. First time only, accept the consent prompt.
+   - **Service principal (Microsoft Entra ID application)** — enter the SP's **Tenant ID**, **Client ID**, and **Client Secret** (these get stored encrypted in Power Platform).
+7. Select **Create**. A green check mark confirms the connection is valid.
+8. Select **Next**.
+9. Enter the **Azure AI Search vector index** name: `idx-rag-documents`. Only one index can be added per knowledge source.
+10. Provide a **Name** and **Description** for the knowledge source:
+    - **Name:** `rag-knowledge-base` (or a customer-friendly name)
+    - **Description:** as detailed as possible — e.g. *"Internal `<customer>` document corpus including policies, handbooks, and standard operating procedures. Use for all factual questions about company practices."* The description is used by Copilot Studio's [generative orchestration](https://learn.microsoft.com/microsoft-copilot-studio/advanced-generative-actions) to decide when to call this source, so be specific.
+11. Select **Add to agent**.
 
-### C2.2 Map the schema fields
+The knowledge source appears in the **Knowledge** table with **Status: In progress** while Copilot Studio indexes the vector index metadata. Status flips to **Ready** within ~30–60 seconds.
 
-Copilot Studio uses the schema mapping to render citations and to decide which fields to feed the generative model.
+> **No field mapping.** Unlike some older RAG knowledge connectors, the current Azure AI Search integration does **not** ask you to map Title / URL / Content fields manually — it consumes the schema of the vector index directly. The next subsection covers the field conventions that drive citations and grounding.
 
-| Copilot Studio field | Value | Why |
-|---|---|---|
-| **Title field** | `doc_id` | Shown as the citation heading in answers |
-| **URL field** | `source_uri` | Makes citations clickable; opens the original blob in a new tab |
-| **Content field** | `content` | The text the LLM grounds answers on |
-| **Enable semantic search** | **ON** ← critical | Without this, the agent uses keyword-only search and quality drops sharply |
+### C2.2 Field conventions for citations and grounding
 
-> If a friendlier title is wanted (e.g. the original filename instead of the `file_id` GUID), add a `title` string field to the index in [03-deployment-manual.md § 4.1](./03-deployment-manual.md#41-create-the-index) (and populate it from `source_path` in `nb_ocr_chunk_upload`'s chunk payload) and select it here instead of `doc_id`.
+Copilot Studio derives behavior from your index schema:
 
-### C2.3 Save and validate
+| Behavior | How it's resolved |
+|---|---|
+| **Content** the LLM grounds answers on | All searchable text fields in the index — in this pattern, the `content` field on `idx-rag-documents` |
+| **Vector field** used for embedding-based retrieval | Detected from the index's `vectorSearch` configuration — in this pattern, `content_vector` with the `aif-vectorizer` integrated AOAI vectorizer |
+| **Semantic ranking** | Triggered automatically when the index has a semantic configuration (`semantic-default` in [03-deployment-manual.md § 4.1](./03-deployment-manual.md#41-create-the-index)) |
+| **Citation URL** (clickable link shown next to each answer) | Copilot Studio looks for `metadata_storage_path` first; if not present, it uses **any field whose value is a complete URL**. In this pattern, the chunk JSON written by [`nb_ocr_chunk_upload`](./03b-fabric-setup.md#f72-nb_ocr_chunk_upload) populates `source_uri` with the raw blob URL, which satisfies this convention. |
+| **Citation label** | Generated from the content of the cited chunk — there is no separate "Title field" picker in the current UI |
 
-1. **Save**
-2. Wait ~30 seconds for the knowledge source to show **Status: Ready**
-3. If the status sticks on **Validating** or shows an auth error:
-   - For caller's-identity auth — confirm your account has **Search Index Data Reader** on the search service
-   - For SP auth — confirm the SP has **Search Index Data Reader** on the search service
-   - Check role propagation (up to 15 minutes), then refresh the knowledge sources list
+Reference: [Return citations](https://learn.microsoft.com/microsoft-copilot-studio/knowledge-azure-ai-search#return-citations).
+
+> **Adding a friendly title for citations.** If your customer prefers human-readable citation labels over auto-generated previews, add a `title` string field to the AI Search index and populate it from `source_path` (the original filename) in the chunk JSON. Add it to the index schema in [§ 4.1](./03-deployment-manual.md#41-create-the-index) and to the chunk-build code in [`nb_ocr_chunk_upload`](./03b-fabric-setup.md#f72-nb_ocr_chunk_upload). Copilot Studio will surface the value automatically once it's in the index.
+
+### C2.3 Validate the connection
+
+1. Wait ~30–60 seconds for the Knowledge source row to flip from **Status: In progress** to **Status: Ready**.
+2. If the status sticks on **In progress** or shows an error:
+   - For **Microsoft Entra ID Integrated** — confirm your account has **Search Index Data Reader** on the search service
+   - For **Service principal** — confirm the SP has **Search Index Data Reader** on the search service
+   - Check role propagation (up to 15 minutes), then refresh the Knowledge page
+3. If the row reports an unrecoverable error, see [Troubleshooting pointers](#troubleshooting-pointers) (broken connections can persist at the environment level).
+
+### C2.4 (Optional) Virtual Network support
+
+If the AI Search service is locked down with a [private endpoint](https://learn.microsoft.com/azure/search/search-security-overview), Copilot Studio can still connect via the Power Platform VNet integration. Configure VNet support for your Power Platform environment first ([Set up Virtual Network support](https://learn.microsoft.com/power-platform/admin/vnet-support-setup-configure)), then proceed with the C2.1 steps unchanged. Out of scope for the default demo build.
 
 ---
 
-## Phase C3 — Configure generative answers
+## Phase C3 — Configure grounding behavior
 
-By default, Copilot Studio agents can fall back to their underlying LLM ("open-domain" answers) when the knowledge source doesn't contain the answer. For a grounded RAG agent we want the knowledge source to be the **only** source.
+For a citation-required RAG agent, the goal is: **answer ONLY from the AI Search index, never from the model's general knowledge.** Two related settings together control this; both must be off.
 
-1. **Generative AI** (left nav) → **Settings**
-2. **Knowledge source** → select the AI Search source from C2 (it's the only one if you haven't added others)
-3. **Generative answers** → **Enabled**
-4. **Use general knowledge** → **Off** (forces the agent to answer only from the AI Search index — best for a citation-required corpus)
-5. **Content moderation** → leave at **High** unless you have a specific reason to lower it
-6. **Save**
+### C3.1 Turn off the agent-level general-knowledge fallback
 
-Reference: [Configure generative answers](https://learn.microsoft.com/microsoft-copilot-studio/nlu-generative-answers).
+1. Open the agent's **Overview** page.
+2. Scroll to the **Knowledge** section.
+3. Find **Allow the AI to use its own general knowledge** — turn it **Off**.
+
+   This stops the agent from using its underlying LLM knowledge (Bing search, model parametric knowledge) as a fallback when the AI Search index doesn't return a hit.
+
+Reference: [Knowledge sources summary](https://learn.microsoft.com/microsoft-copilot-studio/knowledge-copilot-studio).
+
+### C3.2 Block ungrounded responses (generative orchestration)
+
+1. Open **Settings → Generative AI** (left nav).
+2. Confirm **Generative orchestration** is enabled (required for the next toggle to apply).
+3. Scroll to the **Knowledge** section.
+4. Find **Allow ungrounded responses** — turn it **Off**.
+
+   With this off, the agent **blocks any response generated in a turn where it didn't actually call a knowledge source or tool**. If the model tries to answer from conversation history or parametric memory without retrieving a chunk, the response is blocked and the agent triggers its **Fallback** topic (typically responding with "I don't have information on that").
+
+5. **Content moderation** — leave at **High** unless you have a specific reason to lower it.
+6. **Save**.
+
+> **Why both toggles matter.** The Overview-page "Allow the AI to use its own general knowledge" gates the AI's right to **consult** general knowledge at all. The Generative-AI-settings "Allow ungrounded responses" enforces the per-turn rule that the model must have called the knowledge source for that response. With both off, the agent is in strict-grounding mode. Note: even with both off, the model can still blend general knowledge into a response that *did* retrieve a chunk — these settings prevent ungrounded responses, not ungrounded *phrases*. For per-customer audit-grade verification, validate citations in the [05-testing.md § D](./05-testing.md) golden set.
+
+Reference: [Allow ungrounded responses](https://learn.microsoft.com/microsoft-copilot-studio/knowledge-copilot-studio#allow-ungrounded-responses), [Orchestrate agent behavior with generative AI](https://learn.microsoft.com/microsoft-copilot-studio/advanced-generative-actions).
 
 ---
 
@@ -170,26 +222,53 @@ If quality is poor, iterate on:
 
 ## Phase C5 — Publish to channels
 
-### C5.1 Microsoft Teams
+Copilot Studio now uses a **single combined channel** for Teams and Microsoft 365 Copilot. Publishing to one or both is a matter of toggles, not two separate channel additions.
 
-1. **Channels** (left nav) → **Microsoft Teams** → **Turn on Teams**
-2. The first time, Copilot Studio prompts for tenant approval. Click **Submit for admin approval** (or **Publish** if approval is already in place from C0.2).
-3. Once approved, open the published agent link → installs the agent into Teams
-4. Pin the agent for easier access
+### C5.1 Publish the agent
 
-Reference: [Add your agent to Microsoft Teams](https://learn.microsoft.com/microsoft-copilot-studio/publication-add-bot-to-microsoft-teams).
+Before the channel can be added, the agent must be published at least once.
 
-### C5.2 Microsoft 365 Copilot
+1. From the agent's **Overview** page, select **Publish** (top right).
+2. Confirm the publish action. Typical publish time: **30–60 seconds**.
+3. Wait for the **Published successfully** confirmation. You can republish at any time after future edits — republishing pushes updates to all installed instances.
 
-1. **Channels** (left nav) → **Microsoft 365 Copilot** → **Turn on Microsoft 365 Copilot**
-2. **Submit for admin approval** if not already cleared
-3. Once approved, the agent appears in the **Microsoft 365 Copilot agent gallery** for users with M365 Copilot licenses (in Word, Outlook, Teams, copilot.microsoft.com, etc.)
+### C5.2 Add the Teams and Microsoft 365 Copilot channel
 
-Reference: [Publish your agent to Microsoft 365 Copilot](https://learn.microsoft.com/microsoft-copilot-studio/publication-add-bot-to-microsoft-copilot).
+1. From the agent's top menu bar, select **Channels**.
+2. Select the **Teams and Microsoft 365 Copilot** tile. The configuration panel opens.
+3. Under **Turn on Microsoft 365**, keep **Make agent available in Microsoft 365 Copilot** **selected** (the default). Clear it only if you want Teams-only.
+4. Select **Edit details** to customize the agent's icon, color, short description, and developer / privacy / terms-of-use URLs (these appear in the Teams app store and the M365 Copilot agent gallery).
+5. Select **Save** → back on the channel panel, select **Add channel**.
 
-### C5.3 Other channels (optional)
+Reference: [Connect an agent to the Teams and Microsoft 365 Copilot channels](https://learn.microsoft.com/microsoft-copilot-studio/publication-add-bot-to-microsoft-teams#connect-an-agent-to-the-teams-and-microsoft-365-copilot-channels).
 
-Copilot Studio supports many other channels (web chat, Slack, Facebook, custom apps, Direct Line). For this pattern, Teams + M365 Copilot are the canonical demo / production targets. Add others as needed via **Channels → + Add channel**.
+### C5.3 Install for yourself (builder validation)
+
+Before sharing, install the agent in your own Teams / M365 Copilot to confirm it works end-to-end as a normal user (not just in the Test pane).
+
+1. In the Teams and Microsoft 365 Copilot channel panel, select **See agent in Teams**. The Teams app store install dialog opens.
+2. Select **Add**. The agent appears in your Teams left nav and in your Microsoft 365 Copilot agent list (if M365 was enabled in C5.2 step 3).
+3. Open a chat with the agent in Teams and ask a representative question from your golden set ([05-testing.md § C](./05-testing.md)). Confirm answer + citation.
+4. In Microsoft 365 Copilot (Word, Outlook, Teams, or copilot.microsoft.com), type `@` and select the agent from the list. Ask the same question and confirm parity.
+
+### C5.4 Share with others (optional)
+
+There are three distribution levels per [C0.2](#c02-channel-publishing-approvals). Choose based on your audience:
+
+1. In the Teams and Microsoft 365 Copilot channel panel, select **Availability options**.
+2. Choose one of:
+   - **Copy link** — shareable installation link for a small audience. Recipients still need agent access (use **Share** in the agent's main menu to grant security groups).
+   - **Show to my teammates and shared users** — adds the agent to the **Built with Power Platform** section of the Teams app store; visible only to users / groups the agent is explicitly shared with. **No admin approval required.** Best for pilot phase.
+   - **Show to everyone in my org** — submits to admin approval. Once approved, the agent appears in the **Built for your org** section of the Teams app store and the **Built by your org** section of the Microsoft 365 Copilot agent gallery. Best for production rollout.
+3. If you selected **Show to everyone in my org**, follow the on-screen confirmation, then **Submit for admin approval**.
+4. Admin reviews the request in [Microsoft 365 admin center → Agents → All agents → Requests](https://admin.microsoft.com/), and approves / rejects from there. SLA: typically 1–2 business days.
+5. After approval, the channel panel status flips to **Approved**. New installs (and updates for existing installs) automatically pick up the published version.
+
+Reference: [Show an agent in the Teams app store or in the Microsoft 365 Agent Store](https://learn.microsoft.com/microsoft-copilot-studio/publication-add-bot-to-microsoft-teams#show-an-agent-in-the-teams-app-store-or-in-the-microsoft-365-agent-store), [Manage requested Copilot Studio agents](https://learn.microsoft.com/microsoft-365/copilot/agent-essentials/agent-lifecycle/agent-copilot-studio-requested).
+
+### C5.5 Other channels (optional)
+
+Copilot Studio supports many other channels (web chat, Slack, Facebook, custom apps, Direct Line). For this pattern, Teams + M365 Copilot are the canonical demo / production targets. Add others as needed via the **Channels** page.
 
 ---
 
@@ -215,12 +294,15 @@ If a user can't see the agent in Teams / M365 Copilot:
 ## Phase C6 validation checklist
 
 - [ ] Agent created in the expected Power Platform environment
-- [ ] AI Search knowledge source bound and showing **Status: Ready**
-- [ ] **Enable semantic search** is **ON** in the knowledge source
-- [ ] **Use general knowledge** is **OFF** in generative answers settings (for strict grounding)
+- [ ] AI Search knowledge source bound via **Microsoft Entra ID Integrated** or **Service principal** (not Access Key) and showing **Status: Ready**
+- [ ] Vector index name = `idx-rag-documents`; description is detailed (not just the index name)
+- [ ] Overview-page **Allow the AI to use its own general knowledge** is **Off**
+- [ ] Generative AI settings **Allow ungrounded responses** is **Off** (with generative orchestration enabled)
 - [ ] Test pane returns grounded answers with citations on all four question categories
-- [ ] Teams channel published; agent reachable in a Teams chat as a normal user
-- [ ] M365 Copilot channel published; agent reachable in the M365 Copilot agent gallery
+- [ ] Agent published at least once (required before adding the channel)
+- [ ] **Teams and Microsoft 365 Copilot** channel added with **Make agent available in Microsoft 365 Copilot** selected
+- [ ] Agent installed for the builder and reachable from both Teams and M365 Copilot
+- [ ] For broader rollout: Availability options set to the appropriate scope (shared users or org-wide with admin approval)
 - [ ] End-to-end: question in Teams → answer with clickable citation → opens raw file in Blob
 
 When all boxes are checked → proceed to [05-testing.md](./05-testing.md) for the formal retrieval-quality evaluation (golden set, semantic-ranker A/B, demo script rehearsal).
@@ -233,16 +315,19 @@ Common Copilot Studio-layer issues:
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Knowledge source stuck on **Validating** | Caller / SP missing **Search Index Data Reader** on the AI Search service | Grant the role; wait 15 min for propagation |
-| Knowledge source shows auth error | Local-key auth attempted but disabled on AI Search | Re-bind with Entra auth (caller's identity or SP), not admin/query key |
-| Test pane returns "I don't have information" for every question | Index is empty, or **Enable semantic search** is off, or `content` field mapping is wrong | Check index doc count (Phase 4 validation), re-check schema mapping in C2.2 |
-| Citations missing or unclickable | `URL field` not mapped, or `source_uri` field is null in indexed chunks | Re-check field mapping in C2.2; verify `nb_ocr_chunk_upload` is populating `source_uri` in chunk JSON |
-| Agent gives answers but no citations | Generative answers configured but knowledge source isn't the bound source | Re-check C3 step 2 — knowledge source must be selected |
-| Hallucinated answers (no citation, off-topic) | **Use general knowledge** is on | Turn it off in C3 step 4 |
-| Teams publish stuck on **Pending admin approval** | M365 admin hasn't cleared the submission | Follow up with M365 admin; typical SLA 1–2 business days |
-| User in Teams sees "Agent not available" | User not licensed, or in a different Power Platform environment, or admin approval hasn't propagated | Check licensing + environment + approval status |
+| Knowledge source stuck on **In progress** | Caller / SP missing **Search Index Data Reader** on the AI Search service | Grant the role; wait 15 min for propagation, then refresh the Knowledge page |
+| Knowledge source shows auth error | Tried to use an Access Key against a search service with `disableLocalAuth=true` | Recreate the connection with **Microsoft Entra ID Integrated** or **Service principal**. See [C2.1](#c21-add-the-knowledge-source). |
+| **Add knowledge** dialog briefly opens then errors out and is unusable for any agent | A previously created Azure AI Search connection in this Power Platform environment is broken; the broken connection lives at the environment scope and there is no in-product way to delete it | Reset the agent's external access, or delete and recreate the affected agent. When re-adding, use one of the **Entra ID** auth types, not **Access Key**. See [Add Azure AI Search as a knowledge source — Create the connection](https://learn.microsoft.com/microsoft-copilot-studio/knowledge-azure-ai-search#create-the-connection-to-azure-ai-search). |
+| Test pane returns "I don't have information" for every question | Index is empty, or the wrong vector index name was entered in C2.1 step 9, or the `content` field is empty in chunk JSONs | Check index doc count ([03-deployment-manual.md § 4](./03-deployment-manual.md#phase-4--ai-search-index) validation), re-check the index name in the Knowledge source configuration |
+| Citations missing or unclickable | Indexed chunks have no field containing a complete URL (no `metadata_storage_path`, no other URL-valued field) | Verify `source_uri` in chunk JSON is populated with the full `https://<storage>.blob.core.windows.net/...` URL — see [`nb_ocr_chunk_upload`](./03b-fabric-setup.md#f72-nb_ocr_chunk_upload). Re-run the AI Search indexer if the field was added after first index. |
+| Agent gives answers but no citations | Knowledge source isn't bound at the agent level (maybe only on a topic-level generative answers node) | Confirm the source appears in the agent's **Knowledge** page, not only inside a topic |
+| Hallucinated answers (claims with no citation) | **Allow ungrounded responses** is still On, or **Allow the AI to use its own general knowledge** is still On | Turn both off per [C3.1](#c31-turn-off-the-agent-level-general-knowledge-fallback) and [C3.2](#c32-block-ungrounded-responses-generative-orchestration) |
+| **Add channel** button greyed out | Agent has never been published | Publish the agent first ([C5.1](#c51-publish-the-agent)). The channel cannot be added until at least one publish has succeeded. |
+| **Show to everyone in my org** stuck on **Pending admin approval** | M365 admin hasn't cleared the submission in [Microsoft 365 admin center → Agents → Requests](https://admin.microsoft.com/) | Follow up with M365 admin; typical SLA 1–2 business days |
+| User in Teams sees "Agent not available" / "Built for your org" tab missing | User not licensed for Microsoft 365 Copilot, or in a different Power Platform environment than the agent, or admin approval hasn't propagated, or your tenant doesn't allow Power Platform apps in Teams | Check licensing, environment, approval status, and [Manage Power Platform apps in Teams](https://learn.microsoft.com/microsoftteams/manage-power-platform-apps) |
+| User can open the agent and chat, but citation link returns 403 or AuthorizationFailure | The Blob URL in `source_uri` requires Entra auth the end-user doesn't have | Either grant users **Storage Blob Data Reader** on the source storage account, or layer a SAS-token rewrite proxy on top of the blob URL before chunk upload |
 
-For the AI Search-side issues (indexer failures, vectorizer auth, blob 403s), see [06-troubleshooting.md § 4](./06-troubleshooting.md#4--ai-search-index--indexer).
+For the AI Search-side issues (indexer failures, vectorizer auth, blob 403s on the **indexer**, semantic ranker), see [06-troubleshooting.md § 4](./06-troubleshooting.md#4--ai-search-index--indexer).
 
 ---
 
@@ -250,12 +335,15 @@ For the AI Search-side issues (indexer failures, vectorizer auth, blob 403s), se
 
 - [Copilot Studio overview](https://learn.microsoft.com/microsoft-copilot-studio/fundamentals-what-is-copilot-studio)
 - [Copilot Studio licensing](https://learn.microsoft.com/microsoft-copilot-studio/requirements-licensing-subscriptions)
-- [Connect to Azure AI Search as a knowledge source](https://learn.microsoft.com/microsoft-copilot-studio/knowledge-add-azure-ai-search)
-- [Configure generative answers](https://learn.microsoft.com/microsoft-copilot-studio/nlu-generative-answers)
-- [Add your agent to Microsoft Teams](https://learn.microsoft.com/microsoft-copilot-studio/publication-add-bot-to-microsoft-teams)
-- [Publish your agent to Microsoft 365 Copilot](https://learn.microsoft.com/microsoft-copilot-studio/publication-add-bot-to-microsoft-copilot)
+- [Add Azure AI Search as a knowledge source](https://learn.microsoft.com/microsoft-copilot-studio/knowledge-azure-ai-search) — includes citation field convention and VNet support
+- [Knowledge sources summary](https://learn.microsoft.com/microsoft-copilot-studio/knowledge-copilot-studio) — includes the **Allow ungrounded responses** setting
+- [Orchestrate agent behavior with generative AI](https://learn.microsoft.com/microsoft-copilot-studio/advanced-generative-actions)
+- [Connect and configure an agent for Teams and Microsoft 365](https://learn.microsoft.com/microsoft-copilot-studio/publication-add-bot-to-microsoft-teams) — single combined channel reference
+- [Publish agents for Microsoft 365 Copilot](https://learn.microsoft.com/microsoft-365/copilot/extensibility/publish)
+- [Manage requested Copilot Studio agents](https://learn.microsoft.com/microsoft-365/copilot/agent-essentials/agent-lifecycle/agent-copilot-studio-requested) — admin approval flow
+- [Manage Power Platform apps in Teams](https://learn.microsoft.com/microsoftteams/manage-power-platform-apps)
 - [Power Platform environments overview](https://learn.microsoft.com/power-platform/admin/environments-overview)
-- [Microsoft 365 Copilot agent gallery](https://learn.microsoft.com/microsoft-365-copilot/agents/agents-overview)
+- [Index file content and metadata by using Azure AI Search](https://learn.microsoft.com/azure/architecture/ai-ml/architecture/search-blob-metadata) — `metadata_storage_path` convention
 
 ---
 
