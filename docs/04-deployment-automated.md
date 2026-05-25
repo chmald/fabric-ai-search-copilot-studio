@@ -20,10 +20,9 @@ The automated deployment path. Provisions the Azure platform layer via Bicep, th
 | Resource group | `main.bicep` (subscription scope) | Container for everything else |
 | Key Vault | `modules/keyvault.bicep` | RBAC-mode; for any non-managed-identity secrets |
 | Storage account + `raw/` + `chunks/` containers | `modules/storage.bicep` | Permanent canonical store |
-| Document Intelligence | `modules/docintelligence.bicep` | `prebuilt-read` OCR (Standard S0) |
-| Azure AI Foundry resource | `modules/aifoundry.bicep` | Model gateway hosting `text-embedding-3-large` + `gpt-4o` |
+| Azure AI Foundry resource | `modules/aifoundry.bicep` | Multi-service Cognitive Services account (`kind=AIServices`). Hosts `text-embedding-3-large` + `gpt-4o` deployments **and** serves Document Intelligence (`prebuilt-read` OCR) from the same account — no separate FormRecognizer resource is provisioned |
 | AI Search Standard S1 | `modules/search.bicep` | Hybrid + semantic ranker enabled, system-assigned MI |
-| RBAC role assignments | `modules/rbac.bicep` | Search MI → `Cognitive Services OpenAI User` on Foundry; Search MI → `Storage Blob Data Reader` on Storage |
+| RBAC role assignments | `modules/rbac.bicep` | Search MI → `Cognitive Services OpenAI User` on Foundry; Search MI → `Storage Blob Data Reader` on Storage; Foundry MI → `Storage Blob Data Reader` on Storage (so DI can fetch `raw/<file>` via `urlSource`) |
 
 **What is NOT deployed by Bicep** (configured by the post-deploy script):
 

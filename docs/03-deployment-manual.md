@@ -2,7 +2,7 @@
 
 Step-by-step manual build of the **Azure platform layer** of the RAG knowledge-base pattern. Assumes all of [02-prerequisites.md](./02-prerequisites.md) is complete.
 
-> **What this document is.** A no-IaC, click-through walkthrough that provisions the **Azure resources** in the pattern (RG, Key Vault, Storage, Document Intelligence, Azure AI Foundry + 2 model deployments, AI Search, RBAC, and the AI Search index / data source / indexer). The same Azure end-state is reproducible with [Bicep](./04-deployment-automated.md) — use this manual path when you want to learn the components hands-on or for one-off demo labs; use Bicep for repeatable / CI deployments.
+> **What this document is.** A no-IaC, click-through walkthrough that provisions the **Azure resources** in the pattern (RG, Key Vault, Storage, Azure AI Foundry + 2 model deployments + built-in Document Intelligence, AI Search, RBAC, and the AI Search index / data source / indexer). The same Azure end-state is reproducible with [Bicep](./04-deployment-automated.md) — use this manual path when you want to learn the components hands-on or for one-off demo labs; use Bicep for repeatable / CI deployments.
 
 > **What this document is NOT.** It does **not** cover the Fabric ingestion pipeline or the Copilot Studio agent. Both of those layers are always manual (no IaC surface exists for them today) and have their own dedicated runbooks:
 >
@@ -19,7 +19,7 @@ Step-by-step manual build of the **Azure platform layer** of the RAG knowledge-b
 
 | Layer | Owner | Doc | Automatable? |
 |---|---|---|---|
-| **Azure platform** (RG, KV, Storage, DI, Foundry, AI Search, RBAC, index/indexer) | This doc | **03 (this doc, manual)** or [04 (Bicep)](./04-deployment-automated.md) | Yes — via Bicep + post-deploy Python script |
+| **Azure platform** (RG, KV, Storage, Foundry+DI, AI Search, RBAC, index/indexer) | This doc | **03 (this doc, manual)** or [04 (Bicep)](./04-deployment-automated.md) | Yes — via Bicep + post-deploy Python script |
 | **Fabric workspace + ingest pipeline** | Fabric tenant admin + builder | [03b-fabric-setup.md](./03b-fabric-setup.md) | No — Fabric workspaces / Lakehouses / pipelines have no Bicep / ARM provider today |
 | **Copilot Studio agent + publishing** | Power Platform admin + builder | [03c-copilot-studio-setup.md](./03c-copilot-studio-setup.md) | No — Power Platform, not Azure |
 
@@ -27,7 +27,7 @@ Step-by-step manual build of the **Azure platform layer** of the RAG knowledge-b
 
 | Phase | What you build | ~Time | Validation at end |
 |---|---|---|---|
-| **1** | **Azure foundation:** RG + Key Vault + Blob + Document Intelligence + Azure AI Foundry + 2 model deployments + AI Search + RBAC | 60–90 min | All Azure resources deployed; identities + RBAC set |
+| **1** | **Azure foundation:** RG + Key Vault + Blob + Azure AI Foundry (multi-service — includes both OpenAI deployments and Document Intelligence) + AI Search + RBAC | 60–90 min | All Azure resources deployed; identities + RBAC set |
 | **4** | **AI Search index:** schema, integrated vectorizer, hybrid + semantic configuration; indexer pointed at Blob `chunks/` | 45–60 min | Indexer run succeeds; sample query returns chunks with semantic captions |
 
 In between Phase 1 and Phase 4 you switch to **[03b-fabric-setup.md](./03b-fabric-setup.md)** to build the Fabric ingest pipeline (which produces the chunk JSON files in Blob `chunks/` that the Phase 4 indexer consumes). After Phase 4 validates, switch to **[03c-copilot-studio-setup.md](./03c-copilot-studio-setup.md)** to build the agent on top of the populated index.
@@ -78,31 +78,19 @@ az storage container create --account-name $ST --name raw --auth-mode login
 az storage container create --account-name $ST --name chunks --auth-mode login
 ```
 
-> **`--allow-shared-key-access false`** disables the storage account access keys. Every reader and writer (AI Search indexer, Document Intelligence, Fabric pipeline, you) must authenticate with Entra ID via a managed identity / service principal / signed-in user. The container-creation commands above use `--auth-mode login` so they go through your Azure CLI identity rather than account keys.
+> **`--allow-shared-key-access false`** disables the storage account access keys. Every reader and writer (AI Search indexer, Document Intelligence — served from the Foundry account — Fabric pipeline, you) must authenticate with Entra ID via a managed identity / service principal / signed-in user. The container-creation commands above use `--auth-mode login` so they go through your Azure CLI identity rather than account keys.
 
-### 1.4 Create Document Intelligence
+### 1.4 Document Intelligence — served by the Foundry resource (no separate resource to create)
 
-In the Azure portal:
+The pattern does **not** provision a standalone `Microsoft.CognitiveServices/accounts` of `kind=FormRecognizer`. Document Intelligence is exposed by the **Azure AI Foundry resource** you create in [§ 1.5](#15-create-azure-ai-foundry-resource--openai-deployments) below — a Foundry account (`kind=AIServices`) is a multi-service Cognitive Services resource that provides Azure OpenAI **and** Document Intelligence **and** Vision **and** Translator **and** Speech from the same resource ID, the same managed identity, and a single set of RBAC role assignments.
 
-1. **Create a resource → Document Intelligence**
-2. Resource group: `rg-rag-demo-eus`
-3. Region: same as the rest
-4. Pricing tier: **Standard S0** (not Free — free is page-limited)
-5. Create
-6. After deployment: **Identity → System assigned → Status: On → Save**. Note the **Object (principal) ID** — you grant this Blob Data Reader in step 1.7 so DI can fetch private blobs via `urlSource`.
-7. **Networking / Resource management → Disable local authentication**. Or via CLI:
-   ```bash
-   az cognitiveservices account update \
-     --name di-rag-demo-eus --resource-group $RG \
-     --custom-domain di-rag-demo-eus \
-     --properties '{"disableLocalAuth": true}'
-   ```
+The Fabric OCR notebook (see [03b-fabric-setup.md § F7.2](./03b-fabric-setup.md#f72-nb_ocr_chunk_upload)) points the `azure-ai-documentintelligence` Python SDK at the Foundry resource's **Cognitive Services endpoint** — i.e. `https://<foundry-name>.cognitiveservices.azure.com/` (note: different host suffix from the OpenAI-compatible `<foundry-name>.openai.azure.com/` host used by the AI Search vectorizer, but the same underlying resource).
 
-No keys are stored anywhere. Clients call DI with `Authorization: Bearer <entra-token>` (token resource: `https://cognitiveservices.azure.com/`) and a role assignment of **Cognitive Services User** on this resource.
+No action in this section. Continue to § 1.5.
 
 ### 1.5 Create Azure AI Foundry resource + OpenAI deployments
 
-> **Why a Foundry resource, not a standalone Azure OpenAI resource?** The Azure AI Foundry resource (kind `AIServices`) is the strategic Microsoft model-gateway resource. It hosts OpenAI models (and the broader Foundry catalog: Cohere, Llama, Phi, Mistral, …) under a single resource and exposes an OpenAI-compatible endpoint at `https://<resource>.openai.azure.com/` — so the AI Search integrated `azureOpenAI` vectorizer works against it unchanged. This pattern uses Foundry's model-gateway capability only; Foundry's agent runtime (Agent Service / Hub / Projects) is **not** used here — Copilot Studio fills the agent role. Foundry agent runtime is the right addition for engagements that need multi-agent routing, custom tool calling, or query triage beyond knowledge-base Q&A.
+> **Why a Foundry resource, not a standalone Azure OpenAI resource?** The Azure AI Foundry resource (kind `AIServices`) is the strategic Microsoft model-gateway resource. It hosts OpenAI models (and the broader Foundry catalog: Cohere, Llama, Phi, Mistral, …) under a single resource and exposes an OpenAI-compatible endpoint at `https://<resource>.openai.azure.com/` — so the AI Search integrated `azureOpenAI` vectorizer works against it unchanged. It is **also a multi-service Cognitive Services account**, so the same resource serves the **Document Intelligence** `prebuilt-read` endpoint used by the Fabric OCR notebook (at `https://<resource>.cognitiveservices.azure.com/`) — no separate FormRecognizer resource is needed. This pattern uses Foundry's model-gateway capability + the built-in DI endpoint; Foundry's agent runtime (Agent Service / Hub / Projects) is **not** used here — Copilot Studio fills the agent role. Foundry agent runtime is the right addition for engagements that need multi-agent routing, custom tool calling, or query triage beyond knowledge-base Q&A.
 
 In the Azure portal:
 
@@ -114,9 +102,11 @@ In the Azure portal:
    - Deploy `gpt-4o` → name it `chat`
    - For both: set capacity to 10K TPM for demo
    - (Optional) browse the Foundry catalog for non-OpenAI models if you plan to extend later; this pattern only requires the two OpenAI deployments above
-5. Confirm the OpenAI-compatible endpoint: **Endpoints** view shows `https://aif-rag-demo-eus.openai.azure.com/` — that's the value the AI Search vectorizer will use
-6. **Identity → System assigned → Status: On** (not required by this pattern's flows but enables future scenarios)
-7. **Disable local authentication** — same CLI pattern as 1.4:
+5. Confirm endpoints — the **Endpoints** view shows both host names for this single resource:
+   - `https://aif-rag-demo-eus.openai.azure.com/` — used by the AI Search OpenAI vectorizer + embedding skill
+   - `https://aif-rag-demo-eus.cognitiveservices.azure.com/` — used by the Fabric OCR notebook to call Document Intelligence `prebuilt-read`
+6. **Identity → System assigned → Status: On → Save**. Note the **Object (principal) ID** — the same MI handles both Azure OpenAI calls **and** Document Intelligence `urlSource` blob fetches, so you grant this single MI **Storage Blob Data Reader** in step 1.7.
+7. **Disable local authentication**:
    ```bash
    az cognitiveservices account update \
      --name aif-rag-demo-eus --resource-group $RG \
@@ -124,7 +114,7 @@ In the Azure portal:
      --properties '{"disableLocalAuth": true}'
    ```
 
-No keys are stored anywhere. The AI Search integrated vectorizer authenticates via its system-assigned managed identity (granted **Cognitive Services User** on this resource in step 1.7).
+No keys are stored anywhere. The AI Search service uses its system-assigned managed identity to call the embedding deployment — both at **query time** (the `azureOpenAI` vectorizer on the index, configured in § 4.1) **and at index time** (the `AzureOpenAIEmbeddingSkill` in the skillset, configured in § 4.3). Both call paths require the MI to have **Cognitive Services OpenAI User** on this resource (granted in step 1.7 — *not* the similarly-named **Cognitive Services User** role, which doesn't include OpenAI data-plane access). The Fabric OCR notebook calls Document Intelligence on the same resource using its own dedicated service principal (see [03b-fabric-setup.md § F2.2](./03b-fabric-setup.md#f22-create-a-di-caller-service-principal-for-mssal-from-the-notebook)) with **Cognitive Services User** on the same resource.
 
 ### 1.6 Create AI Search
 
@@ -140,35 +130,38 @@ In the Azure portal:
    ```bash
    az search service update \
      --name srch-rag-demo-eus --resource-group $RG \
-     --auth-options aadOrApiKey \
-     --aad-auth-failure-mode http401WithBearerChallenge \
      --disable-local-auth true
    ```
-   (The `aadOrApiKey` option still controls the bearer-challenge configuration; `--disable-local-auth true` rejects all API keys regardless.)
+   > **Do NOT pass `--auth-options aadOrApiKey` together with `--disable-local-auth true`.** The Azure Search API treats the two as mutually exclusive and rejects the call with `BadRequest: AuthOptions must be null if DisableLocalAuth is true`. With local auth disabled, unauthenticated requests already receive a proper `401` with a `WWW-Authenticate: Bearer ...` challenge by default — no `authOptions` configuration is required.
 8. **Semantic ranker**: confirm enabled (Standard tier includes a free quota; Free plan is acceptable for demo)
 
 No admin or query keys are stored anywhere. All callers (your post-deploy work, Copilot Studio, app code) authenticate with Entra bearer tokens (resource: `https://search.azure.com/`).
 
 ### 1.7 RBAC wiring
 
-With API keys disabled across Foundry, DI, AI Search, and Storage, **every** data-plane interaction depends on a role assignment. Skip any of these and the corresponding service call will return 401 or 403.
+With API keys disabled across Foundry, AI Search, and Storage, **every** data-plane interaction depends on a role assignment. Skip any of these and the corresponding service call will return 401 or 403.
 
 ```bash
 # Identities
 SEARCH_OBJID=<AI Search system-assigned MI object ID from step 1.6>
-DI_OBJID=<Document Intelligence system-assigned MI object ID from step 1.4>
+AIF_OBJID=<Foundry resource system-assigned MI object ID from step 1.5>
 ME_OBJID=$(az ad signed-in-user show --query id -o tsv)
 
 # Resource IDs
 AIF_RES_ID=$(az cognitiveservices account show --name aif-rag-demo-eus -g $RG --query id -o tsv)
-DI_RES_ID=$(az cognitiveservices account show --name di-rag-demo-eus -g $RG --query id -o tsv)
 SRCH_RES_ID=$(az search service show --name srch-rag-demo-eus -g $RG --query id -o tsv)
 ST_RES_ID=$(az storage account show --name $ST -g $RG --query id -o tsv)
 
 # 1. AI Search → Foundry (integrated vectorizer calls the embedding deployment)
+#    CRITICAL: This must be "Cognitive Services OpenAI User" — NOT the similarly
+#    named "Cognitive Services User". The latter grants data-plane access to
+#    non-OpenAI Cognitive Services (Document Intelligence, Translator, etc.) but
+#    does NOT cover Azure OpenAI / Foundry OpenAI deployments. Using the wrong
+#    role causes the indexer to succeed while silently committing documents with
+#    a null content_vector (see docs/06-troubleshooting.md § 4.1).
 az role assignment create \
   --assignee-object-id $SEARCH_OBJID --assignee-principal-type ServicePrincipal \
-  --role "Cognitive Services User" \
+  --role "Cognitive Services OpenAI User" \
   --scope $AIF_RES_ID
 
 # 2. AI Search → Blob (indexer pulls chunk JSON from chunks/)
@@ -177,10 +170,11 @@ az role assignment create \
   --role "Storage Blob Data Reader" \
   --scope $ST_RES_ID
 
-# 3. Document Intelligence → Blob (urlSource fetches raw/<file> via DI's own MI;
-#    required because shared-key access on Storage is disabled and you can't pass a SAS)
+# 3. Foundry MI → Blob (Document Intelligence runs inside the Foundry account; it
+#    uses the Foundry MI to fetch raw/<file> via urlSource. Required because
+#    shared-key access on Storage is disabled and you can't pass a SAS.)
 az role assignment create \
-  --assignee-object-id $DI_OBJID --assignee-principal-type ServicePrincipal \
+  --assignee-object-id $AIF_OBJID --assignee-principal-type ServicePrincipal \
   --role "Storage Blob Data Reader" \
   --scope $ST_RES_ID
 
@@ -204,17 +198,18 @@ az role assignment create \
 
 > **Propagation:** Azure role assignments take up to **15 minutes** to be honored, especially cross-resource-type assignments (Search MI → Foundry, Search MI → Storage). If subsequent steps return 401 or 403, wait and retry before debugging further.
 
-Fabric workspace identity → Blob (Data Contributor) and Fabric workspace identity → Document Intelligence (Cognitive Services User) are configured later from the Fabric side once the workspace identity exists, in [03b-fabric-setup.md § Phase F2.1](./03b-fabric-setup.md#f21-grant-the-workspace-identity-the-required-roles). Skip them here.
+Fabric workspace identity → Blob (Data Contributor) and DI-caller SP → Foundry (Cognitive Services User) are configured later from the Fabric side once the workspace identity / SP exist, in [03b-fabric-setup.md §§ F2.1–F2.2](./03b-fabric-setup.md#f21-grant-the-workspace-identity-the-required-roles). Skip them here.
 
 ### Phase 1 validation
 
-- [ ] All 6 Azure resources exist in the same RG and region
-- [ ] Foundry, Document Intelligence, and AI Search show **Local authentication: Disabled**
+- [ ] All 5 Azure resources exist in the same RG and region (RG, Key Vault, Storage, Foundry, AI Search — note: **no separate Document Intelligence resource**; DI is served by the Foundry account)
+- [ ] Foundry and AI Search show **Local authentication: Disabled**
 - [ ] Storage account shows **Allow storage account key access: Disabled**
-- [ ] AI Search system-assigned MI has both role assignments visible in IAM (Cognitive Services User on Foundry, Storage Blob Data Reader on Storage)
-- [ ] Document Intelligence system-assigned MI has **Storage Blob Data Reader** on the storage account
+- [ ] AI Search system-assigned MI has both role assignments visible in IAM (**Cognitive Services OpenAI User** on Foundry, **Storage Blob Data Reader** on Storage). Verify the OpenAI variant of the role specifically — a plain `Cognitive Services User` assignment will let the indexer run but produce zero-vector documents.
+- [ ] Foundry resource system-assigned MI has **Storage Blob Data Reader** on the storage account (required for Document Intelligence `urlSource` fetches)
 - [ ] You have **Search Service Contributor** + **Search Index Data Contributor** on the AI Search service
 - [ ] Foundry resource has two deployments: `embedding` (text-embedding-3-large) and `chat` (gpt-4o)
+- [ ] Foundry resource exposes **both** host names: `<name>.openai.azure.com` (OpenAI / vectorizer) and `<name>.cognitiveservices.azure.com` (Document Intelligence and other Cognitive Services)
 - [ ] Key Vault exists and you have **Key Vault Secrets Officer** on it (used later if any secret-based fallback becomes necessary; this pattern stores no API keys in it)
 
 ---
@@ -306,7 +301,9 @@ Authorization: Bearer <token from `az account get-access-token --resource https:
 }
 ```
 
-> **Critical:** the `vectorizers[0].azureOpenAIParameters.authIdentity` set to `null` means **use the service's system-assigned managed identity**. The role assignment from Phase 1.7 (Cognitive Services User on the Foundry resource) is what makes this work. If you used a user-assigned identity instead, set the identity object here. The `resourceUri` uses the Foundry resource's OpenAI-compatible endpoint (`*.openai.azure.com`) — Foundry resources expose this for backwards-compatible tooling like the AI Search vectorizer.
+> **Critical:** the `vectorizers[0].azureOpenAIParameters.authIdentity` set to `null` means **use the service's system-assigned managed identity**. The role assignment from Phase 1.7 (**Cognitive Services OpenAI User** on the Foundry resource) is what makes this work — confirm you granted the OpenAI variant of the role, not the similarly-named plain `Cognitive Services User`. If you used a user-assigned identity instead, set the identity object here. The `resourceUri` uses the Foundry resource's OpenAI-compatible endpoint (`*.openai.azure.com`) — Foundry resources expose this for backwards-compatible tooling like the AI Search vectorizer.
+>
+> **What this vectorizer does NOT do.** It runs at **query time** — it converts a text query from Copilot Studio into a vector before searching. It does **not** generate the per-document embeddings stored in the index. For that you need a **skillset** with an `AzureOpenAIEmbeddingSkill` (created in [§ 4.3](#43-create-the-skillset-indexing-time-vectorization)) and an `outputFieldMapping` on the indexer (added in [§ 4.4](#44-create-the-indexer)).
 
 ### 4.2 Create the data source
 
@@ -327,7 +324,56 @@ Content-Type: application/json
 
 Using the `ResourceId=...;` connection string enables **managed-identity authentication** — the indexer authenticates to Blob with its system-assigned MI (granted Storage Blob Data Reader in Phase 1.7). No storage account key is referenced or required.
 
-### 4.3 Create the indexer
+### 4.3 Create the skillset (indexing-time vectorization)
+
+> **Why this step exists.** The `azureOpenAI` vectorizer you put on the index in [§ 4.1](#41-create-the-index) handles **query-time** text-to-vector conversion only — it kicks in when Copilot Studio sends a text query and the search service needs to convert that query to a vector for retrieval. It does **not** generate the per-document embeddings stored in the index.
+>
+> To populate `content_vector` for each indexed chunk at ingestion time, you need a **skillset** with an `AzureOpenAIEmbeddingSkill`, and you wire that skill's output into the index's `content_vector` field via the indexer's `outputFieldMappings` (added in [§ 4.4](#44-create-the-indexer) below).
+>
+> **Skip this step** and the indexer will run cleanly with `itemsProcessed: N`, zero errors, zero warnings — but every document will have a null `content_vector`, the service's `vectorIndexSize` will stay at `0`, and Copilot Studio queries (which are vector-first) will return nothing. See [06-troubleshooting.md § 4.1](./06-troubleshooting.md#41-vectorizer-auth-failure-loud-or-silent) for the silent-failure signature.
+
+```http
+PUT https://srch-rag-demo-eus.search.windows.net/skillsets/skill-rag-embeddings?api-version=2024-07-01
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "name": "skill-rag-embeddings",
+  "description": "Generate vector embeddings for chunk content via the Foundry embedding deployment",
+  "skills": [
+    {
+      "@odata.type": "#Microsoft.Skills.Text.AzureOpenAIEmbeddingSkill",
+      "name": "embed-content",
+      "description": "Vectorize the chunk text",
+      "context": "/document",
+      "resourceUri": "https://aif-rag-demo-eus.openai.azure.com",
+      "deploymentId": "embedding",
+      "modelName": "text-embedding-3-large",
+      "dimensions": 3072,
+      "inputs": [
+        { "name": "text", "source": "/document/content" }
+      ],
+      "outputs": [
+        { "name": "embedding", "targetName": "content_vector_embedding" }
+      ],
+      "authIdentity": null
+    }
+  ]
+}
+```
+
+The skill calls the Foundry OpenAI endpoint using the search service's system-assigned managed identity (`"authIdentity": null`). Phase 1.7 step 1 already granted that MI **Cognitive Services OpenAI User** on the Foundry resource. Verify with:
+
+```bash
+SEARCH_OBJID=<AI Search system-assigned MI object ID>
+AIF_RES_ID=$(az cognitiveservices account show --name aif-rag-demo-eus -g $RG --query id -o tsv)
+az role assignment list --scope $AIF_RES_ID --fill-principal-name false \
+  --query "[?principalId=='$SEARCH_OBJID'].roleDefinitionName" -o tsv
+```
+
+You should see `Cognitive Services OpenAI User`. If you see plain `Cognitive Services User` instead, re-do Phase 1.7 step 1 — the plain role grants data-plane access to non-OpenAI Cognitive Services but does NOT grant OpenAI permissions.
+
+### 4.4 Create the indexer
 
 ```http
 PUT https://srch-rag-demo-eus.search.windows.net/indexers/ixr-chunks?api-version=2024-07-01
@@ -338,6 +384,7 @@ Content-Type: application/json
   "name": "ixr-chunks",
   "dataSourceName": "ds-chunks",
   "targetIndexName": "idx-rag-documents",
+  "skillsetName": "skill-rag-embeddings",
   "parameters": {
     "configuration": { "parsingMode": "json" }
   },
@@ -353,13 +400,19 @@ Content-Type: application/json
     { "sourceFieldName": "ingest_ts",  "targetFieldName": "ingest_ts" },
     { "sourceFieldName": "metadata",   "targetFieldName": "metadata" }
   ],
+  "outputFieldMappings": [
+    {
+      "sourceFieldName": "/document/content_vector_embedding",
+      "targetFieldName": "content_vector"
+    }
+  ],
   "schedule": { "interval": "PT5M" }
 }
 ```
 
-Note: `content_vector` is **not** in field mappings — the integrated vectorizer generates it automatically from `content` at index time.
+`content_vector` is **not** in `fieldMappings` (the chunk JSON has no embedding to copy) — it's populated via `outputFieldMappings`, which reads the skill's `embedding` output (the skill writes it to `/document/content_vector_embedding` per the `targetName` in [§ 4.3](#43-create-the-skillset-indexing-time-vectorization)) and writes it to the index's `content_vector` field.
 
-### 4.4 Run the indexer manually
+### 4.5 Run the indexer manually
 
 ```bash
 TOKEN=$(az account get-access-token --resource https://search.azure.com --query accessToken -o tsv)
@@ -378,7 +431,17 @@ curl -H "Authorization: Bearer $TOKEN" \
 
 A successful run shows `lastResult.status = "success"` and `itemsProcessed` matching the number of chunk JSONs in Blob.
 
-### 4.5 Smoke-test the index
+> **Confirm vectors are actually being generated, not just text.** A successful indexer run with `itemsProcessed > 0` is necessary but not sufficient. Also check the service's `vectorIndexSize` counter — it should be > 0 once documents are indexed:
+>
+> ```bash
+> curl -sH "Authorization: Bearer $TOKEN" \
+>   "https://srch-rag-demo-eus.search.windows.net/servicestats?api-version=2024-07-01" \
+>   | jq '.counters | {documentCount, vectorIndexSize, storageSize}'
+> ```
+>
+> If `documentCount > 0` but `vectorIndexSize: 0`, you're hitting silent vectorizer failure — almost always the missing skillset (§ 4.3 skipped) or the wrong role on the AI Search MI (plain `Cognitive Services User` instead of `Cognitive Services OpenAI User`). See [06-troubleshooting.md § 4.1](./06-troubleshooting.md#41-vectorizer-auth-failure-loud-or-silent).
+
+### 4.6 Smoke-test the index
 
 Run a sample query that exercises hybrid + semantic ranker:
 
@@ -416,7 +479,10 @@ Confirm:
 
 - [ ] Index exists with vector + semantic configurations
 - [ ] Data source uses managed-identity connection string (no keys)
+- [ ] **Skillset `skill-rag-embeddings` exists** with one `AzureOpenAIEmbeddingSkill` and the indexer references it via `skillsetName`
+- [ ] Indexer has an `outputFieldMapping` from `/document/content_vector_embedding` to `content_vector`
 - [ ] Indexer last run = `success`, items processed = chunk JSON count
+- [ ] Service stats show `vectorIndexSize > 0` whenever `documentCount > 0` (proves vectors are populating)
 - [ ] Test query returns chunks with semantic re-ranker scores
 
 ---

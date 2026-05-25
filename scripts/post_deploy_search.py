@@ -25,12 +25,22 @@ What this script does
 2. Creates (or updates) the search index `idx-rag-documents`:
      - text + vector + metadata fields (per docs/01-architecture.md schema)
      - integrated `azureOpenAI` vectorizer pointed at the Foundry embedding deployment
+       (this vectorizer handles QUERY-time text→vector conversion when Copilot Studio
+        sends a text query — it does NOT generate vectors at index time)
      - semantic configuration `semantic-default`
 3. Creates (or updates) the data source `ds-chunks` using a managed-identity ResourceId
    connection string to the storage account's `chunks/` container
-4. Creates (or updates) the indexer `ixr-chunks` with a 5-minute schedule
-5. Optionally runs the indexer manually (--run-indexer)
-6. In --verify mode: hits the index $count + a semantic test query + indexer status
+4. Creates (or updates) the skillset `skill-rag-embeddings` with an
+   `AzureOpenAIEmbeddingSkill` that generates the per-chunk embedding at INDEX time.
+   Without this skill, the indexer commits documents with a null `content_vector`,
+   the index reports `vectorIndexSize: 0`, and Copilot Studio vector queries return
+   nothing. See docs/06-troubleshooting.md § 4.1.
+5. Creates (or updates) the indexer `ixr-chunks` with a 5-minute schedule, the
+   skillset attached, and an `outputFieldMapping` that writes the skill's embedding
+   output to the index's `content_vector` field
+6. Optionally runs the indexer manually (--run-indexer)
+7. In --verify mode: hits the index $count + a semantic test query + indexer status
+   + service stats (confirms vectorIndexSize > 0 when documents > 0)
 
 The script is idempotent — safe to re-run if a previous run failed partway.
 
@@ -204,11 +214,57 @@ def datasource_payload(ids: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def skillset_name(ids: dict[str, Any]) -> str:
+    """Skillset name — honors `searchSkillsetName` in ids file, else default."""
+    return ids.get("searchSkillsetName", "skill-rag-embeddings")
+
+
+def skillset_payload(ids: dict[str, Any]) -> dict[str, Any]:
+    """Skillset with a single AzureOpenAIEmbeddingSkill.
+
+    The skill runs at INDEX time and writes the embedding to /document/content_vector_embedding.
+    The indexer's outputFieldMappings (see `indexer_payload`) wire that to the index's
+    `content_vector` field.
+
+    Auth: the skill calls the Foundry OpenAI endpoint using the search service's
+    system-assigned managed identity (authIdentity=None). The MI must have
+    'Cognitive Services OpenAI User' on the Foundry resource — NOT the similarly
+    named 'Cognitive Services User' role, which doesn't grant OpenAI data-plane
+    access. See docs/06-troubleshooting.md § 4.1.
+    """
+    is_large = "large" in ids.get("embeddingModel", "").lower()
+    return {
+        "name": skillset_name(ids),
+        "description": (
+            "Generate vector embeddings for chunk content via the Foundry embedding "
+            "deployment. Required for index-time vectorization — the vectorizer on the "
+            "index handles QUERY-time only."
+        ),
+        "skills": [
+            {
+                "@odata.type": "#Microsoft.Skills.Text.AzureOpenAIEmbeddingSkill",
+                "name": "embed-content",
+                "description": "Vectorize the chunk text",
+                "context": "/document",
+                "resourceUri": ids["foundryOpenAIEndpoint"],
+                "deploymentId": ids["embeddingDeployment"],
+                "modelName": ids["embeddingModel"],
+                "dimensions": 3072 if is_large else 1536,
+                "inputs": [{"name": "text", "source": "/document/content"}],
+                "outputs": [{"name": "embedding", "targetName": "content_vector_embedding"}],
+                # authIdentity=None => use search service's system-assigned MI
+                "authIdentity": None,
+            }
+        ],
+    }
+
+
 def indexer_payload(ids: dict[str, Any]) -> dict[str, Any]:
     return {
         "name": ids["searchIndexerName"],
         "dataSourceName": ids["searchDataSourceName"],
         "targetIndexName": ids["searchIndexName"],
+        "skillsetName": skillset_name(ids),
         "parameters": {"configuration": {"parsingMode": "json"}},
         "fieldMappings": [
             {"sourceFieldName": "id",         "targetFieldName": "id"},
@@ -221,6 +277,13 @@ def indexer_payload(ids: dict[str, Any]) -> dict[str, Any]:
             {"sourceFieldName": "page_end",   "targetFieldName": "page_end"},
             {"sourceFieldName": "ingest_ts",  "targetFieldName": "ingest_ts"},
             {"sourceFieldName": "metadata",   "targetFieldName": "metadata"},
+        ],
+        # Wires the skillset's embedding output into the index's content_vector field.
+        "outputFieldMappings": [
+            {
+                "sourceFieldName": "/document/content_vector_embedding",
+                "targetFieldName": "content_vector",
+            }
         ],
         "schedule": {"interval": "PT5M"},
     }
@@ -241,9 +304,15 @@ def configure(ids: dict[str, Any], tokens: SearchTokenProvider) -> None:
     print(f"[OK] Data source '{ids['searchDataSourceName']}' created "
           f"(managed-identity connection to {ids['storageAccount']}/{ids['chunksContainer']}).")
 
+    sk_name = skillset_name(ids)
+    print(f"[..] Creating/updating skillset: {sk_name}")
+    search_put(endpoint, tokens, "skillsets", sk_name, skillset_payload(ids))
+    print(f"[OK] Skillset '{sk_name}' created (AzureOpenAIEmbeddingSkill → content_vector).")
+
     print(f"[..] Creating/updating indexer: {ids['searchIndexerName']}")
     search_put(endpoint, tokens, "indexers", ids["searchIndexerName"], indexer_payload(ids))
-    print(f"[OK] Indexer '{ids['searchIndexerName']}' created (schedule: PT5M).")
+    print(f"[OK] Indexer '{ids['searchIndexerName']}' created "
+          f"(schedule: PT5M, skillset: {sk_name}).")
 
 
 def run_indexer(ids: dict[str, Any], tokens: SearchTokenProvider) -> None:
@@ -315,6 +384,30 @@ def verify(ids: dict[str, Any], tokens: SearchTokenProvider) -> int:
             errors += 1
     except Exception as e:
         print(f"[FAIL] Indexer status check: {e}")
+        errors += 1
+
+    # 4. Service stats — confirm vectorIndexSize > 0 whenever documentCount > 0.
+    # Catches the "silent vectorizer failure" mode where the indexer reports success
+    # but vectors aren't actually being generated (missing skillset, missing role,
+    # role-name confusion). See docs/06-troubleshooting.md § 4.1.
+    try:
+        stats = search_get(endpoint, tokens, "servicestats?")
+        counters = stats.get("counters", {})
+        doc_count = counters.get("documentCount", {}).get("usage", 0)
+        vec_size = counters.get("vectorIndexSize", {}).get("usage", 0)
+        if doc_count == 0:
+            print(f"[OK] Service stats: documentCount=0, vectorIndexSize=0 "
+                  f"(expected on empty index — run the Fabric pipeline to ingest chunks).")
+        elif vec_size > 0:
+            print(f"[OK] Service stats: documentCount={doc_count}, vectorIndexSize={vec_size} bytes "
+                  f"(vectors are populating correctly).")
+        else:
+            print(f"[FAIL] Service stats: documentCount={doc_count} but vectorIndexSize=0. "
+                  f"Documents are indexed but vectors are NOT being generated. "
+                  f"This is silent vectorizer failure — see docs/06-troubleshooting.md § 4.1.")
+            errors += 1
+    except Exception as e:
+        print(f"[FAIL] Service stats check: {e}")
         errors += 1
 
     return errors

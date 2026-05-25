@@ -133,7 +133,7 @@ Write-Host (" Foundry         : {0}" -f $summary.foundryResource)
 Write-Host (" Foundry endpoint: {0}" -f $summary.foundryOpenAIEndpoint)
 Write-Host ("   embedding     : {0} ({1})" -f $summary.embeddingDeployment, $summary.embeddingModel)
 Write-Host ("   chat          : {0} ({1})" -f $summary.chatDeployment, $summary.chatModel)
-Write-Host (" Doc Intelligence: {0}" -f $summary.documentIntelligence)
+Write-Host ("   doc intel.    : {0} (same Foundry account, multi-service)" -f $summary.documentIntelligenceEndpoint)
 Write-Host (" AI Search       : {0}" -f $summary.searchService)
 Write-Host (" AI Search MI ID : {0}" -f $summary.searchPrincipalId)
 Write-Host ""

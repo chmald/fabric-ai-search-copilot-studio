@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.43.8.12551",
-      "templateHash": "11537740717671611697"
+      "templateHash": "11349243527878607216"
     }
   },
   "parameters": {
@@ -130,7 +130,6 @@
     "rgName": "[format('rg-{0}', variables('nameSuffix'))]",
     "kvName": "[take(format('kv-{0}', variables('nameSuffix')), 24)]",
     "aifName": "[format('aif-{0}', variables('nameSuffix'))]",
-    "diName": "[format('di-{0}', variables('nameSuffix'))]",
     "searchName": "[format('srch-{0}', variables('nameSuffix'))]",
     "mergedTags": "[union(parameters('tags'), createObject('environment', parameters('env'), 'region', parameters('location')))]"
   },
@@ -630,117 +629,6 @@
     {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
-      "name": "di-deploy",
-      "resourceGroup": "[variables('rgName')]",
-      "properties": {
-        "expressionEvaluationOptions": {
-          "scope": "inner"
-        },
-        "mode": "Incremental",
-        "parameters": {
-          "name": {
-            "value": "[variables('diName')]"
-          },
-          "location": {
-            "value": "[parameters('location')]"
-          },
-          "tags": {
-            "value": "[variables('mergedTags')]"
-          }
-        },
-        "template": {
-          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
-          "contentVersion": "1.0.0.0",
-          "metadata": {
-            "_generator": {
-              "name": "bicep",
-              "version": "0.43.8.12551",
-              "templateHash": "11177704627398969988"
-            }
-          },
-          "parameters": {
-            "name": {
-              "type": "string",
-              "metadata": {
-                "description": "Document Intelligence resource name."
-              }
-            },
-            "location": {
-              "type": "string",
-              "metadata": {
-                "description": "Azure region."
-              }
-            },
-            "tags": {
-              "type": "object",
-              "defaultValue": {},
-              "metadata": {
-                "description": "Resource tags."
-              }
-            },
-            "sku": {
-              "type": "string",
-              "defaultValue": "S0",
-              "allowedValues": [
-                "F0",
-                "S0"
-              ],
-              "metadata": {
-                "description": "SKU. F0 = free tier (500 pages/month, demo only). S0 = standard."
-              }
-            }
-          },
-          "resources": [
-            {
-              "type": "Microsoft.CognitiveServices/accounts",
-              "apiVersion": "2024-10-01",
-              "name": "[parameters('name')]",
-              "location": "[parameters('location')]",
-              "tags": "[parameters('tags')]",
-              "kind": "FormRecognizer",
-              "sku": {
-                "name": "[parameters('sku')]"
-              },
-              "identity": {
-                "type": "SystemAssigned"
-              },
-              "properties": {
-                "customSubDomainName": "[parameters('name')]",
-                "publicNetworkAccess": "Enabled",
-                "networkAcls": {
-                  "defaultAction": "Allow"
-                },
-                "disableLocalAuth": true
-              }
-            }
-          ],
-          "outputs": {
-            "id": {
-              "type": "string",
-              "value": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('name'))]"
-            },
-            "name": {
-              "type": "string",
-              "value": "[parameters('name')]"
-            },
-            "endpoint": {
-              "type": "string",
-              "value": "[reference(resourceId('Microsoft.CognitiveServices/accounts', parameters('name')), '2024-10-01').endpoint]"
-            },
-            "systemAssignedPrincipalId": {
-              "type": "string",
-              "value": "[reference(resourceId('Microsoft.CognitiveServices/accounts', parameters('name')), '2024-10-01', 'full').identity.principalId]"
-            }
-          }
-        }
-      },
-      "dependsOn": [
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('rgName'))]"
-      ]
-    },
-    {
-      "type": "Microsoft.Resources/deployments",
-      "apiVersion": "2025-04-01",
       "name": "search-deploy",
       "resourceGroup": "[variables('rgName')]",
       "properties": {
@@ -769,7 +657,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.43.8.12551",
-              "templateHash": "1025811877349934409"
+              "templateHash": "7050220694575744579"
             }
           },
           "parameters": {
@@ -862,11 +750,6 @@
                 "encryptionWithCmk": {
                   "enforcement": "Unspecified"
                 },
-                "authOptions": {
-                  "aadOrApiKey": {
-                    "aadAuthFailureMode": "http401WithBearerChallenge"
-                  }
-                },
                 "disableLocalAuth": true
               }
             }
@@ -909,8 +792,8 @@
           "searchPrincipalId": {
             "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('rgName')), 'Microsoft.Resources/deployments', 'search-deploy'), '2025-04-01').outputs.systemAssignedPrincipalId.value]"
           },
-          "docIntelPrincipalId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('rgName')), 'Microsoft.Resources/deployments', 'di-deploy'), '2025-04-01').outputs.systemAssignedPrincipalId.value]"
+          "foundryPrincipalId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('rgName')), 'Microsoft.Resources/deployments', 'foundry-deploy'), '2025-04-01').outputs.systemAssignedPrincipalId.value]"
           },
           "storageAccountName": {
             "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('rgName')), 'Microsoft.Resources/deployments', 'storage-deploy'), '2025-04-01').outputs.name.value]"
@@ -935,7 +818,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.43.8.12551",
-              "templateHash": "15932081274880064643"
+              "templateHash": "14317285307206387440"
             }
           },
           "parameters": {
@@ -945,10 +828,10 @@
                 "description": "AI Search service system-assigned managed identity principal ID."
               }
             },
-            "docIntelPrincipalId": {
+            "foundryPrincipalId": {
               "type": "string",
               "metadata": {
-                "description": "Document Intelligence system-assigned managed identity principal ID."
+                "description": "Foundry resource system-assigned managed identity principal ID. Granted Storage Blob Data Reader so Document Intelligence (served from the same Foundry account) can fetch raw/<file> via urlSource."
               }
             },
             "storageAccountName": {
@@ -990,7 +873,7 @@
           },
           "variables": {
             "roleIds": {
-              "cognitiveServicesUser": "a97b65f3-24c7-4388-baec-2e87135dc908",
+              "cognitiveServicesOpenAIUser": "5e0bd9bd-7b93-4f28-af87-19fc36ad61bd",
               "storageBlobDataReader": "2a2b9908-6ea1-4ae2-8e65-a410df84e7d1",
               "searchServiceContributor": "7ca78c08-252a-4471-8644-bb5ff32d4ba0",
               "searchIndexDataContributor": "8ebe5a00-799e-43f5-93ac-243d3dce84a7"
@@ -1001,11 +884,11 @@
               "type": "Microsoft.Authorization/roleAssignments",
               "apiVersion": "2022-04-01",
               "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('foundryAccountName'))]",
-              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('foundryAccountName')), parameters('searchPrincipalId'), variables('roleIds').cognitiveServicesUser)]",
+              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('foundryAccountName')), parameters('searchPrincipalId'), variables('roleIds').cognitiveServicesOpenAIUser)]",
               "properties": {
                 "principalId": "[parameters('searchPrincipalId')]",
                 "principalType": "ServicePrincipal",
-                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('roleIds').cognitiveServicesUser)]"
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('roleIds').cognitiveServicesOpenAIUser)]"
               }
             },
             {
@@ -1023,9 +906,9 @@
               "type": "Microsoft.Authorization/roleAssignments",
               "apiVersion": "2022-04-01",
               "scope": "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]",
-              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), parameters('docIntelPrincipalId'), variables('roleIds').storageBlobDataReader)]",
+              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), parameters('foundryPrincipalId'), variables('roleIds').storageBlobDataReader)]",
               "properties": {
-                "principalId": "[parameters('docIntelPrincipalId')]",
+                "principalId": "[parameters('foundryPrincipalId')]",
                 "principalType": "ServicePrincipal",
                 "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('roleIds').storageBlobDataReader)]"
               }
@@ -1058,15 +941,15 @@
           "outputs": {
             "searchToFoundryAssignmentId": {
               "type": "string",
-              "value": "[extensionResourceId(resourceId('Microsoft.CognitiveServices/accounts', parameters('foundryAccountName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('foundryAccountName')), parameters('searchPrincipalId'), variables('roleIds').cognitiveServicesUser))]"
+              "value": "[extensionResourceId(resourceId('Microsoft.CognitiveServices/accounts', parameters('foundryAccountName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('foundryAccountName')), parameters('searchPrincipalId'), variables('roleIds').cognitiveServicesOpenAIUser))]"
             },
             "searchToStorageAssignmentId": {
               "type": "string",
               "value": "[extensionResourceId(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), parameters('searchPrincipalId'), variables('roleIds').storageBlobDataReader))]"
             },
-            "diToStorageAssignmentId": {
+            "foundryToStorageAssignmentId": {
               "type": "string",
-              "value": "[extensionResourceId(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), parameters('docIntelPrincipalId'), variables('roleIds').storageBlobDataReader))]"
+              "value": "[extensionResourceId(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), parameters('foundryPrincipalId'), variables('roleIds').storageBlobDataReader))]"
             },
             "deployerToSearchServiceAssignmentId": {
               "type": "string",
@@ -1080,7 +963,6 @@
         }
       },
       "dependsOn": [
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('rgName')), 'Microsoft.Resources/deployments', 'di-deploy')]",
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('rgName')), 'Microsoft.Resources/deployments', 'foundry-deploy')]",
         "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('rgName'))]",
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('rgName')), 'Microsoft.Resources/deployments', 'search-deploy')]",
@@ -1106,12 +988,11 @@
         "keyVaultUri": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('rgName')), 'Microsoft.Resources/deployments', 'kv-deploy'), '2025-04-01').outputs.uri.value]",
         "foundryResource": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('rgName')), 'Microsoft.Resources/deployments', 'foundry-deploy'), '2025-04-01').outputs.name.value]",
         "foundryOpenAIEndpoint": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('rgName')), 'Microsoft.Resources/deployments', 'foundry-deploy'), '2025-04-01').outputs.openAIEndpoint.value]",
+        "documentIntelligenceEndpoint": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('rgName')), 'Microsoft.Resources/deployments', 'foundry-deploy'), '2025-04-01').outputs.cognitiveServicesEndpoint.value]",
         "embeddingDeployment": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('rgName')), 'Microsoft.Resources/deployments', 'foundry-deploy'), '2025-04-01').outputs.embeddingDeploymentName.value]",
         "embeddingModel": "[parameters('embeddingModelName')]",
         "chatDeployment": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('rgName')), 'Microsoft.Resources/deployments', 'foundry-deploy'), '2025-04-01').outputs.chatDeploymentName.value]",
         "chatModel": "[parameters('chatModelName')]",
-        "documentIntelligence": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('rgName')), 'Microsoft.Resources/deployments', 'di-deploy'), '2025-04-01').outputs.name.value]",
-        "documentIntelligenceEndpoint": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('rgName')), 'Microsoft.Resources/deployments', 'di-deploy'), '2025-04-01').outputs.endpoint.value]",
         "searchService": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('rgName')), 'Microsoft.Resources/deployments', 'search-deploy'), '2025-04-01').outputs.name.value]",
         "searchEndpoint": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('rgName')), 'Microsoft.Resources/deployments', 'search-deploy'), '2025-04-01').outputs.endpoint.value]",
         "searchPrincipalId": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('rgName')), 'Microsoft.Resources/deployments', 'search-deploy'), '2025-04-01').outputs.systemAssignedPrincipalId.value]",

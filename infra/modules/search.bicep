@@ -72,18 +72,18 @@ resource search 'Microsoft.Search/searchServices@2024-03-01-preview' = {
     encryptionWithCmk: {
       enforcement: 'Unspecified'
     }
-    // authOptions retains the bearer-challenge configuration so unauthenticated
-    // requests receive a proper 401 with WWW-Authenticate header.
-    // disableLocalAuth=true rejects admin/query API keys; all callers must use
-    // Entra ID bearer tokens via the following roles:
+    // Entra-only auth. With `disableLocalAuth: true`, admin and query API keys are
+    // rejected and every caller must use a bearer token. The Azure Search API requires
+    // `authOptions` to be NULL when `disableLocalAuth` is true (the two are mutually
+    // exclusive — setting both returns `BadRequest: AuthOptions must be null if
+    // DisableLocalAuth is true`). Unauthenticated requests still receive a proper 401
+    // with a `WWW-Authenticate: Bearer ...` challenge — that is the default behaviour
+    // when local auth is disabled and does not need to be opted in via `authOptions`.
+    //
+    // Required roles for callers (granted in modules/rbac.bicep or 03-deployment-manual.md § 1.7):
     //   * Search Service Contributor   — create/manage indexes, datasources, indexers
     //   * Search Index Data Contributor — write documents to an index
     //   * Search Index Data Reader     — read/query documents
-    authOptions: {
-      aadOrApiKey: {
-        aadAuthFailureMode: 'http401WithBearerChallenge'
-      }
-    }
     disableLocalAuth: true
   }
 }

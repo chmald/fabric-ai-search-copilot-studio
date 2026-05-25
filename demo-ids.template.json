@@ -40,7 +40,8 @@
     "foundryEmbeddingModel": "text-embedding-3-large",
     "foundryChatDeployment": "chat",
     "foundryChatModel": "gpt-4o",
-    "documentIntelligence": "di-rag-demo-<env>-<region>"
+    "_documentIntelligence_note": "Document Intelligence (prebuilt-read OCR) is served by the same Foundry resource (kind=AIServices is a multi-service Cognitive Services account). The DI SDK / REST endpoint is the Foundry resource's *.cognitiveservices.azure.com URL — see documentIntelligenceEndpoint below. No separate FormRecognizer resource is provisioned.",
+    "documentIntelligenceEndpoint": "https://aif-rag-demo-<env>-<region>.cognitiveservices.azure.com/"
   },
 
   "copilotStudio": {

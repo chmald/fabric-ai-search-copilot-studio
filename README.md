@@ -56,7 +56,7 @@ See [docs/01-architecture.md](./docs/01-architecture.md) for the full design nar
 | [docs/04-deployment-automated.md](./docs/04-deployment-automated.md) | Automated path — Bicep + post-deploy script + ADO pipeline for the **Azure layer**; Fabric still uses 03b, Copilot Studio still uses 03c |
 | [docs/05-testing.md](./docs/05-testing.md) | Functional tests, retrieval quality, semantic-ranker validation, end-to-end demo script |
 | [docs/06-troubleshooting.md](./docs/06-troubleshooting.md) | Common failure modes and fixes |
-| `infra/main.bicep` + `infra/modules/*.bicep` | Bicep IaC for all Azure resources (RG, KV, Storage, Foundry + model deployments, Doc Intelligence, AI Search, RBAC) |
+| `infra/main.bicep` + `infra/modules/*.bicep` | Bicep IaC for all Azure resources (RG, KV, Storage, Foundry + model deployments + built-in Document Intelligence, AI Search, RBAC) |
 | `infra/main.parameters.json` | Bicep parameters template — copy to `main.parameters.local.json` for your values (gitignored) |
 | `infra/deploy.ps1` | PowerShell wrapper for `az deployment sub create` + output capture |
 | `scripts/post_deploy_search.py` | Creates AI Search index, data source, and indexer with integrated AOAI vectorizer (Bicep can't express these cleanly) |
@@ -78,7 +78,7 @@ You will need (full detail in [docs/02-prerequisites.md](./docs/02-prerequisites
 - **Microsoft Fabric tenant** with a workspace you can create artifacts in (Lakehouse + Data Pipelines)
 - **Copilot Studio license** for the building user (Maker access)
 - **Azure AI Foundry resource** (the unified Azure AI Services resource) with capacity for one chat completion deployment (e.g. `gpt-4o`) and one embedding deployment (e.g. `text-embedding-3-large`) — Foundry is the strategic model-gateway resource and supersedes the legacy standalone Azure OpenAI resource for new deployments
-- **Region alignment**: all services (AI Search, Azure AI Foundry, Document Intelligence, Blob, Fabric) ideally in the **same Azure region**, or at least the same data residency boundary
+- **Region alignment**: all services (AI Search, Azure AI Foundry — which hosts both the OpenAI models and the Document Intelligence OCR endpoint — Blob, Fabric) ideally in the **same Azure region**, or at least the same data residency boundary
 - **AI Search**: **Standard (S1) or higher** SKU (semantic ranker is not available on Basic)
 
 ---

@@ -25,8 +25,8 @@
 │   ├─ Storage account      stragdeveastus2 (containers: raw, chunks)     │
 │   ├─ AI Foundry resource  aif-rag-dev-eastus2                           │
 │   │     ├─ embedding deployment: text-embedding-3-large                 │
-│   │     └─ chat deployment:      gpt-4o                                 │
-│   ├─ Document Intelligence di-rag-dev-eastus2                           │
+│   │     ├─ chat deployment:      gpt-4o                                 │
+│   │     └─ Document Intelligence: prebuilt-read (same account, kind=AIServices) │
 │   └─ AI Search (Standard) srch-rag-dev-eastus2                          │
 │         ├─ index:    idx-rag-documents (hybrid + semantic ranker)       │
 │         ├─ data src: ds-chunks (managed-identity → Blob)                │

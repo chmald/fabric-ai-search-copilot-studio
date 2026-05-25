@@ -39,8 +39,7 @@ flowchart TB
     subgraph Azure["🔵 Azure — AI & Storage Platform"]
         KV[Azure Key Vault<br/>secrets + managed identities]
         BLOB[(Azure Blob<br/>raw/ + chunks/<br/>permanent canonical store)]
-        DI[Document Intelligence<br/>prebuilt-read OCR]
-        AIFNDRY[Azure AI Foundry<br/>OpenAI chat + embedding deployments<br/>model-gateway role only]
+        AIFNDRY[Azure AI Foundry<br/>kind=AIServices — multi-service<br/>OpenAI chat + embedding deployments<br/>+ Document Intelligence prebuilt-read OCR]
         SEARCH[Azure AI Search<br/>hybrid index + integrated vectorizer<br/>+ semantic ranker]
     end
 
@@ -57,8 +56,8 @@ flowchart TB
     OL --> PIPE
     PIPE -->|register + state| CTRL
     PIPE -->|copy raw files| BLOB
-    PIPE -->|OCR call| DI
-    DI -->|extracted text| PIPE
+    PIPE -->|OCR call| AIFNDRY
+    AIFNDRY -->|extracted text| PIPE
     PIPE -->|chunked JSON| BLOB
     BLOB -->|indexer pull| SEARCH
     SEARCH -.->|integrated vectorizer<br/>auto-embed| AIFNDRY
@@ -124,7 +123,7 @@ Use Delta merge (`MERGE INTO`) on `file_id` for upserts. Build dashboards on top
 |---|---|
 | **Azure Key Vault** | Single source of truth for connection strings, API keys, and secrets. Pipelines and indexers authenticate via **managed identity** wherever possible; Key Vault is the fallback for any secret that cannot be replaced by RBAC. |
 | **Azure Blob Storage** | Permanent canonical store. Two containers: `raw/` (the original files, used for citation linkback from Copilot Studio answers) and `chunks/` (one JSON file per chunk, consumed by the AI Search indexer). |
-| **Azure Document Intelligence** | OCR. Use the **prebuilt-read** model (no training). Returns extracted text, page-aware structure, and confidence scores. |
+| **Azure Document Intelligence** | OCR. Use the **prebuilt-read** model (no training). Returns extracted text, page-aware structure, and confidence scores. **Served by the same Foundry/AIServices account** — there is no separate `Microsoft.CognitiveServices/accounts` of `kind=FormRecognizer` in this pattern; the DI REST/SDK endpoint is the Foundry resource's `*.cognitiveservices.azure.com` URL. |
 | **Azure AI Foundry resource** (model gateway) | Two OpenAI deployments hosted in a single Foundry resource: an **embedding** model (recommended: `text-embedding-3-large`) for the AI Search integrated vectorizer, and a **chat completion** model (recommended: `gpt-4o`) for the Copilot Studio generative answers. Foundry resource (kind `AIServices`) supersedes the legacy standalone Azure OpenAI resource for new deployments and exposes an OpenAI-compatible endpoint at `https://<resource>.openai.azure.com/` for backwards-compatible tooling. **This pattern uses Foundry's model-gateway capability only — not its agent runtime (Agent Service / Hub / Projects), which is filled by Copilot Studio. Foundry agent runtime is an engagement-specific addition for cases that need multi-agent routing, custom tool calling, or query triage beyond knowledge-base Q&A.** |
 | **Azure AI Search** | The retrieval engine. A single index with text, vector, and metadata fields. **Integrated vectorizer** (`azureOpenAI` kind, pointed at the Foundry resource's OpenAI-compatible endpoint) embeds chunks at index time and embeds user queries at search time — **zero custom embedding code anywhere**. **Hybrid query mode** (BM25 + vector) plus **semantic ranker** on top. **Standard (S1) tier or higher** required. |
 
@@ -241,7 +240,7 @@ No code touches this path.
 
 ### Data residency
 
-- Co-locate **AI Search + Foundry resource + Blob + Document Intelligence** in the same Azure region wherever possible
+- Co-locate **AI Search + Foundry resource (OpenAI models + Document Intelligence) + Blob** in the same Azure region wherever possible
 - Fabric capacity region should match unless cross-region egress is acceptable
 - Copilot Studio environment region is independent but should respect customer data-residency policies
 
@@ -279,9 +278,11 @@ Fabric is already in the customer's footprint. Data Pipelines is drag-and-drop, 
 
 Living the control plane inside Fabric (vs. external SQL) keeps governance, RBAC, and observability inside the customer's Fabric workspace. Delta gives atomic upserts, time-travel for audit, and easy Power BI / Dataflow integration for dashboards.
 
-### 8. Document Intelligence prebuilt-read
+### 8. Document Intelligence prebuilt-read (served by the Foundry resource)
 
 `prebuilt-read` handles printed + handwritten text, ~70+ languages, and mixed file types (PDF, JPG, PNG, TIFF, BMP, DOCX) with no training required. For RAG over an arbitrary document corpus, no custom extraction is needed — the goal is full text + page structure, which `prebuilt-read` provides.
+
+A Foundry resource (`kind=AIServices`) is a **multi-service Cognitive Services account** — it exposes Azure OpenAI, Document Intelligence, Vision, Translator, Speech, and the rest of the Cognitive Services catalogue from the same resource ID, the same `*.cognitiveservices.azure.com` endpoint, the same managed identity, and a single set of role assignments. This pattern uses the OpenAI sub-namespace (for the embedding + chat deployments) and the Document Intelligence sub-namespace (for `prebuilt-read`) from the same account. A separate `Microsoft.CognitiveServices/accounts` of `kind=FormRecognizer` is **not** provisioned — doing so would add a redundant resource, a duplicate managed identity, and an extra RBAC surface for no capability gain.
 
 ### 9. Teams + M365 Copilot day-one
 

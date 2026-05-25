@@ -49,7 +49,7 @@ Fabric workspace (ws-rag-<env>)
         └── On-error handler           → nb_update_control_table (status=failed, last_error)
 ```
 
-**Design rationale at a glance.** Document Intelligence is called from a notebook (not a pipeline Web activity) and the pipeline contains no `Until` loop — both choices work around real Fabric constraints documented in [Appendix A.1](#a1-no-web-activity-until-or-child-pipeline). The auth model uses Fabric's workspace identity for Blob + Key Vault and a dedicated service principal (`sp-rag-di-caller`) for Document Intelligence — explained in [Appendix A.2](#a2-msal--service-principal-for-document-intelligence). All Azure services have local-key auth disabled; there are no API keys to store or rotate.
+**Design rationale at a glance.** Document Intelligence is called from a notebook (not a pipeline Web activity) and the pipeline contains no `Until` loop — both choices work around real Fabric constraints documented in [Appendix A.1](#a1-no-web-activity-until-or-child-pipeline). The auth model uses Fabric's workspace identity for Blob + Key Vault and a dedicated service principal (`sp-rag-di-caller`) for Document Intelligence (granted on the Azure AI Foundry resource that serves the DI endpoint — see [01-architecture.md § 8](./01-architecture.md#8-document-intelligence-prebuilt-read-served-by-the-foundry-resource) for why DI is consolidated into Foundry) — explained in [Appendix A.2](#a2-msal--service-principal-for-document-intelligence). All Azure services have local-key auth disabled; there are no API keys to store or rotate.
 
 ---
 
@@ -165,17 +165,19 @@ For Document Intelligence (`https://cognitiveservices.azure.com/`), the supporte
 
    Note the `appId` and `tenant`. Copy the `password` to your clipboard — you'll store it in Key Vault next and it cannot be retrieved later.
 
-2. **Grant the SP `Cognitive Services User` on the Document Intelligence resource:**
+2. **Grant the SP `Cognitive Services User` on the Foundry resource (which serves Document Intelligence):**
 
    ```bash
    SP_OBJID=$(az ad sp show --id <client-id> --query id -o tsv)
-   DI_RES_ID=$(az cognitiveservices account show --name <di-resource> -g <rg> --query id -o tsv)
+   AIF_RES_ID=$(az cognitiveservices account show --name <foundry-resource> -g <rg> --query id -o tsv)
 
    az role assignment create \
      --assignee-object-id $SP_OBJID --assignee-principal-type ServicePrincipal \
      --role "Cognitive Services User" \
-     --scope $DI_RES_ID
+     --scope $AIF_RES_ID
    ```
+
+   > **Why on the Foundry resource and not a separate DI resource?** This pattern uses a single Foundry account (`kind=AIServices`) to serve both the OpenAI deployments and the Document Intelligence `prebuilt-read` endpoint. `Cognitive Services User` on the Foundry resource grants access to the DI sub-namespace; the AI Search vectorizer separately uses `Cognitive Services OpenAI User` on the same resource for the OpenAI sub-namespace. See [01-architecture.md § 8](./01-architecture.md#8-document-intelligence-prebuilt-read-served-by-the-foundry-resource).
 
 3. **Store the SP secret in Key Vault** under a name the notebook will reference (default: `di-sp-secret`):
 
@@ -485,7 +487,7 @@ Parameters expected:
 - `chunks_account` (string)
 - `chunks_container` (string) — `chunks`
 - `chunks_prefix` (string) — typically `f"{file_id}/"`
-- `di_endpoint` (string) — e.g. `https://di-rag-demo-eus.cognitiveservices.azure.com`
+- `di_endpoint` (string) — the **Foundry resource's** Cognitive Services endpoint, which serves the DI API. Format: `https://<foundry-name>.cognitiveservices.azure.com` (note: different host suffix from the OpenAI `<foundry-name>.openai.azure.com` host used by the AI Search vectorizer — same resource, two host names).
 - `key_vault_name` (string) — e.g. `kv-rag-demo-eus`
 - `di_sp_tenant_id` (string) — from F2.2 step 1
 - `di_sp_client_id` (string) — from F2.2 step 1
@@ -782,7 +784,7 @@ Select the **Parameters** tab (bottom pane) and add the following — all string
 | `storage_account` | `stragdemoeus` | Copy sink (F8.5), `mark_pending` (F8.6), `ocr_chunk_upload` (F8.7) |
 | `raw_container` | `raw` | Copy sink (F8.5), `mark_pending` (F8.6), `ocr_chunk_upload` (F8.7) |
 | `chunks_container` | `chunks` | `ocr_chunk_upload` (F8.7) |
-| `di_endpoint` | `https://di-rag-demo-eus.cognitiveservices.azure.com` | `ocr_chunk_upload` (F8.7) |
+| `di_endpoint` | `https://aif-rag-demo-eus.cognitiveservices.azure.com` (the **Foundry** resource's Cognitive Services host — serves DI) | `ocr_chunk_upload` (F8.7) |
 | `key_vault_name` | `kv-rag-demo-eus` | `ocr_chunk_upload` (F8.7) |
 | `di_sp_tenant_id` | `<tenant-guid-from-F2.2>` | `ocr_chunk_upload` (F8.7) |
 | `di_sp_client_id` | `<client-id-from-F2.2>` | `ocr_chunk_upload` (F8.7) |
@@ -991,7 +993,7 @@ Record the pipeline GUID in `demo-ids.local.json` under `fabric.pipelineId`.
 - [ ] Workspace identity granted **Storage Blob Data Contributor** on the storage account
 - [ ] Workspace identity granted **Key Vault Secrets User** on the Key Vault (for reading the DI-caller SP secret)
 - [ ] DI-caller service principal (`sp-rag-di-caller`) created
-- [ ] DI-caller SP granted **Cognitive Services User** on the Document Intelligence resource
+- [ ] DI-caller SP granted **Cognitive Services User** on the Foundry resource (which serves the DI endpoint — no separate FormRecognizer resource)
 - [ ] DI-caller SP secret stored in Key Vault as `di-sp-secret`
 - [ ] Lakehouse `lh_rag_<env>` created with `control_table_files` table
 - [ ] OneLake shortcut at `Files/source_docs/` showing source documents
@@ -1054,7 +1056,7 @@ Fabric notebooks have two hard auth constraints that shape the DI auth pattern:
 
 The workspace identity also cannot be used with MSAL — its client secret isn't exposed to notebook code.
 
-**The fix.** Register a dedicated service principal `sp-rag-di-caller` ([F2.2](#f22-create-a-di-caller-service-principal-for-mssal-from-the-notebook)) and grant it **Cognitive Services User** on the Document Intelligence resource. The SP's client secret is stored in Key Vault, and the notebook reads it at runtime using `notebookutils.credentials.getSecret` (which works because the workspace identity has **Key Vault Secrets User** on the vault — granted in [F2.1](#f21-grant-the-workspace-identity-the-required-roles)). The notebook then uses [MSAL's `ConfidentialClientApplication`](https://learn.microsoft.com/entra/msal/python/) to acquire a token for `https://cognitiveservices.azure.com/.default`.
+**The fix.** Register a dedicated service principal `sp-rag-di-caller` ([F2.2](#f22-create-a-di-caller-service-principal-for-mssal-from-the-notebook)) and grant it **Cognitive Services User** on the **Foundry resource** (which serves Document Intelligence as part of its multi-service `AIServices` kind — there is no separate FormRecognizer account in this pattern; see [01-architecture.md § 8](./01-architecture.md#8-document-intelligence-prebuilt-read-served-by-the-foundry-resource)). The SP's client secret is stored in Key Vault, and the notebook reads it at runtime using `notebookutils.credentials.getSecret` (which works because the workspace identity has **Key Vault Secrets User** on the vault — granted in [F2.1](#f21-grant-the-workspace-identity-the-required-roles)). The notebook then uses [MSAL's `ConfidentialClientApplication`](https://learn.microsoft.com/entra/msal/python/) to acquire a token for `https://cognitiveservices.azure.com/.default`.
 
 > The role assignment must be on the **SP**, not on the workspace identity — the workspace identity is never the principal that calls DI.
 

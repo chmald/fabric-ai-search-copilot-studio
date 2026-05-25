@@ -124,12 +124,88 @@ def test_indexer_field_mappings_round_trip():
     payload = pds.indexer_payload(SAMPLE_IDS)
     src = {m["sourceFieldName"] for m in payload["fieldMappings"]}
     tgt = {m["targetFieldName"] for m in payload["fieldMappings"]}
-    # 1:1 mapping for everything except content_vector (auto-populated by vectorizer)
+    # 1:1 mapping for everything except content_vector (filled by the skillset via
+    # outputFieldMappings, not by a regular fieldMapping).
     assert "content" in src and "content" in tgt
     assert "content_vector" not in src and "content_vector" not in tgt, \
-        "content_vector should NOT be in field mappings; integrated vectorizer fills it"
+        "content_vector must NOT be in fieldMappings; it's filled via outputFieldMappings"
 
 
 def test_indexer_schedule_is_5min():
     payload = pds.indexer_payload(SAMPLE_IDS)
     assert payload["schedule"]["interval"] == "PT5M"
+
+
+def test_indexer_references_skillset():
+    payload = pds.indexer_payload(SAMPLE_IDS)
+    assert payload["skillsetName"] == "skill-rag-embeddings", \
+        "Indexer must reference the skillset — without it, content_vector stays null " \
+        "and Copilot Studio returns no results (silent vectorizer failure)."
+
+
+def test_indexer_skillset_name_overridable():
+    ids = {**SAMPLE_IDS, "searchSkillsetName": "my-custom-skillset"}
+    payload = pds.indexer_payload(ids)
+    assert payload["skillsetName"] == "my-custom-skillset"
+
+
+def test_indexer_has_output_field_mapping_for_content_vector():
+    payload = pds.indexer_payload(SAMPLE_IDS)
+    ofm = payload["outputFieldMappings"]
+    assert len(ofm) >= 1
+    cv_mapping = next((m for m in ofm if m["targetFieldName"] == "content_vector"), None)
+    assert cv_mapping is not None, "Missing outputFieldMapping for content_vector"
+    assert cv_mapping["sourceFieldName"] == "/document/content_vector_embedding", \
+        "sourceFieldName must match the skill's targetName under /document"
+
+
+# ---------- skillset payload ------------------------------------------------------
+
+
+def test_skillset_name_default():
+    assert pds.skillset_name(SAMPLE_IDS) == "skill-rag-embeddings"
+
+
+def test_skillset_name_overridable():
+    ids = {**SAMPLE_IDS, "searchSkillsetName": "my-custom-skillset"}
+    assert pds.skillset_name(ids) == "my-custom-skillset"
+
+
+def test_skillset_payload_has_aoai_embedding_skill():
+    payload = pds.skillset_payload(SAMPLE_IDS)
+    assert len(payload["skills"]) == 1
+    skill = payload["skills"][0]
+    assert skill["@odata.type"] == "#Microsoft.Skills.Text.AzureOpenAIEmbeddingSkill"
+    assert skill["resourceUri"].endswith(".openai.azure.com")
+    assert skill["deploymentId"] == "embedding"
+    assert skill["modelName"] == "text-embedding-3-large"
+    # authIdentity=None => use system-assigned managed identity
+    assert skill["authIdentity"] is None
+
+
+def test_skillset_payload_input_is_content_field():
+    payload = pds.skillset_payload(SAMPLE_IDS)
+    skill = payload["skills"][0]
+    assert skill["inputs"][0]["name"] == "text"
+    assert skill["inputs"][0]["source"] == "/document/content"
+
+
+def test_skillset_payload_output_target_matches_indexer_mapping():
+    """The skill output targetName must match the indexer's outputFieldMapping source."""
+    skill_payload = pds.skillset_payload(SAMPLE_IDS)
+    indexer_pl = pds.indexer_payload(SAMPLE_IDS)
+    skill_output_target = skill_payload["skills"][0]["outputs"][0]["targetName"]
+    expected_source = f"/document/{skill_output_target}"
+    cv_mapping = next(m for m in indexer_pl["outputFieldMappings"]
+                      if m["targetFieldName"] == "content_vector")
+    assert cv_mapping["sourceFieldName"] == expected_source, (
+        f"Skill writes to /document/{skill_output_target} but indexer reads from "
+        f"{cv_mapping['sourceFieldName']} — these must match or content_vector stays null."
+    )
+
+
+def test_skillset_dimensions_match_embedding_model():
+    large_ids = {**SAMPLE_IDS, "embeddingModel": "text-embedding-3-large"}
+    small_ids = {**SAMPLE_IDS, "embeddingModel": "text-embedding-3-small"}
+    assert pds.skillset_payload(large_ids)["skills"][0]["dimensions"] == 3072
+    assert pds.skillset_payload(small_ids)["skills"][0]["dimensions"] == 1536

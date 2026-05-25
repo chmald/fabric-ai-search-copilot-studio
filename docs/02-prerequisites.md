@@ -29,7 +29,7 @@ Contributor-only is **not enough**; you will hit "Authorization failed" errors w
 
 In the target subscription, register these resource providers (one-time, takes a few minutes):
 
-- `Microsoft.CognitiveServices` (Document Intelligence, Azure AI Foundry — provider covers both)
+- `Microsoft.CognitiveServices` (Azure AI Foundry — same provider also covers Document Intelligence, served from the same Foundry account)
 - `Microsoft.Search`
 - `Microsoft.Storage`
 - `Microsoft.KeyVault`
@@ -171,10 +171,13 @@ Initiate these admin asks **before** you start building so they're cleared by th
 
 ### Required
 
-- **Document Intelligence resource** in the target subscription + region (same region as the Foundry resource / AI Search ideally)
-- **Standard pricing tier** (Free tier is limited to 500 pages/month — fine for demo, not for production)
+- **No separate resource** — Document Intelligence is provided by the **Azure AI Foundry resource** from § 6. A Foundry resource (`kind=AIServices`) is a multi-service Cognitive Services account that exposes Azure OpenAI **and** Document Intelligence (and Vision, Translator, Speech, …) from the same endpoint, managed identity, and RBAC surface.
+- The DI SDK / REST endpoint is the Foundry resource's `https://<name>.cognitiveservices.azure.com/` URL (note the host suffix — different from the OpenAI-compatible `<name>.openai.azure.com` host used by the vectorizer; same resource, two host names).
+- Foundry's `S0` pricing tier covers DI usage. No `prebuilt-read` page quota beyond standard Cognitive Services billing.
 
 The pattern uses only the `prebuilt-read` model — no custom training, no Document Intelligence Studio work required.
+
+> **Why consolidated?** Provisioning a separate `Microsoft.CognitiveServices/accounts` of `kind=FormRecognizer` alongside the Foundry account adds a redundant resource, a duplicate managed identity, and an extra set of role assignments without unlocking any capability that Foundry's built-in DI doesn't already provide. See [01-architecture.md § 8](./01-architecture.md#8-document-intelligence-prebuilt-read-served-by-the-foundry-resource) for the full rationale.
 
 ---
 
@@ -202,7 +205,7 @@ The pattern uses only the `prebuilt-read` model — no custom training, no Docum
 - **Access policy / RBAC mode** decided (RBAC strongly preferred for new deployments)
 - Granted **Key Vault Secrets Officer** (or equivalent) to the building user for the duration of the build
 
-> **This pattern stores zero AI-service secrets in Key Vault.** Foundry, Document Intelligence, AI Search, and Storage all have local auth / shared-key access disabled — every cross-service call goes through Entra ID via managed identity. Key Vault is kept in the deployment as the standard place to put any secret that gets added later (e.g. credentials for a Snowflake / SharePoint Online / SQL Server connector you wire into the Fabric pipeline). If you delete the Key Vault module from `infra/main.bicep`, nothing in the default pattern breaks.
+> **This pattern stores zero AI-service secrets in Key Vault.** Foundry (which serves both OpenAI **and** Document Intelligence), AI Search, and Storage all have local auth / shared-key access disabled — every cross-service call goes through Entra ID via managed identity. Key Vault is kept in the deployment as the standard place to put any secret that gets added later (e.g. credentials for a Snowflake / SharePoint Online / SQL Server connector you wire into the Fabric pipeline). If you delete the Key Vault module from `infra/main.bicep`, nothing in the default pattern breaks.
 
 ---
 
@@ -214,11 +217,11 @@ These are the role assignments required by the pattern's Entra-only auth posture
 
 | Principal | Role | Scope | Why |
 |---|---|---|---|
-| AI Search service managed identity | **Cognitive Services User** | Foundry resource | Integrated vectorizer authenticates to the embedding deployment with a bearer token — **critical** |
+| AI Search service managed identity | **Cognitive Services OpenAI User** | Foundry resource | Integrated vectorizer authenticates to the embedding deployment with a bearer token — **critical**. Must be the OpenAI-specific role, **not** plain `Cognitive Services User` (silent-failure trap — see [06-troubleshooting.md § 4.1](./06-troubleshooting.md)). |
 | AI Search service managed identity | **Storage Blob Data Reader** | Storage account (or `chunks/` container) | Indexer pulls chunk JSON — **critical** |
-| Document Intelligence managed identity | **Storage Blob Data Reader** | Storage account (or `raw/` container) | DI fetches `urlSource` files — required because shared-key access on Storage is disabled |
+| Foundry resource managed identity | **Storage Blob Data Reader** | Storage account (or `raw/` container) | Document Intelligence (served from the Foundry account) fetches `urlSource` files via its own MI — required because shared-key access on Storage is disabled |
 | Fabric workspace identity | **Storage Blob Data Contributor** | Storage account | Copy / chunk-upload activities write to `raw/` + `chunks/`. Assigned manually in [03b-fabric-setup.md § F2.1](./03b-fabric-setup.md#f21-grant-the-workspace-identity-the-required-roles) once the workspace identity exists |
-| Fabric workspace identity | **Cognitive Services User** | Document Intelligence resource | Pipeline Web activity authenticates to DI with bearer token — same F2.1 step |
+| DI-caller service principal (`sp-rag-di-caller`) | **Cognitive Services User** | Foundry resource | Fabric notebook calls Document Intelligence via MSAL with this SP's secret — see [03b-fabric-setup.md § F2.2](./03b-fabric-setup.md#f22-create-a-di-caller-service-principal-for-mssal-from-the-notebook) |
 
 ### Builder / deployer (assigned to the user or service principal running deploys)
 
@@ -227,7 +230,7 @@ These are the role assignments required by the pattern's Entra-only auth posture
 | Building user / deploy SP | **Search Service Contributor** | AI Search service | Create / update index, datasource, indexer via REST bearer token (admin keys are disabled) |
 | Building user / deploy SP | **Search Index Data Contributor** | AI Search service | Run sample queries against `/docs/search` during build + test |
 | Building user | **Storage Blob Data Contributor** | Storage account | Upload / inspect blobs through Azure CLI / portal during build |
-| Building user | **Cognitive Services Contributor** | Foundry resource + Document Intelligence | Deploy models, change settings, see Identity blade |
+| Building user | **Cognitive Services Contributor** | Foundry resource | Deploy models, change settings, see Identity blade. Covers both the OpenAI deployments **and** the Document Intelligence usage (same resource). |
 | Building user | **Key Vault Secrets Officer** | Key Vault | Manage any secrets you add later for downstream connector credentials |
 
 > When using the automated path, set the `deployerPrincipalId` parameter in `infra/main.parameters.local.json` to your object ID; Bicep then assigns the two Search roles for you. The remaining builder roles still need to be granted manually (typically once per environment, not per deploy).
@@ -236,7 +239,7 @@ These are the role assignments required by the pattern's Entra-only auth posture
 
 ## 11 — Regional alignment
 
-This pattern has a strong **co-location** requirement: AI Search, the Foundry resource hosting your OpenAI models, Document Intelligence, Blob Storage, Key Vault, and your Fabric capacity should all live in the **same Azure region** wherever possible. The dominant constraint is **OpenAI model availability** — `text-embedding-3-large` and `gpt-4o` are not in every region, and they're the only services in the stack whose regional rollout lags meaningfully behind general Azure availability.
+This pattern has a strong **co-location** requirement: AI Search, the Foundry resource (which hosts both your OpenAI models and the Document Intelligence OCR endpoint), Blob Storage, Key Vault, and your Fabric capacity should all live in the **same Azure region** wherever possible. The dominant constraint is **OpenAI model availability** — `text-embedding-3-large` and `gpt-4o` are not in every region, and they're the only services in the stack whose regional rollout lags meaningfully behind general Azure availability.
 
 Copilot Studio's environment region is independent and can differ from the Azure region; choose it based on customer data-residency policy.
 
@@ -308,7 +311,7 @@ Other regions (UAE North, South Africa North, Brazil South, Central India, etc.)
 
 ### Why these regions are the recommendation
 
-1. **Model availability is the only hard constraint.** AI Search, Document Intelligence, Blob, Key Vault, and Fabric are widely available; pick a region for them and they will work. OpenAI deployments are the bottleneck.
+1. **Model availability is the only hard constraint.** AI Search, Blob, Key Vault, and Fabric are widely available; pick a region for them and they will work. OpenAI deployments (in the Foundry resource that also serves Document Intelligence) are the bottleneck.
 2. **OpenAI model rollouts cluster.** When a new OpenAI model lands in Azure, it typically reaches East US 2, Sweden Central, Australia East, and Japan East within the first wave. These four regions are the "follow Azure OpenAI's roadmap" choices.
 3. **Co-location preserves the no-egress story.** The integrated vectorizer (AI Search → Foundry) and the indexer (AI Search → Blob) both produce non-trivial inter-service traffic. In-region calls are sub-millisecond and free; cross-region calls add cost and meaningfully degrade indexing throughput.
 4. **Semantic ranker latency is region-sensitive.** The semantic ranker adds 300–500 ms at p95 in a single region. Cross-region between AI Search and Foundry can push that to 1+ second.
@@ -344,7 +347,8 @@ A consistent naming convention makes the build navigable and replicable. Suggest
 Resource group:   rg-<workload>-<env>-<region>           e.g.  rg-rag-demo-eus
 AI Search:        srch-<workload>-<env>-<region>         e.g.  srch-rag-demo-eus
 AI Foundry:       aif-<workload>-<env>-<region>          e.g.  aif-rag-demo-eus
-Doc Intelligence: di-<workload>-<env>-<region>           e.g.  di-rag-demo-eus
+                  (multi-service — serves OpenAI models AND Document Intelligence;
+                   no separate `di-*` resource is provisioned)
 Storage:          st<workload><env><region>              e.g.  stragdemoeus  (lowercase, no hyphens)
 Key Vault:        kv-<workload>-<env>-<region>           e.g.  kv-rag-demo-eus
 Fabric workspace: ws-<workload>-<env>                    e.g.  ws-rag-demo

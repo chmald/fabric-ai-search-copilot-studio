@@ -13,10 +13,12 @@ Common failure modes and fixes for the RAG knowledge-base pattern. Organized by 
 | Copilot Studio answers with "I don't have any information" | Knowledge source not bound, or index is empty | [§5](#5--copilot-studio) |
 | Copilot Studio cites generic / wrong source | Hybrid+semantic not enabled in knowledge source | [§5.2](#52-citations-look-wrong-or-generic) |
 | Index has 0 documents | Indexer failed, or chunks not landing in Blob | [§4](#4--ai-search-index--indexer) |
-| Indexer status = `transientFailure` repeatedly | Integrated vectorizer auth failure (Foundry role) | [§4.1](#41-vectorizer-auth-failure) |
+| Index has docs but `vectorIndexSize = 0` (Copilot Studio returns nothing; vector index size shows 0 B in the portal) | **Silent vectorizer failure** — most often the indexer has no skillset attached (vectors are never generated), or the AI Search MI has the wrong role on Foundry (`Cognitive Services User` instead of `Cognitive Services OpenAI User`) | [§4.1](#41-vectorizer-auth-failure-loud-or-silent) |
+| Indexer status = `transientFailure` repeatedly | Integrated vectorizer auth failure (loud variant) | [§4.1](#41-vectorizer-auth-failure-loud-or-silent) |
 | `403 Forbidden` from indexer reading Blob | Search MI missing Storage Blob Data Reader | [§4.2](#42-indexer-cannot-read-blob) |
 | `401 Unauthorized` + `WWW-Authenticate: Bearer` from a REST call | API keys disabled — caller used `api-key` / `Ocp-Apim-Subscription-Key` instead of an Entra bearer token | [§0.1](#01-401-from-services-with-local-auth-disabled) |
 | `403` from Storage with "KeyBasedAuthenticationNotPermitted" | Storage shared-key access disabled; caller used an account key or key-based connection string | [§0.2](#02-403-keybasedauthenticationnotpermitted-on-storage) |
+| Bicep deploy fails on `search-deploy` with `BadRequest: AuthOptions must be null if DisableLocalAuth is true` | Search service body has both `authOptions` and `disableLocalAuth: true` — the API rejects this combination | [§0.4](#04-bicep-deploy-fails-authoptions-must-be-null-if-disablelocalauth-is-true) |
 | Copilot Studio knowledge source save fails with "key not valid" | Trying to use admin / query key on a service that has `disableLocalAuth=true` | [§5.7](#57-knowledge-source-save-fails-with-key-not-valid) |
 | Pipeline activity fails on OCR call | DI auth or wrong endpoint / API version | [§3.1](#31-document-intelligence-call-fails) |
 | Pipeline chunk activity fails | Notebook auth or dependency missing | [§3.2](#32-chunking-notebook-fails) |
@@ -86,6 +88,63 @@ If the bearer call also returns 401/403, the caller's identity is missing the re
 - Re-deploy. The Bicep-managed assignment will land cleanly.
 
 If the failure is `AuthorizationFailed`, the deploying identity lacks **User Access Administrator** on the resource group — see [02-prerequisites.md § 1](./02-prerequisites.md#1--azure-subscription).
+
+### 0.4 Bicep deploy fails: `AuthOptions must be null if DisableLocalAuth is true`
+
+**Symptom.** `az deployment sub create` (or `pwsh ./infra/deploy.ps1`) fails on the `search-deploy` nested deployment with:
+
+```
+ResourceDeploymentFailure
+  search-deploy
+    BadRequest: AuthOptions must be null if DisableLocalAuth is true.
+```
+
+**Cause.** The Azure AI Search resource (`Microsoft.Search/searchServices`) treats `properties.authOptions` and `properties.disableLocalAuth: true` as **mutually exclusive**. When local auth is disabled, all API keys are rejected and every caller must use an Entra bearer token — there is no meaningful "auth options" to configure, so the body must omit (or null-out) `authOptions` entirely. Setting both fields is rejected at validation time before any resource changes are applied.
+
+A common historical mistake is to carry over CLI / ARM examples that include:
+
+```jsonc
+"properties": {
+  "authOptions": { "aadOrApiKey": { "aadAuthFailureMode": "http401WithBearerChallenge" } },
+  "disableLocalAuth": true
+}
+```
+
+… thinking `authOptions` is needed to opt into the bearer challenge. It isn't. When `disableLocalAuth: true`, the service issues a `401 Unauthorized` with `WWW-Authenticate: Bearer ...` by default for every unauthenticated request.
+
+**Fix — Bicep.** Remove the `authOptions` block from `infra/modules/search.bicep`:
+
+```bicep
+resource search 'Microsoft.Search/searchServices@2024-03-01-preview' = {
+  properties: {
+    // ...
+    // DO NOT set authOptions when disableLocalAuth is true
+    disableLocalAuth: true
+  }
+}
+```
+
+**Fix — az CLI (manual deploy path § 1.6).** Do not pass `--auth-options` together with `--disable-local-auth true`:
+
+```bash
+# WRONG — returns BadRequest: AuthOptions must be null if DisableLocalAuth is true
+az search service update --name <svc> --resource-group <rg> \
+  --auth-options aadOrApiKey \
+  --aad-auth-failure-mode http401WithBearerChallenge \
+  --disable-local-auth true
+
+# CORRECT
+az search service update --name <svc> --resource-group <rg> \
+  --disable-local-auth true
+```
+
+**Verify after fix.** The deployment redeploys cleanly, and any unauthenticated request to the service returns the proper bearer challenge automatically:
+
+```bash
+curl -i https://<svc>.search.windows.net/indexes?api-version=2024-07-01
+# HTTP/1.1 401 Unauthorized
+# WWW-Authenticate: Bearer authorization_uri="https://login.microsoftonline.com/...", ...
+```
 
 ---
 
@@ -347,25 +406,25 @@ Inner error: {
 }
 ```
 
-**Cause.** Document Intelligence tried to fetch `urlSource` (the `https://<storage>.blob.core.windows.net/raw/<file_id>/<filename>` URL the notebook passed) and got rejected. Since this pattern disables shared-key access on the storage account (`allowSharedKeyAccess: false`), DI **must** authenticate to Blob using its own system-assigned managed identity. If the DI managed identity is missing the **Storage Blob Data Reader** role on the storage account, the storage service returns 401/403 and DI surfaces that as `InvalidContent`.
+**Cause.** Document Intelligence tried to fetch `urlSource` (the `https://<storage>.blob.core.windows.net/raw/<file_id>/<filename>` URL the notebook passed) and got rejected. Since this pattern disables shared-key access on the storage account (`allowSharedKeyAccess: false`), DI **must** authenticate to Blob using a managed identity. Document Intelligence is served by the **Foundry resource** (`kind=AIServices`) in this pattern — so the relevant identity is the Foundry resource's system-assigned MI, not a separate DI MI. If the Foundry MI is missing the **Storage Blob Data Reader** role on the storage account, the storage service returns 401/403 and DI surfaces that as `InvalidContent`.
 
-(Other less common causes: the blob doesn't actually exist at the URL the notebook constructed; the storage account firewall blocks DI; DI's managed identity is disabled altogether.)
+(Other less common causes: the blob doesn't actually exist at the URL the notebook constructed; the storage account firewall blocks the Foundry resource; the Foundry resource's managed identity is disabled altogether.)
 
-**Diagnostic flow.** Run these checks against your environment (replace `<sub>`, `<rg>`, `<di>`, `<storage>` with values from `demo-ids.local.json`):
+**Diagnostic flow.** Run these checks against your environment (replace `<sub>`, `<rg>`, `<foundry>`, `<storage>` with values from `demo-ids.local.json`):
 
 ```bash
-# 1. Confirm DI has a system-assigned MI and capture its principal ID
-DI_OBJID=$(az cognitiveservices account show --name <di> -g <rg> \
+# 1. Confirm the Foundry resource (which serves DI) has a system-assigned MI and capture its principal ID
+AIF_OBJID=$(az cognitiveservices account show --name <foundry> -g <rg> \
   --query identity.principalId -o tsv)
-echo "DI MI: $DI_OBJID"
+echo "Foundry MI: $AIF_OBJID"
 
 # 2. Confirm shared-key is disabled on Storage (this pattern's default)
 az storage account show --name <storage> \
   --query "{allowSharedKeyAccess:allowSharedKeyAccess, bypass:networkRuleSet.bypass}" -o json
 
-# 3. Check whether the DI MI has any role on the storage account
+# 3. Check whether the Foundry MI has any role on the storage account
 ST_RES_ID=$(az storage account show --name <storage> -g <rg> --query id -o tsv)
-az role assignment list --assignee $DI_OBJID --scope $ST_RES_ID -o table
+az role assignment list --assignee $AIF_OBJID --scope $ST_RES_ID -o table
 
 # 4. Confirm the blob actually exists (sign in as your az identity, which has
 #    Storage Blob Data Contributor from Phase 1.7)
@@ -375,23 +434,23 @@ az storage blob list --account-name <storage> --container-name raw \
 
 If step 3 returns no rows, that's the cause.
 
-**Fix.** Grant Storage Blob Data Reader to the DI MI:
+**Fix.** Grant Storage Blob Data Reader to the Foundry MI:
 
 ```bash
-DI_OBJID=$(az cognitiveservices account show --name <di> -g <rg> --query identity.principalId -o tsv)
+AIF_OBJID=$(az cognitiveservices account show --name <foundry> -g <rg> --query identity.principalId -o tsv)
 ST_RES_ID=$(az storage account show --name <storage> -g <rg> --query id -o tsv)
 
 az role assignment create \
-  --assignee-object-id $DI_OBJID --assignee-principal-type ServicePrincipal \
+  --assignee-object-id $AIF_OBJID --assignee-principal-type ServicePrincipal \
   --role "Storage Blob Data Reader" \
   --scope $ST_RES_ID
 ```
 
 Wait **5–15 minutes** for the role to propagate, then re-run the pipeline.
 
-If you originally provisioned via `infra/main.bicep` and this assignment is missing, your deployment predates the audit fix — pull latest and re-run `pwsh ./infra/deploy.ps1` (the `rbac.bicep` module now creates this assignment automatically; see [03-deployment-manual.md § 1.7 step 3](./03-deployment-manual.md#17-rbac-wiring)).
+If you originally provisioned via `infra/main.bicep` and this assignment is missing, your deployment predates the DI-consolidation fix — pull latest and re-run `pwsh ./infra/deploy.ps1` (the `rbac.bicep` module now grants Storage Blob Data Reader to the Foundry MI automatically; see [03-deployment-manual.md § 1.7 step 3](./03-deployment-manual.md#17-rbac-wiring)).
 
-**If you're running with the storage firewall locked down** (private endpoints, or `defaultAction: Deny`), the role grant alone isn't sufficient — DI needs either a [trusted-services bypass](https://learn.microsoft.com/azure/storage/common/storage-network-security#grant-access-to-trusted-azure-services) on the storage account or a private endpoint shared with DI. See [Managed identities for Document Intelligence — Private storage account access](https://learn.microsoft.com/azure/ai-services/document-intelligence/authentication/managed-identities#private-storage-account-access).
+**If you're running with the storage firewall locked down** (private endpoints, or `defaultAction: Deny`), the role grant alone isn't sufficient — the Foundry resource needs either a [trusted-services bypass](https://learn.microsoft.com/azure/storage/common/storage-network-security#grant-access-to-trusted-azure-services) on the storage account or a shared private endpoint. See [Managed identities for Document Intelligence — Private storage account access](https://learn.microsoft.com/azure/ai-services/document-intelligence/authentication/managed-identities#private-storage-account-access).
 
 ### 3.10 PyJWT dependency-conflict warning
 
@@ -509,27 +568,123 @@ Then trigger `pl_ingest_docs` — the lookup activity's exit payload will report
 
 ## 4 — AI Search index / indexer
 
-### 4.1 Vectorizer auth failure
+### 4.1 Vectorizer auth failure (loud OR silent)
 
-**Symptom.** Indexer status shows `lastResult.errorMessage` referencing OpenAI 401 / 403 from the Foundry endpoint, or "managed identity not authorized to invoke embedding deployment."
+**Symptom — loud variant.** Indexer status shows `lastResult.errorMessage` referencing OpenAI 401 / 403 from the Foundry endpoint, or "managed identity not authorized to invoke embedding deployment."
 
-**Cause.** AI Search service's managed identity does not have **Cognitive Services OpenAI User** role on the Foundry resource hosting the embedding deployment.
+**Symptom — silent variant (more common, harder to diagnose).** Indexer reports `status: success` and a non-zero `documentCount`, but:
 
-**Fix.**
+- AI Search service stats show `vectorIndexSize.usage = 0` while `documentCount.usage > 0`
+- Documents returned by a `*` search have a `content_vector` field that is `null` or an empty array
+- Copilot Studio / your client app sends a vector-first query and gets back zero hits — "I don't have information." — even though the index is populated with text
+
+The indexer's overall `success` status hides the failure entirely — there's no error, no warning, no telltale `transientFailure`. The chunks are committed text-only with a null vector.
+
+**Quick diagnostic.** Hit the service-stats endpoint — if `vectorIndexSize: 0` while `documentCount: N>0`, you're looking at silent vectorizer failure:
 
 ```bash
+TOKEN=$(az account get-access-token --resource https://search.azure.com --query accessToken -o tsv)
+curl -sH "Authorization: Bearer $TOKEN" \
+  "https://<search-svc>.search.windows.net/servicestats?api-version=2024-07-01" \
+  | jq '.counters | {documentCount, vectorIndexSize, storageSize}'
+```
+
+**Cause — in order of likelihood:**
+
+1. **No skillset attached to the indexer** (most common). The `azureOpenAI` *vectorizer* on the index is **query-time only** — it converts incoming text queries to vectors at search time. To generate vectors at INDEX time you need a separate **skillset** with an `AzureOpenAIEmbeddingSkill`, with the indexer referencing it via `skillsetName` and writing the skill's output into `content_vector` via `outputFieldMappings`. If the indexer has `skillsetName: null` or `outputFieldMappings: []`, this is the cause.
+
+2. **Wrong role on the AI Search MI**. The required role on the Foundry resource is **`Cognitive Services OpenAI User`** (role ID `5e0bd9bd-7b93-4f28-af87-19fc36ad61bd`). The similarly named **`Cognitive Services User`** (role ID `a97b65f3-24c7-4388-baec-2e87135dc908`) grants data-plane access to non-OpenAI Cognitive Services (Document Intelligence, Translator, Vision) on a Foundry/AIServices resource but **does NOT** grant the OpenAI sub-namespace required for embedding / completion calls. Both cases produce identical silent-failure symptoms.
+
+3. **Missing role entirely** — same symptom as #2 above; the skill call gets 401/403 and the indexer silently swallows it.
+
+See [Azure OpenAI vectorizer reference — vectorizer parameters](https://learn.microsoft.com/azure/search/vector-search-vectorizer-azure-open-ai#vectorizer-parameters) and the [Azure OpenAI embedding skill](https://learn.microsoft.com/azure/search/cognitive-search-skill-azure-openai-embedding) docs.
+
+**Verify configuration.** Run these against your environment to nail down which of the three causes you're hitting:
+
+```bash
+SEARCH=<search-svc-name>
+TOKEN=$(az account get-access-token --resource https://search.azure.com --query accessToken -o tsv)
+
+# 1. Is a skillset attached to the indexer?
+curl -sH "Authorization: Bearer $TOKEN" \
+  "https://$SEARCH.search.windows.net/indexers/<indexer-name>?api-version=2024-07-01" \
+  | jq '{skillsetName, outputFieldMappings}'
+# Expected:
+#   skillsetName: "skill-rag-embeddings"
+#   outputFieldMappings includes a mapping to "content_vector"
+# If skillsetName is null — cause #1. Skip to Fix § A.
+
+# 2. Does the skillset exist?
+curl -sH "Authorization: Bearer $TOKEN" \
+  "https://$SEARCH.search.windows.net/skillsets?api-version=2024-07-01" \
+  | jq '.value[].name'
+
+# 3. What role does the AI Search MI have on Foundry?
 SEARCH_OBJID=<AI Search system-assigned MI object ID>
 AIF_RES_ID=$(az cognitiveservices account show --name <foundry-resource> -g <rg> --query id -o tsv)
+az role assignment list --scope $AIF_RES_ID --fill-principal-name false \
+  --query "[?principalId=='$SEARCH_OBJID'].{role:roleDefinitionName}" -o table
+# Expected: Cognitive Services OpenAI User
+# If "Cognitive Services User" or nothing — cause #2 or #3. Skip to Fix § B.
+```
 
+**Fix A — missing skillset (cause #1).** Create the skillset + update the indexer to reference it:
+
+```bash
+# Create the AzureOpenAIEmbeddingSkill skillset
+curl -X PUT -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  "https://$SEARCH.search.windows.net/skillsets/skill-rag-embeddings?api-version=2024-07-01" \
+  -d '{
+    "name": "skill-rag-embeddings",
+    "skills": [{
+      "@odata.type": "#Microsoft.Skills.Text.AzureOpenAIEmbeddingSkill",
+      "name": "embed-content",
+      "context": "/document",
+      "resourceUri": "https://<foundry-resource>.openai.azure.com",
+      "deploymentId": "embedding",
+      "modelName": "text-embedding-3-large",
+      "dimensions": 3072,
+      "inputs": [{"name": "text", "source": "/document/content"}],
+      "outputs": [{"name": "embedding", "targetName": "content_vector_embedding"}]
+    }]
+  }'
+
+# Re-PUT the indexer with skillsetName + outputFieldMappings
+# (Get the current indexer with GET first, then add these two fields; PUT replaces the whole resource.)
+# Or just re-run the post-deploy script:
+python scripts/post_deploy_search.py --ids demo-ids.local.json --run-indexer
+```
+
+For the manual portal walkthrough, see [03-deployment-manual.md § 4.3](./03-deployment-manual.md#43-create-the-skillset-indexing-time-vectorization).
+
+**Fix B — wrong / missing role (causes #2 and #3).** Apply the right role:
+
+```bash
 az role assignment create \
   --assignee-object-id $SEARCH_OBJID --assignee-principal-type ServicePrincipal \
   --role "Cognitive Services OpenAI User" \
   --scope $AIF_RES_ID
+
+# (Optional) remove the misleading non-OpenAI role to keep the principal clean:
+# az role assignment delete --assignee $SEARCH_OBJID --role "Cognitive Services User" --scope $AIF_RES_ID
 ```
 
-Wait up to 15 minutes for propagation, then re-run the indexer.
+**After either fix — force re-vectorization.** Reset the indexer (clears its high-water-mark so it reprocesses the existing documents that were committed with null vectors), then trigger a run:
 
-**Also check:** the vectorizer definition's `azureOpenAIParameters.authIdentity` is set correctly. `null` = system-assigned managed identity. If you used a user-assigned MI, you must set the identity ID explicitly.
+```bash
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  "https://$SEARCH.search.windows.net/indexers/<indexer-name>/reset?api-version=2024-07-01"
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  "https://$SEARCH.search.windows.net/indexers/<indexer-name>/run?api-version=2024-07-01"
+```
+
+Wait 60–90 seconds (longer for large indexes) and re-check `vectorIndexSize` — it should now be > 0. Copilot Studio queries will start returning results immediately.
+
+> **For role grants:** allow up to 15 minutes for propagation before re-running. If the indexer still produces null vectors after the wait, reset + run again — the search service caches its MI bearer token for a few minutes.
+
+**If you provisioned via Bicep:** the current `infra/modules/rbac.bicep` and `scripts/post_deploy_search.py` together create both the right role and the skillset. Older deployments (before this audit fix) are missing the skillset — update the repo and re-run `python scripts/post_deploy_search.py` to add it; no Bicep redeploy needed.
+
+**Also check (less common):** the vectorizer / skill definition's `authIdentity` is set correctly. `null` = system-assigned managed identity. If you used a user-assigned MI, you must set the identity ID explicitly.
 
 ### 4.2 Indexer cannot read Blob
 

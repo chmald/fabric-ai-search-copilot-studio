@@ -6,22 +6,27 @@
 //   * Resource group
 //   * Key Vault (RBAC-mode)
 //   * Storage account + raw/ and chunks/ containers
-//   * Azure AI Foundry resource (kind=AIServices) + text-embedding-3-large + gpt-4o deployments
-//   * Azure Document Intelligence (kind=FormRecognizer)
+//   * Azure AI Foundry resource (kind=AIServices) — multi-service Cognitive Services
+//     account that provides BOTH:
+//        - Azure OpenAI deployments (text-embedding-3-large + gpt-4o)
+//        - Document Intelligence (prebuilt-read OCR, same endpoint, same MI)
+//     A separate Microsoft.CognitiveServices/accounts of kind=FormRecognizer is NOT
+//     provisioned — Foundry's AIServices kind exposes the DI API surface natively
+//     via the same `*.cognitiveservices.azure.com` endpoint.
 //   * Azure AI Search Standard S1 (semantic ranker enabled, system-assigned MI)
 //   * RBAC role assignments:
-//        - AI Search MI -> Cognitive Services User on Foundry (integrated vectorizer)
+//        - AI Search MI -> Cognitive Services OpenAI User on Foundry (integrated vectorizer)
 //        - AI Search MI -> Storage Blob Data Reader on Storage (indexer pulls chunks/)
-//        - Document Intelligence MI -> Storage Blob Data Reader on Storage
-//          (DI fetches raw/<file> via urlSource using its own MI — required because
-//          shared-key access on Storage is disabled)
+//        - Foundry MI -> Storage Blob Data Reader on Storage
+//          (DI fetches raw/<file> via urlSource using Foundry's own MI — required
+//          because shared-key access on Storage is disabled)
 //        - (Optional, when deployerPrincipalId is set) deployer ->
 //          Search Service Contributor + Search Index Data Contributor on AI Search
 //          so the post-deploy script can authenticate with a bearer token instead
 //          of admin keys (which are disabled).
 //
 // Auth posture:
-//   * disableLocalAuth=true on Foundry, Document Intelligence, AI Search
+//   * disableLocalAuth=true on Foundry, AI Search
 //   * allowSharedKeyAccess=false on Storage
 //   All clients (vectorizer, indexer, Fabric pipeline, app code, scripts) authenticate
 //   with Entra ID bearer tokens via managed identity or service principal.
@@ -117,7 +122,6 @@ var stgName       = toLower(replace('st${workloadName}${env}${locationShort}', '
 var rgName         = 'rg-${nameSuffix}'
 var kvName         = take('kv-${nameSuffix}', 24)
 var aifName        = 'aif-${nameSuffix}'
-var diName         = 'di-${nameSuffix}'
 var searchName     = 'srch-${nameSuffix}'
 
 var mergedTags = union(tags, {
@@ -175,16 +179,6 @@ module foundry 'modules/aifoundry.bicep' = {
   }
 }
 
-module docIntel 'modules/docintelligence.bicep' = {
-  scope: rg
-  name: 'di-deploy'
-  params: {
-    name: diName
-    location: location
-    tags: mergedTags
-  }
-}
-
 module search 'modules/search.bicep' = {
   scope: rg
   name: 'search-deploy'
@@ -201,7 +195,7 @@ module rbac 'modules/rbac.bicep' = {
   name: 'rbac-deploy'
   params: {
     searchPrincipalId: search.outputs.systemAssignedPrincipalId
-    docIntelPrincipalId: docIntel.outputs.systemAssignedPrincipalId
+    foundryPrincipalId: foundry.outputs.systemAssignedPrincipalId
     storageAccountName: storage.outputs.name
     foundryAccountName: foundry.outputs.name
     searchServiceName: search.outputs.name
@@ -230,17 +224,17 @@ output deploymentSummary object = {
   keyVault: keyVault.outputs.name
   keyVaultUri: keyVault.outputs.uri
 
-  // Foundry (model gateway)
+  // Foundry (multi-service Cognitive Services — OpenAI models + Document Intelligence)
   foundryResource: foundry.outputs.name
   foundryOpenAIEndpoint: foundry.outputs.openAIEndpoint
+  // Document Intelligence (prebuilt-read OCR) is served by the SAME Foundry account
+  // at its generic Cognitive Services endpoint. The Fabric pipeline's OCR notebook
+  // points the azure-ai-documentintelligence SDK at this URL.
+  documentIntelligenceEndpoint: foundry.outputs.cognitiveServicesEndpoint
   embeddingDeployment: foundry.outputs.embeddingDeploymentName
   embeddingModel: embeddingModelName
   chatDeployment: foundry.outputs.chatDeploymentName
   chatModel: chatModelName
-
-  // Document Intelligence
-  documentIntelligence: docIntel.outputs.name
-  documentIntelligenceEndpoint: docIntel.outputs.endpoint
 
   // AI Search
   searchService: search.outputs.name
