@@ -394,7 +394,7 @@ source_path = "Files/source_docs/"   # default; overridden by pipeline
 
 # Imports
 import json
-from pyspark.sql.functions import col, md5, concat_ws, regexp_replace
+from pyspark.sql.functions import col, md5, concat_ws, regexp_replace, lit
 
 # Discover files in the source (binaryFile reader recursively walks the folder)
 src = (
@@ -424,12 +424,36 @@ src = src.withColumn(
     md5(concat_ws("|", col("source_path"), col("source_modified_ts").cast("string"))),
 )
 
-# Anti-join against control table to find new files
-ctrl = spark.table("control_table_files").select("file_id")
-new_files = src.join(ctrl, on="file_id", how="left_anti")
+# ---------------------------------------------------------------------------
+# Pick up two categories of files:
+#   1. BRAND NEW   — not in control_table_files at all (left_anti)
+#   2. RETRY       — already in control_table_files but any per-stage status
+#                    is 'failed' AND the row is not tombstoned (manual skip).
+# mark_pending uses MERGE … WHEN MATCHED THEN UPDATE, so the retry rows are
+# flipped back to 'pending' on the next run and either 'succeeded' or 'failed'
+# at the end — no schema changes needed. Set tombstoned=true in the control
+# table to permanently stop retrying a specific file_id.
+# ---------------------------------------------------------------------------
+ctrl = spark.table("control_table_files")
+
+brand_new = src.join(ctrl.select("file_id"), on="file_id", how="left_anti")
+
+retry_ids = (
+    ctrl
+    .filter(
+        (col("tombstoned").isNull() | (col("tombstoned") == lit(False))) &
+        ((col("ocr_status")   == "failed") |
+         (col("chunk_status") == "failed") |
+         (col("index_status") == "failed"))
+    )
+    .select("file_id")
+)
+retry_files = src.join(retry_ids, on="file_id", how="inner")
+
+to_process = brand_new.unionByName(retry_files).dropDuplicates(["file_id"])
 
 # Persist for the pipeline's Lookup activity to read
-(new_files
+(to_process
     .select("file_id", "source_path",
             col("source_modified_ts").cast("string").alias("source_modified_ts"),
             "byte_size")
@@ -438,13 +462,28 @@ new_files = src.join(ctrl, on="file_id", how="left_anti")
 # Return JSON-serialized summary as the notebook exit value.
 # notebookutils.notebook.exit(value) takes a STRING; the pipeline receives it at
 # @activity('lookup_new_files').output.result.exitValue
-exit_payload = json.dumps({"new_count": new_files.count()})
+new_count   = brand_new.count()
+retry_count = retry_files.count()
+exit_payload = json.dumps({
+    "new_count":   new_count,
+    "retry_count": retry_count,
+    "total":       new_count + retry_count,
+})
 notebookutils.notebook.exit(exit_payload)
 ```
 
 > **`notebookutils.notebook.exit(value)`** is the current Fabric API for returning data from a notebook activity. The legacy `mssparkutils` namespace still works for backwards compatibility but is being retired — always use `notebookutils` for new code. The value passed to `exit()` **must be a string**; serialize complex data with `json.dumps(...)` and parse on the consumer side. See [NotebookUtils notebook run and orchestration](https://learn.microsoft.com/fabric/data-engineering/notebookutils/notebookutils-notebook-run#exit-a-notebook).
 >
 > **Why a staging Delta table instead of returning the file list inline?** The notebook activity's `exitValue` is a single string, and Spark `Row` objects (with timestamps, nested types) don't round-trip cleanly through `json.dumps`. The conventional Fabric pipeline pattern is: have the notebook persist row data to a Delta table, then run a **Lookup activity** ([Phase F8.2](#f82-activity-1-lookup-read-_tmp_new_files-for-the-foreach)) against that table to feed the ForEach. This also keeps file metadata typed and queryable for debugging.
+>
+> **Retry semantics.** The lookup deliberately picks up **both** brand-new files **and** any row in `control_table_files` where `ocr_status`, `chunk_status`, or `index_status` is `'failed'` (unless `tombstoned = true`). The downstream `mark_pending` activity uses `MERGE … WHEN MATCHED THEN UPDATE`, so a retry simply flips the existing row from `failed` → `pending` → `succeeded`/`failed` on the next run — no manual cleanup required. To **permanently** stop retrying a specific file (e.g. a corrupt PDF that will never OCR), tombstone it:
+>
+> ```sql
+> -- Run in a notebook attached to the lakehouse, or via the SQL analytics endpoint
+> UPDATE control_table_files SET tombstoned = true WHERE file_id = '<file_id>';
+> ```
+>
+> The exit payload now reports `{"new_count": N, "retry_count": M, "total": N+M}` so you can see at a glance from the pipeline monitoring view how many of each category the run picked up. See [06-troubleshooting.md § 3.11](./06-troubleshooting.md#311-failed-files-are-not-retried-on-the-next-pipeline-run) for the full retry / recovery flow.
 
 ### F7.2 `nb_ocr_chunk_upload`
 
@@ -482,8 +521,16 @@ di_sp_client_id   = ""
 di_sp_secret_name = "di-sp-secret"
 
 # Install required packages (cached in the session after first install)
-%pip install azure-ai-documentintelligence==1.0.0 azure-storage-blob==12.21.0 azure-core==1.30.2 msal==1.30.0 tiktoken==0.7.0 --quiet
+# pyjwt>=2.6.0 is pinned explicitly to satisfy Fabric's preinstalled fsspec-wrapper;
+# msal's loose pyjwt constraint otherwise resolves to an older version and produces
+# a pip dependency-conflict warning (see 06-troubleshooting.md § 3.10).
+%pip install azure-ai-documentintelligence==1.0.0 azure-storage-blob==12.21.0 azure-core==1.30.2 msal==1.30.0 "pyjwt>=2.6.0" tiktoken==0.7.0 --quiet
 ```
+
+> **`%pip install` is disabled in pipeline runs by default.** Per [Manage Apache Spark libraries in Microsoft Fabric](https://learn.microsoft.com/fabric/data-engineering/library-management#inline-installation), Fabric blocks inline `%pip` in pipeline-triggered notebook runs (it works fine in interactive runs from the notebook editor). You have two ways to make the cell above work from the pipeline:
+>
+> - **Quick unblock** — pass `_inlineInstallationEnabled = true` as a **base parameter** on the `ocr_chunk_upload` notebook activity in the pipeline (see [F8.7](#f87-activity-2c--ocr--chunk--upload-notebook)). This re-enables `%pip` for that specific activity. Best for demo / proof-of-concept.
+> - **Production pattern (recommended)** — create a Fabric **Environment** (e.g. `env-rag-<env>`) with these packages installed in **Full mode**, then attach the environment to `nb_ocr_chunk_upload`. Once the environment is attached, **delete the `%pip install` cell** (libraries are loaded by Fabric when the Spark session starts). See [Manage libraries in Fabric environments](https://learn.microsoft.com/fabric/data-engineering/environment-manage-library). Full mode adds 1–3 minutes to session startup but eliminates per-run resolution variance.
 
 ```python
 import json
@@ -851,7 +898,7 @@ This activity is where Document Intelligence is called. The notebook ([F7.2](#f7
 |---|---|
 | **Name** | `ocr_chunk_upload` |
 | **Notebook** | `nb_ocr_chunk_upload` |
-| **Base parameters** | `file_id` = `@item().file_id`<br/>`raw_blob_uri` = `@concat('https://', pipeline().parameters.storage_account, '.blob.core.windows.net/', pipeline().parameters.raw_container, '/', item().file_id, '/', last(split(item().source_path, '/')))`<br/>`chunks_account` = `@pipeline().parameters.storage_account`<br/>`chunks_container` = `@pipeline().parameters.chunks_container`<br/>`chunks_prefix` = `@concat(item().file_id, '/')`<br/>`di_endpoint` = `@pipeline().parameters.di_endpoint`<br/>`key_vault_name` = `@pipeline().parameters.key_vault_name`<br/>`di_sp_tenant_id` = `@pipeline().parameters.di_sp_tenant_id`<br/>`di_sp_client_id` = `@pipeline().parameters.di_sp_client_id`<br/>`di_sp_secret_name` = `@pipeline().parameters.di_sp_secret_name` |
+| **Base parameters** | `file_id` = `@item().file_id`<br/>`raw_blob_uri` = `@concat('https://', pipeline().parameters.storage_account, '.blob.core.windows.net/', pipeline().parameters.raw_container, '/', item().file_id, '/', last(split(item().source_path, '/')))`<br/>`chunks_account` = `@pipeline().parameters.storage_account`<br/>`chunks_container` = `@pipeline().parameters.chunks_container`<br/>`chunks_prefix` = `@concat(item().file_id, '/')`<br/>`di_endpoint` = `@pipeline().parameters.di_endpoint`<br/>`key_vault_name` = `@pipeline().parameters.key_vault_name`<br/>`di_sp_tenant_id` = `@pipeline().parameters.di_sp_tenant_id`<br/>`di_sp_client_id` = `@pipeline().parameters.di_sp_client_id`<br/>`di_sp_secret_name` = `@pipeline().parameters.di_sp_secret_name`<br/>**`_inlineInstallationEnabled` = `true`** — required because the notebook installs PyPI packages via `%pip install` (see [F7.2](#f72-nb_ocr_chunk_upload) callout). If you attach a [Fabric Environment](https://learn.microsoft.com/fabric/data-engineering/environment-manage-library) instead, omit this parameter and delete the `%pip install` cell from the notebook. |
 
 The notebook returns `{"chunk_count": N}` as its exit value. The next activity parses it with `@json(activity('ocr_chunk_upload').output.result.exitValue).chunk_count`.
 
@@ -984,6 +1031,10 @@ Common Fabric-layer issues are catalogued in [06-troubleshooting.md](./06-troubl
 - **`copy_raw_to_blob` fails with `PathNotFound` and an `abfss:/...` URI in the path** → [§ 3.5](./06-troubleshooting.md#35-copy-activity-fails-with-pathnotfound-and-an-abfss-uri-in-the-path) — `nb_lookup_new_files` is writing absolute abfss URIs instead of paths relative to `Files/`
 - **Lookup activity returns zero rows on first run** even though `nb_lookup_new_files` wrote N rows → [§ 3.6](./06-troubleshooting.md#36-lookup-activity-returns-zero-rows-after-a-spark-write) — SQL analytics endpoint sync lag; add a Refresh SQL Endpoint activity ([F8.2](#f82-activity-15--refresh-sql-endpoint))
 - **`nb_ocr_chunk_upload` fails with `ImportError: cannot import name 'DefaultAzureCredential'` or auth errors against DI** → [§ 3.7](./06-troubleshooting.md#37-nb_ocr_chunk_upload-cant-authenticate-to-document-intelligence) — Fabric notebooks don't support `DefaultAzureCredential`; use the MSAL+SP pattern in [F7.2](#f72-nb_ocr_chunk_upload)
+- **`nb_ocr_chunk_upload` fails with `MagicUsageError: %pip magic command is disabled`** → [§ 3.8](./06-troubleshooting.md#38-pip-install-fails-with-magicusageerror-pip-magic-command-is-disabled) — pipeline runs block `%pip`; either add `_inlineInstallationEnabled = true` to the activity ([F8.7](#f87-activity-2c--ocr--chunk--upload-notebook)) or attach a Fabric Environment
+- **`nb_ocr_chunk_upload` fails with `InvalidContent: Could not download the file from the given URL`** → [§ 3.9](./06-troubleshooting.md#39-document-intelligence-invalidcontent-could-not-download-the-file) — Document Intelligence MI is missing **Storage Blob Data Reader** on the storage account (DI tries anonymous fetch → storage rejects it because shared-key is disabled)
+- **`nb_ocr_chunk_upload` pip warning `fsspec-wrapper requires PyJWT>=2.6.0, but you have pyjwt 2.4.0`** → [§ 3.10](./06-troubleshooting.md#310-pyjwt-dependency-conflict-warning) — msal pulls an older PyJWT than Fabric's preinstalled fsspec-wrapper accepts; pin `pyjwt>=2.6.0` in the install line
+- **Failed files in `control_table_files` are not retried — lookup reports `new_count: 0`** → [§ 3.11](./06-troubleshooting.md#311-failed-files-are-not-retried-on-the-next-pipeline-run) — `nb_lookup_new_files` needs the brand-new + failed union (see [F7.1](#f71-nb_lookup_new_files)); the pattern also covers manual retry and tombstoning
 - **`nb_ocr_chunk_upload` import errors on `%pip install`** → [§ 3.2](./06-troubleshooting.md#32-chunking-notebook-fails) — the install cell didn't run or session is stale
 - **Control table never updates** → [§ 3.3](./06-troubleshooting.md#33-control-table-stuck)
 - **`mark_pending` / `mark_succeeded` fails with `PySparkValueError: CANNOT_DETERMINE_TYPE`** → [§ 3.3.1](./06-troubleshooting.md#331-nb_update_control_table-fails-with-pysparkvalueerror-cannot_determine_type) — `nb_update_control_table` is letting PySpark infer the schema from a mostly-None row; pull the schema from the table instead

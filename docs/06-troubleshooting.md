@@ -295,6 +295,216 @@ And `notebookutils.credentials.getToken` exposes only **four** audience keys: `s
 
 For Blob access from the same notebook, wrap `notebookutils.credentials.getToken('storage')` in the same `TokenCredential` adapter — workspace identity works there because `storage` IS one of the four supported audience keys.
 
+### 3.8 `%pip install` fails with `MagicUsageError: %pip magic command is disabled`
+
+**Symptom.** `ocr_chunk_upload` (or any notebook activity that uses `%pip install`) fails in a pipeline run with:
+
+```
+Notebook execution failed at Notebook service with http status code - '200',
+please check the Run logs on Notebook, additional details -
+'Error name - MagicUsageError, Error value - %pip magic command is disabled.
+Find more details in https://learn.microsoft.com/en-us/fabric/data-engineering/library-management#inline-installation'
+```
+
+The same notebook **runs fine interactively** from the notebook editor — the failure is pipeline-specific.
+
+**Cause.** Per [Manage Apache Spark libraries in Microsoft Fabric](https://learn.microsoft.com/fabric/data-engineering/library-management#inline-installation):
+
+> "Inline commands for managing Python libraries are disabled in notebook pipeline runs by default."
+
+Fabric blocks `%pip install` in non-interactive runs because per-run dependency resolution can produce inconsistent dependency trees across runs.
+
+**Fix.** Choose based on your maturity:
+
+**Option A — Quick unblock (good for demos / dev).** Pass `_inlineInstallationEnabled = true` as a **base parameter** on the notebook activity in the pipeline. This re-enables `%pip` for that specific activity.
+
+- Open `pl_ingest_docs` → select the `ocr_chunk_upload` Notebook activity → **Settings → Base parameters** → add: `_inlineInstallationEnabled` (type: Boolean) = `true`
+- Save and re-run the pipeline
+
+**Option B — Fabric Environment (recommended for production).** Move the library list out of the notebook entirely:
+
+1. In your Fabric workspace, **+ New item → Environment** → name `env-rag-<env>`.
+2. **Libraries → Public libraries** → add: `azure-ai-documentintelligence==1.0.0`, `azure-storage-blob==12.21.0`, `azure-core==1.30.2`, `msal==1.30.0`, `tiktoken==0.7.0`.
+3. **Publish** in **Full mode** (3–6 min publish; adds 1–3 min to session startup, but eliminates per-run variance — see [environment publishing modes](https://learn.microsoft.com/fabric/data-engineering/library-management#environment-publishing-modes-quick-vs-full)).
+4. Open `nb_ocr_chunk_upload` → ribbon **Environment** dropdown → select `env-rag-<env>`.
+5. **Delete the `%pip install` cell** from the notebook — the libraries are now loaded by Fabric at session start.
+6. Remove `_inlineInstallationEnabled` from the notebook activity base parameters if you added it for Option A.
+
+For mixed scenarios (some notebooks need different libraries), see [Manage libraries in Fabric environments](https://learn.microsoft.com/fabric/data-engineering/environment-manage-library).
+
+### 3.9 Document Intelligence `InvalidContent: Could not download the file`
+
+**Symptom.** `ocr_chunk_upload` fails with:
+
+```
+HttpResponseError, Error value -
+(InvalidRequest) Invalid request.
+Code: InvalidRequest
+Message: Invalid request.
+Inner error: {
+    "code": "InvalidContent",
+    "message": "Could not download the file from the given URL."
+}
+```
+
+**Cause.** Document Intelligence tried to fetch `urlSource` (the `https://<storage>.blob.core.windows.net/raw/<file_id>/<filename>` URL the notebook passed) and got rejected. Since this pattern disables shared-key access on the storage account (`allowSharedKeyAccess: false`), DI **must** authenticate to Blob using its own system-assigned managed identity. If the DI managed identity is missing the **Storage Blob Data Reader** role on the storage account, the storage service returns 401/403 and DI surfaces that as `InvalidContent`.
+
+(Other less common causes: the blob doesn't actually exist at the URL the notebook constructed; the storage account firewall blocks DI; DI's managed identity is disabled altogether.)
+
+**Diagnostic flow.** Run these checks against your environment (replace `<sub>`, `<rg>`, `<di>`, `<storage>` with values from `demo-ids.local.json`):
+
+```bash
+# 1. Confirm DI has a system-assigned MI and capture its principal ID
+DI_OBJID=$(az cognitiveservices account show --name <di> -g <rg> \
+  --query identity.principalId -o tsv)
+echo "DI MI: $DI_OBJID"
+
+# 2. Confirm shared-key is disabled on Storage (this pattern's default)
+az storage account show --name <storage> \
+  --query "{allowSharedKeyAccess:allowSharedKeyAccess, bypass:networkRuleSet.bypass}" -o json
+
+# 3. Check whether the DI MI has any role on the storage account
+ST_RES_ID=$(az storage account show --name <storage> -g <rg> --query id -o tsv)
+az role assignment list --assignee $DI_OBJID --scope $ST_RES_ID -o table
+
+# 4. Confirm the blob actually exists (sign in as your az identity, which has
+#    Storage Blob Data Contributor from Phase 1.7)
+az storage blob list --account-name <storage> --container-name raw \
+  --auth-mode login --query "[].name" -o tsv
+```
+
+If step 3 returns no rows, that's the cause.
+
+**Fix.** Grant Storage Blob Data Reader to the DI MI:
+
+```bash
+DI_OBJID=$(az cognitiveservices account show --name <di> -g <rg> --query identity.principalId -o tsv)
+ST_RES_ID=$(az storage account show --name <storage> -g <rg> --query id -o tsv)
+
+az role assignment create \
+  --assignee-object-id $DI_OBJID --assignee-principal-type ServicePrincipal \
+  --role "Storage Blob Data Reader" \
+  --scope $ST_RES_ID
+```
+
+Wait **5–15 minutes** for the role to propagate, then re-run the pipeline.
+
+If you originally provisioned via `infra/main.bicep` and this assignment is missing, your deployment predates the audit fix — pull latest and re-run `pwsh ./infra/deploy.ps1` (the `rbac.bicep` module now creates this assignment automatically; see [03-deployment-manual.md § 1.7 step 3](./03-deployment-manual.md#17-rbac-wiring)).
+
+**If you're running with the storage firewall locked down** (private endpoints, or `defaultAction: Deny`), the role grant alone isn't sufficient — DI needs either a [trusted-services bypass](https://learn.microsoft.com/azure/storage/common/storage-network-security#grant-access-to-trusted-azure-services) on the storage account or a private endpoint shared with DI. See [Managed identities for Document Intelligence — Private storage account access](https://learn.microsoft.com/azure/ai-services/document-intelligence/authentication/managed-identities#private-storage-account-access).
+
+### 3.10 PyJWT dependency-conflict warning
+
+**Symptom.** During `%pip install` in `nb_ocr_chunk_upload`, pip prints:
+
+```
+ERROR: pip's dependency resolver does not currently take into account all the packages
+that are installed. This behaviour is the source of the following dependency conflicts.
+fsspec-wrapper 0.1.15 requires PyJWT>=2.6.0, but you have pyjwt 2.4.0 which is incompatible.
+```
+
+The notebook **still runs**, but the conflict can cause subtle import / runtime issues later.
+
+**Cause.** `msal` declares a loose PyJWT constraint (`pyjwt[crypto]>=1.0.0,<3`), so pip's resolver picks an older version (`2.4.0`) than Fabric's preinstalled `fsspec-wrapper` requires (`>=2.6.0`).
+
+**Fix.** Pin `pyjwt>=2.6.0` explicitly in the install line:
+
+```python
+%pip install azure-ai-documentintelligence==1.0.0 azure-storage-blob==12.21.0 \
+             azure-core==1.30.2 msal==1.30.0 "pyjwt>=2.6.0" tiktoken==0.7.0 --quiet
+```
+
+The current [F7.2 `nb_ocr_chunk_upload`](./03b-fabric-setup.md#f72-nb_ocr_chunk_upload) reflects this fix.
+
+If you've moved to the Fabric Environment pattern from [§ 3.8 Option B](#38-pip-install-fails-with-magicusageerror-pip-magic-command-is-disabled), add `pyjwt>=2.6.0` to the Environment's public-libraries list as well so the Full-mode dependency resolution picks the right version.
+
+### 3.11 Failed files are not retried on the next pipeline run
+
+**Symptom.** A file shows up in `control_table_files` with `ocr_status = 'failed'` (or `chunk_status` / `index_status` = `'failed'`). You re-run `pl_ingest_docs` and the lookup activity reports `new_count: 0` — the failed file is **not** picked up.
+
+**Cause.** Older versions of `nb_lookup_new_files` used a plain `left_anti` join against `control_table_files`, which excludes **every** row already in the control table — including failed ones. The current notebook ([F7.1](./03b-fabric-setup.md#f71-nb_lookup_new_files)) was updated to also pick up rows where any per-stage status is `'failed'` (gated by `tombstoned`).
+
+**Fix — update the lookup notebook.** Open `nb_lookup_new_files` and confirm it contains the union pattern (brand-new + retry):
+
+```python
+from pyspark.sql.functions import col, lit
+
+ctrl = spark.table("control_table_files")
+brand_new = src.join(ctrl.select("file_id"), on="file_id", how="left_anti")
+
+retry_ids = (
+    ctrl
+    .filter(
+        (col("tombstoned").isNull() | (col("tombstoned") == lit(False))) &
+        ((col("ocr_status")   == "failed") |
+         (col("chunk_status") == "failed") |
+         (col("index_status") == "failed"))
+    )
+    .select("file_id")
+)
+retry_files = src.join(retry_ids, on="file_id", how="inner")
+to_process  = brand_new.unionByName(retry_files).dropDuplicates(["file_id"])
+```
+
+The downstream `mark_pending` activity already does `MERGE … WHEN MATCHED THEN UPDATE`, so the retry simply overwrites the failed row with `pending` at the start of the run and `succeeded`/`failed` at the end — no manual cleanup needed.
+
+**Inspect the control table** to see what's failed and why:
+
+```sql
+-- SQL analytics endpoint of lh_rag_<env>
+SELECT file_id, source_path, ocr_status, chunk_status, index_status,
+       last_error, ingest_ts, tombstoned
+FROM control_table_files
+WHERE ocr_status   = 'failed'
+   OR chunk_status = 'failed'
+   OR index_status = 'failed'
+ORDER BY ingest_ts DESC;
+```
+
+**Force a single file to be re-tried** without re-running the whole pipeline — set any stage to `'failed'` (or clear the row):
+
+```sql
+-- Option A: mark a specific stage as failed → next run will retry
+UPDATE control_table_files
+SET   ocr_status   = 'failed',
+      last_error   = 'manual retry trigger'
+WHERE file_id = '<file_id>';
+
+-- Option B: delete the row → next run treats the file as brand new
+DELETE FROM control_table_files WHERE file_id = '<file_id>';
+```
+
+> **Caveat:** SQL DML against lakehouse tables runs in the **SQL analytics endpoint** (read-only by default in some Fabric tenant configurations). If `UPDATE` / `DELETE` is blocked, run the equivalent operation in a notebook attached to the lakehouse:
+>
+> ```python
+> from delta.tables import DeltaTable
+> DeltaTable.forName(spark, "control_table_files").update(
+>     condition = "file_id = '<file_id>'",
+>     set       = {"ocr_status": "'failed'", "last_error": "'manual retry trigger'"},
+> )
+> ```
+
+**Permanently skip a file** (corrupt PDF, scanned image DI can't read, intentionally excluded document) — tombstone it:
+
+```sql
+UPDATE control_table_files SET tombstoned = true WHERE file_id = '<file_id>';
+```
+
+Tombstoned rows are excluded from both the new-file and retry passes of `nb_lookup_new_files`, so they will never be processed again until you flip the flag back. They remain in the table for audit / reporting.
+
+**Re-process every failed file in bulk** after a known-fixed regression (e.g. you just granted the missing RBAC role from [§ 3.9](#39-document-intelligence-invalidcontent-could-not-download-the-file)):
+
+```sql
+-- No-op if your nb_lookup_new_files already includes the retry union
+-- (this just demonstrates that the failed rows are still in scope)
+SELECT COUNT(*) AS retryable
+FROM control_table_files
+WHERE (ocr_status = 'failed' OR chunk_status = 'failed' OR index_status = 'failed')
+  AND (tombstoned IS NULL OR tombstoned = false);
+```
+
+Then trigger `pl_ingest_docs` — the lookup activity's exit payload will report `retry_count` matching this query.
+
 ---
 
 ## 4 — AI Search index / indexer
