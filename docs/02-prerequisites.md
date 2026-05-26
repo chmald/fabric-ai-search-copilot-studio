@@ -55,7 +55,7 @@ az provider register --namespace Microsoft.CognitiveServices --wait
 - **Azure AI Foundry resource** (Azure CLI / ARM kind: `AIServices`) in the target subscription + region. This is the **strategic model-gateway resource** that supersedes the legacy standalone Azure OpenAI resource for new deployments. A single Foundry resource hosts all OpenAI models you deploy and also exposes the broader Foundry model catalog (Cohere, Llama, Phi, Mistral, etc.) under one endpoint.
 - **Two OpenAI model deployments** inside the Foundry resource:
   - **Embedding** — recommended: `text-embedding-3-large` (3072 dim). Acceptable fallback: `text-embedding-3-small` (1536 dim) for cost-sensitive demos.
-  - **Chat completion** — recommended: `gpt-4o`. Acceptable fallback: `gpt-4o-mini` for cost-sensitive demos.
+  - **Chat completion** — **optional**. The locked design does NOT consume a chat completion model (Copilot Studio uses its own host model for generative answers). Only deploy one when an engagement explicitly needs a chat endpoint: custom app code, Foundry agent runtime, or Copilot Studio bring-your-own-model. When you opt in, the recommended model is `gpt-4o` (cost-down: `gpt-4o-mini`). Set `chatModelName` in [infra/main.parameters.local.json](../infra/main.parameters.json) to opt in.
 
 > **Why Foundry resource over the legacy AOAI resource?** The Azure AI Foundry resource is Microsoft's strategic direction for all new AI model deployments. It exposes the same OpenAI-compatible endpoint (`https://<resource>.openai.azure.com/`) so all existing tooling — including the AI Search integrated `azureOpenAI` vectorizer — works unchanged, while giving you a single resource for all model families (current + future) and a single capacity / billing / content-safety plane.
 
@@ -236,7 +236,7 @@ These are the role assignments required by the pattern's Entra-only auth posture
 
 ## 11 — Regional alignment
 
-This pattern has a strong **co-location** requirement: AI Search, the Foundry resource (which hosts both your OpenAI models and the Document Intelligence OCR endpoint), Blob Storage, Key Vault, and your Fabric capacity should all live in the **same Azure region** wherever possible. The dominant constraint is **OpenAI model availability** — `text-embedding-3-large` and `gpt-4o` are not in every region, and they're the only services in the stack whose regional rollout lags meaningfully behind general Azure availability.
+This pattern has a strong **co-location** requirement: AI Search, the Foundry resource (which hosts your OpenAI embedding model and the Document Intelligence OCR endpoint), Blob Storage, Key Vault, and your Fabric capacity should all live in the **same Azure region** wherever possible. The dominant constraint is **OpenAI model availability** — `text-embedding-3-large` (and `gpt-4o` if you opt in to a chat deployment) is not in every region, and these are the only services in the stack whose regional rollout lags meaningfully behind general Azure availability.
 
 Copilot Studio's environment region is independent and can differ from the Azure region; choose it based on customer data-residency policy.
 
@@ -267,7 +267,7 @@ Choose from Tier 2 when data-residency, latency to the customer, or existing Azu
 | North Europe (Dublin) | EMEA | Ireland residency; chat models reliable, embedding model availability mixed |
 | France Central | EMEA | France residency |
 | UK South | EMEA | UK residency; OpenAI availability has improved but still verify per-model |
-| Switzerland North | EMEA | Switzerland residency; verify gpt-4o availability per quota |
+| Switzerland North | EMEA | Switzerland residency; verify embedding availability per quota (and gpt-4o if opting in to a chat deployment) |
 | Korea Central | APAC | Korea residency |
 
 ### Tier-3 regions (workarounds required)
@@ -278,7 +278,7 @@ Other regions (UAE North, South Africa North, Brazil South, Central India, etc.)
 
 > ✅ available · ⚠️ available but rollout often lags / quota-limited · ❌ not available at the time of this matrix's authoring
 
-| Region | AI Search S1+ | Foundry resource | text-embedding-3-large | gpt-4o | Doc Intel prebuilt-read | Fabric F-SKU |
+| Region | AI Search S1+ | Foundry resource | text-embedding-3-large | gpt-4o (opt-in) | Doc Intel prebuilt-read | Fabric F-SKU |
 |---|---|---|---|---|---|---|
 | East US 2 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | East US | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -379,7 +379,7 @@ Indicative monthly costs for a **demo / pilot** scale (single region, ~10K docs 
 |---|---|---|
 | AI Search Standard S1 | ~$250 | One replica, one partition |
 | Foundry — OpenAI embedding (text-embedding-3-large) | ~$10–$50 | One-time bulk embed + low ongoing |
-| Foundry — OpenAI chat (gpt-4o) | ~$50–$200 | Scales with query volume |
+| Foundry — OpenAI chat (gpt-4o) | $0 by default; ~$50–$200 if opted in | Optional. The locked design does not deploy a chat model. Scales with query volume when enabled. |
 | Document Intelligence (prebuilt-read) | ~$15–$30 | $1.50 / 1K pages |
 | Blob Storage (Hot, ~50 GB) | ~$2 | |
 | Key Vault | ~$1 | |

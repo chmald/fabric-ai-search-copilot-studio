@@ -20,7 +20,7 @@ The automated deployment path. Provisions the Azure platform layer via Bicep, th
 | Resource group | `main.bicep` (subscription scope) | Container for everything else |
 | Key Vault | `modules/keyvault.bicep` | RBAC-mode; for any non-managed-identity secrets |
 | Storage account + `raw/` + `chunks/` containers | `modules/storage.bicep` | Permanent canonical store |
-| Azure AI Foundry resource | `modules/aifoundry.bicep` | Multi-service Cognitive Services account (`kind=AIServices`). Hosts `text-embedding-3-large` + `gpt-4o` deployments **and** serves Document Intelligence (`prebuilt-read` OCR) from the same account — no separate FormRecognizer resource is provisioned |
+| Azure AI Foundry resource | `modules/aifoundry.bicep` | Multi-service Cognitive Services account (`kind=AIServices`). Always deploys the `text-embedding-3-large` deployment (required by the AI Search vectorizer). The `gpt-4o` chat deployment is **opt-in**: set `chatModelName` in `main.parameters.local.json` to `gpt-4o` (or `gpt-4o-mini`) to provision it; leave it empty (the default) to skip — the locked design does not consume a chat completion model. The same Foundry account also serves Document Intelligence (`prebuilt-read` OCR) — no separate FormRecognizer resource is provisioned. |
 | AI Search Standard S1 | `modules/search.bicep` | Hybrid + semantic ranker enabled, system-assigned MI |
 | RBAC role assignments | `modules/rbac.bicep` | Search MI → `Cognitive Services OpenAI User` on Foundry; Search MI → `Storage Blob Data Reader` on Storage; Foundry MI → `Storage Blob Data Reader` on Storage (so DI can fetch `raw/<file>` via `urlSource`) |
 
@@ -69,7 +69,7 @@ Minimum values to set:
     "env":                  { "value": "dev" },
     "embeddingModelName":   { "value": "text-embedding-3-large" },
     "embeddingModelTpm":    { "value": 10 },
-    "chatModelName":        { "value": "gpt-4o" },
+    "chatModelName":        { "value": "" },
     "chatModelTpm":         { "value": 10 },
     "deployerPrincipalId":  { "value": "<output of: az ad signed-in-user show --query id -o tsv>" },
     "deployerPrincipalType":{ "value": "User" }

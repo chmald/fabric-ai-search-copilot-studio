@@ -94,10 +94,9 @@ In the Azure portal:
 2. Same resource group, region (confirm OpenAI model availability for the region)
 3. Pricing tier: **Standard S0**
 4. After deployment: open **Azure AI Foundry portal** (foundry.azure.com) → select the resource → **Models + endpoints → Deploy a model**:
-   - Deploy `text-embedding-3-large` → name it `embedding`
-   - Deploy `gpt-4o` → name it `chat`
-   - For both: set capacity to 10K TPM for demo
-   - (Optional) browse the Foundry catalog for non-OpenAI models if you plan to extend later; this pattern only requires the two OpenAI deployments above
+   - Deploy `text-embedding-3-large` → name it `embedding` (set capacity to 10K TPM for demo)
+   - **(Optional)** Deploy `gpt-4o` → name it `chat`. The locked design does **not** consume a chat completion model — Copilot Studio uses its own host model for generative answers. Only deploy a chat model when an engagement explicitly needs a chat endpoint (custom app code, Foundry agent runtime, BYOM Copilot Studio).
+   - (Optional) browse the Foundry catalog for non-OpenAI models if you plan to extend later; this pattern only requires the embedding deployment above
 5. Confirm endpoints — the **Endpoints** view shows both host names for this single resource:
    - `https://aif-rag-demo-eus.openai.azure.com/` — used by the AI Search OpenAI vectorizer + embedding skill
    - `https://aif-rag-demo-eus.cognitiveservices.azure.com/` — used by the Fabric OCR notebook to call Document Intelligence `prebuilt-read`
@@ -204,7 +203,7 @@ Fabric workspace identity → Blob (Data Contributor) and DI-caller SP → Found
 - [ ] AI Search system-assigned MI has both role assignments visible in IAM (**Cognitive Services OpenAI User** on Foundry, **Storage Blob Data Reader** on Storage). Verify the OpenAI variant of the role specifically — a plain `Cognitive Services User` assignment will let the indexer run but produce zero-vector documents.
 - [ ] Foundry resource system-assigned MI has **Storage Blob Data Reader** on the storage account (required for Document Intelligence `urlSource` fetches)
 - [ ] You have **Search Service Contributor** + **Search Index Data Contributor** on the AI Search service
-- [ ] Foundry resource has two deployments: `embedding` (text-embedding-3-large) and `chat` (gpt-4o)
+- [ ] Foundry resource has the `embedding` (text-embedding-3-large) deployment. A `chat` (gpt-4o) deployment is **optional** — only deploy one if you've opted in for an engagement-specific extension (the locked design does not require it).
 - [ ] Foundry resource exposes **both** host names: `<name>.openai.azure.com` (OpenAI / vectorizer) and `<name>.cognitiveservices.azure.com` (Document Intelligence and other Cognitive Services)
 - [ ] Key Vault exists and you have **Key Vault Secrets Officer** on it (used later if any secret-based fallback becomes necessary; this pattern stores no API keys in it)
 

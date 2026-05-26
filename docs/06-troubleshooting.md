@@ -19,6 +19,7 @@ Common failure modes and fixes for the RAG knowledge-base pattern. Organized by 
 | `401 Unauthorized` + `WWW-Authenticate: Bearer` from a REST call | API keys disabled — caller used `api-key` / `Ocp-Apim-Subscription-Key` instead of an Entra bearer token | [§0.1](#01-401-from-services-with-local-auth-disabled) |
 | `403` from Storage with "KeyBasedAuthenticationNotPermitted" | Storage shared-key access disabled; caller used an account key or key-based connection string | [§0.2](#02-403-keybasedauthenticationnotpermitted-on-storage) |
 | Bicep deploy fails on `search-deploy` with `BadRequest: AuthOptions must be null if DisableLocalAuth is true` | Search service body has both `authOptions` and `disableLocalAuth: true` — the API rejects this combination | [§0.4](#04-bicep-deploy-fails-authoptions-must-be-null-if-disablelocalauth-is-true) |
+| Bicep deploy fails on `foundry-deploy` with `FlagMustBeSetForRestore: An existing resource ... has been soft-deleted` | The Foundry / Cognitive Services account name still exists in soft-deleted state from a prior deploy; ARM won't recreate without `restore: true` | [§0.5](#05-bicep-deploy-fails-flagmustbesetforrestore-soft-deleted-foundry--cognitive-services-account) |
 | Copilot Studio knowledge source save fails with "key not valid" | Trying to use admin / query key on a service that has `disableLocalAuth=true` | [§5.7](#57-knowledge-source-save-fails-with-key-not-valid) |
 | Pipeline activity fails on OCR call | DI auth or wrong endpoint / API version | [§3.1](#31-document-intelligence-call-fails) |
 | Pipeline chunk activity fails | Notebook auth or dependency missing | [§3.2](#32-chunking-notebook-fails) |
@@ -145,6 +146,83 @@ curl -i https://<svc>.search.windows.net/indexes?api-version=2024-07-01
 # HTTP/1.1 401 Unauthorized
 # WWW-Authenticate: Bearer authorization_uri="https://login.microsoftonline.com/...", ...
 ```
+
+### 0.5 Bicep deploy fails: `FlagMustBeSetForRestore` (soft-deleted Foundry / Cognitive Services account)
+
+**Symptom.** `az deployment sub create` (or `pwsh ./infra/deploy.ps1`) fails on the `foundry-deploy` nested deployment with:
+
+```
+InvalidTemplateDeployment - The template deployment 'main' is not valid according to
+the validation procedure. The following resource provider(s) -
+'Microsoft.CognitiveServices/accounts (2024-10-01)' reported preflight validation errors.
+FlagMustBeSetForRestore - An existing resource with ID
+'/subscriptions/.../providers/Microsoft.CognitiveServices/accounts/aif-...' has been
+soft-deleted. To restore the resource, you must specify 'restore' to be 'true' in the
+property. If you don't want to restore existing resource, please purge it first.
+```
+
+**Cause.** Cognitive Services accounts (Foundry / OpenAI / Document Intelligence / Vision / Speech / Translator) have a **48-hour soft-delete retention window** on the account *name*. If the account was deleted (manually, by a teardown script, or by a failed deployment rollback) within the last 48 hours, ARM blocks a fresh create with the same name until the operator explicitly chooses to either:
+
+- **restore in place** (preserves the system-assigned MI principal ID and all data-plane state), or
+- **purge** (drops the soft-deleted account entirely so a brand-new resource can be created with a new MI).
+
+**Preserving the MI matters specifically because the DI-caller SP's `Cognitive Services User` role assignment on the Foundry resource is granted manually ([03b-fabric-setup.md § F2.2 step 2](./03b-fabric-setup.md#f22-create-a-di-caller-service-principal-for-mssal-from-the-notebook)) and would be orphaned by any purge-and-recreate cycle.**
+
+#### Fix — restore in place (recommended)
+
+This pattern's Bicep exposes an opt-in `restoreFoundryFromSoftDelete` parameter exactly for this scenario. `infra/modules/aifoundry.bicep` conditionally adds `properties.restore: true` only when this param is true, so it is **safe by default** (a healthy / fresh deploy does **not** carry the `restore` flag).
+
+> **Why isn't `restore: true` always on?** The Cognitive Services ARM provider rejects `restore: true` on a fresh create with `CanNotRestoreANonExistingResource: Could not locate a resource to restore.` It is therefore not safe to leave the flag permanently in the template body — it must be set per-deploy only when the operator knows a soft-deleted ghost exists.
+
+**Recover with `deploy.ps1`** (recommended):
+
+```pwsh
+# Use the -RestoreFoundry switch to add restoreFoundryFromSoftDelete=true to the Bicep params
+pwsh ./infra/deploy.ps1 -RestoreFoundry
+```
+
+**Recover with raw `az` CLI**:
+
+```bash
+az deployment sub create \
+  --name rag-kb-bicep-restore \
+  --location <region> \
+  --template-file infra/main.bicep \
+  --parameters infra/main.parameters.local.json \
+  --parameters restoreFoundryFromSoftDelete=true
+```
+
+After the recovery deploy succeeds, **drop the switch / parameter** on subsequent deploys (`pwsh ./infra/deploy.ps1` with no `-RestoreFoundry`). Leaving it on would cause every future deploy to fail with `CanNotRestoreANonExistingResource` because there is no longer a soft-deleted resource to restore from.
+
+#### Alternative — purge and let Bicep create fresh
+
+Use this only when you intentionally want a clean-slate Foundry resource (new MI, all role assignments need re-wiring):
+
+```bash
+az cognitiveservices account purge \
+  --name aif-rag-<env>-<region> \
+  --resource-group rg-rag-<env>-<region> \
+  --location <region>
+```
+
+Then `pwsh ./infra/deploy.ps1` (no switch). After the deploy:
+
+1. Bicep's deterministic role assignments (AI Search MI → Cognitive Services OpenAI User on Foundry, Foundry MI → Storage Blob Data Reader on Storage) recreate themselves with the new MI principal ID.
+2. **You must manually re-grant the DI-caller SP role** — the SP's `Cognitive Services User` on the *old* Foundry resource is orphaned. Re-run [03b-fabric-setup.md § F2.2 step 2](./03b-fabric-setup.md#f22-create-a-di-caller-service-principal-for-mssal-from-the-notebook) against the new Foundry resource.
+3. Wait up to **15 minutes** for role propagation before the Fabric pipeline can call DI again.
+
+#### Verify after fix
+
+```bash
+# Confirm the account is in 'Succeeded' provisioning state and the MI is populated
+az cognitiveservices account show --name aif-rag-<env>-<region> -g rg-rag-<env>-<region> \
+  --query "{state:properties.provisioningState, mi:identity.principalId}" -o json
+
+# Confirm no soft-deleted ghost exists with the same name in the region
+az cognitiveservices account list-deleted --query "[?name=='aif-rag-<env>-<region>']" -o table
+```
+
+Reference: [Recover or purge deleted Azure AI Services resources](https://learn.microsoft.com/azure/ai-services/recover-purge-resources).
 
 ---
 

@@ -28,15 +28,16 @@
       "_comment": "TPM in units of 1000. 10 = 10K TPM (demo). Bump to 50+ for production indexing throughput."
     },
     "chatModelName": {
-      "value": "gpt-4o",
-      "_comment": "Cost-down option: gpt-4o-mini"
+      "value": "",
+      "_comment": "OPT-IN. Leave EMPTY (default) to skip the chat deployment — the locked design (Copilot Studio + AI Search + integrated vectorizer) does NOT consume a chat completion model; Copilot Studio uses its own host model. Set to `gpt-4o` (or `gpt-4o-mini` for cost-down) only when an engagement explicitly needs a chat endpoint (custom app code, Foundry agent runtime, BYOM Copilot Studio)."
     },
     "chatModelVersion": {
-      "value": ""
+      "value": "",
+      "_comment": "Ignored when chatModelName is empty."
     },
     "chatModelTpm": {
       "value": 10,
-      "_comment": "TPM in units of 1000. 10 = 10K TPM (demo). Size based on expected concurrent agent queries x tokens per turn."
+      "_comment": "TPM in units of 1000. Ignored when chatModelName is empty. Only relevant when opting in."
     },
     "searchSku": {
       "value": "standard",

@@ -209,3 +209,41 @@ def test_skillset_dimensions_match_embedding_model():
     small_ids = {**SAMPLE_IDS, "embeddingModel": "text-embedding-3-small"}
     assert pds.skillset_payload(large_ids)["skills"][0]["dimensions"] == 3072
     assert pds.skillset_payload(small_ids)["skills"][0]["dimensions"] == 1536
+
+
+# ---------- chat-deployment-optional behavior ------------------------------------
+# The locked design (Copilot Studio + AI Search hybrid index + integrated vectorizer)
+# does NOT consume a chat completion model — Copilot Studio uses its own host model.
+# infra/main.bicep defaults chatModelName to '' so the chat deployment is skipped;
+# infra/deploy.ps1's deploymentSummary then emits chatDeployment="" and chatModel="".
+# These tests verify that every payload builder still works when those fields are
+# empty or missing, so a chat-disabled deploy never breaks the post-deploy script.
+
+
+def _ids_without_chat():
+    ids = {k: v for k, v in SAMPLE_IDS.items() if k not in {"chatDeployment", "chatModel"}}
+    return ids
+
+
+def test_index_payload_works_without_chat_fields():
+    payload = pds.index_payload(_ids_without_chat())
+    assert payload["name"] == "idx-rag-documents"
+
+
+def test_indexer_payload_works_without_chat_fields():
+    payload = pds.indexer_payload(_ids_without_chat())
+    assert payload["name"] == "ixr-chunks"
+
+
+def test_skillset_payload_works_without_chat_fields():
+    payload = pds.skillset_payload(_ids_without_chat())
+    assert payload["skills"][0]["deploymentId"] == "embedding"
+
+
+def test_payloads_work_with_empty_chat_fields():
+    """deploy.ps1 writes chatDeployment='' and chatModel='' when chat is skipped."""
+    ids = {**SAMPLE_IDS, "chatDeployment": "", "chatModel": "", "chatDeployed": False}
+    # All three builders must succeed without referencing the empty values.
+    assert pds.index_payload(ids)["name"] == "idx-rag-documents"
+    assert pds.indexer_payload(ids)["name"] == "ixr-chunks"
+    assert pds.skillset_payload(ids)["skills"][0]["deploymentId"] == "embedding"

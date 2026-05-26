@@ -7,8 +7,12 @@
 //   * Key Vault (RBAC-mode)
 //   * Storage account + raw/ and chunks/ containers
 //   * Azure AI Foundry resource (kind=AIServices) — multi-service Cognitive Services
-//     account that provides BOTH:
-//        - Azure OpenAI deployments (text-embedding-3-large + gpt-4o)
+//     account that provides:
+//        - Azure OpenAI embedding deployment (text-embedding-3-large) — required
+//        - Azure OpenAI chat deployment (gpt-4o) — OPTIONAL (only provisioned when
+//          chatModelName param is non-empty; the locked design — Copilot Studio +
+//          AI Search hybrid index + integrated vectorizer — does NOT consume a chat
+//          completion model. Copilot Studio uses its own host model.)
 //        - Document Intelligence (prebuilt-read OCR, same endpoint, same MI)
 //     A separate Microsoft.CognitiveServices/accounts of kind=FormRecognizer is NOT
 //     provisioned — Foundry's AIServices kind exposes the DI API surface natively
@@ -78,16 +82,19 @@ param embeddingModelVersion string = ''
 @maxValue(2000)
 param embeddingModelTpm int = 10
 
-@description('OpenAI chat model. Recommended: gpt-4o. Acceptable cost-down: gpt-4o-mini.')
-param chatModelName string = 'gpt-4o'
+@description('OpenAI chat model. Default is EMPTY (no chat deployment is provisioned) because the locked design — Copilot Studio + AI Search hybrid index + integrated vectorizer — does NOT consume a chat completion model. Copilot Studio uses its own host model for generative answers. Set this to `gpt-4o` (or `gpt-4o-mini` for cost-down) only when an engagement explicitly needs a chat endpoint: custom app code calling completions, Foundry agent runtime, or a Copilot Studio bring-your-own-model configuration.')
+param chatModelName string = ''
 
-@description('OpenAI chat model version. Leave blank to let Azure pick latest.')
+@description('OpenAI chat model version. Leave blank to let Azure pick latest. Ignored when chatModelName is empty.')
 param chatModelVersion string = ''
 
-@description('OpenAI chat deployment TPM capacity in units of 1000 (e.g. 10 = 10K TPM).')
+@description('OpenAI chat deployment TPM capacity in units of 1000 (e.g. 10 = 10K TPM). Ignored when chatModelName is empty.')
 @minValue(1)
 @maxValue(2000)
 param chatModelTpm int = 10
+
+@description('Set to true ONLY when redeploying after a `FlagMustBeSetForRestore` failure (Azure soft-delete recovery). When true, the Foundry account is restored in place from soft-delete, preserving the system-assigned MI principal ID and any role assignments granted to it. CAUTION: setting this to true on a fresh deploy (no soft-deleted account to restore) fails with `CanNotRestoreANonExistingResource`. Default false. See docs/06-troubleshooting.md § 0.5.')
+param restoreFoundryFromSoftDelete bool = false
 
 @description('AI Search SKU. Standard (S1) or higher REQUIRED for semantic ranker — do not select Free or Basic.')
 @allowed([
@@ -176,6 +183,7 @@ module foundry 'modules/aifoundry.bicep' = {
     chatModelName: chatModelName
     chatModelVersion: chatModelVersion
     chatModelTpm: chatModelTpm
+    restoreFromSoftDelete: restoreFoundryFromSoftDelete
   }
 }
 
@@ -235,6 +243,7 @@ output deploymentSummary object = {
   embeddingModel: embeddingModelName
   chatDeployment: foundry.outputs.chatDeploymentName
   chatModel: chatModelName
+  chatDeployed: !empty(chatModelName)
 
   // AI Search
   searchService: search.outputs.name

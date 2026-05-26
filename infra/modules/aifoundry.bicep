@@ -37,15 +37,18 @@ param embeddingModelVersion string = ''
 @minValue(1)
 param embeddingModelTpm int = 10
 
-@description('Chat model name (Azure OpenAI catalog).')
-param chatModelName string = 'gpt-4o'
+@description('Chat model name (Azure OpenAI catalog). Leave EMPTY to skip the chat deployment entirely — the default locked design (Copilot Studio + AI Search hybrid index + integrated vectorizer) does NOT consume a chat completion model, because Copilot Studio uses its own host model for generative answers. Only set this when you have an explicit engagement-specific need: custom app code calling completions, Foundry agent runtime, or a Copilot Studio bring-your-own-model configuration.')
+param chatModelName string = ''
 
-@description('Chat model version. Leave blank to let Azure pick latest GA.')
+@description('Chat model version. Leave blank to let Azure pick latest GA. Ignored when chatModelName is empty.')
 param chatModelVersion string = ''
 
-@description('Chat deployment TPM capacity in units of 1000.')
+@description('Chat deployment TPM capacity in units of 1000. Ignored when chatModelName is empty.')
 @minValue(1)
 param chatModelTpm int = 10
+
+@description('Set to true ONLY when an existing Foundry account with the same name is in Azure soft-delete state and you want Bicep to restore it in place (preserves the system-assigned MI principal ID and any role assignments granted to it). Default false. CAUTION: when this is true and there is no soft-deleted account to restore, the deploy fails with `CanNotRestoreANonExistingResource`. Set this to true only after a deploy fails with `FlagMustBeSetForRestore`. See docs/06-troubleshooting.md § 0.5.')
+param restoreFromSoftDelete bool = false
 
 resource foundry 'Microsoft.CognitiveServices/accounts@2024-10-01' = {
   name: name
@@ -58,7 +61,12 @@ resource foundry 'Microsoft.CognitiveServices/accounts@2024-10-01' = {
   identity: {
     type: 'SystemAssigned'
   }
-  properties: {
+  // Build the properties bag with a conditional `restore` property. Bicep has no
+  // spread operator, so we use union() to splice the optional flag in only when
+  // restoreFromSoftDelete is true. ARM rejects `restore: true` on a fresh CREATE
+  // (CanNotRestoreANonExistingResource), so it MUST NOT be in the body unless we
+  // actually have a soft-deleted resource to restore from.
+  properties: union({
     customSubDomainName: name
     publicNetworkAccess: 'Enabled'
     networkAcls: {
@@ -69,7 +77,15 @@ resource foundry 'Microsoft.CognitiveServices/accounts@2024-10-01' = {
     // calling identity "Cognitive Services OpenAI User" (OpenAI model access) or
     // "Cognitive Services User" (broader catalog) on this resource.
     disableLocalAuth: true
-  }
+  }, restoreFromSoftDelete ? {
+    // Restore an existing soft-deleted account in place. Preserves the MI principal
+    // ID and any role assignments granted to it — critical here because the
+    // DI-caller SP's "Cognitive Services User" role on this resource is granted
+    // manually (docs/03b-fabric-setup.md § F2.2 step 2) and would be orphaned by
+    // a purge-and-recreate cycle.
+    // Reference: https://learn.microsoft.com/azure/ai-services/recover-purge-resources
+    restore: true
+  } : {})
 }
 
 resource embeddingDeployment 'Microsoft.CognitiveServices/accounts/deployments@2024-10-01' = {
@@ -90,7 +106,12 @@ resource embeddingDeployment 'Microsoft.CognitiveServices/accounts/deployments@2
   }
 }
 
-resource chatDeployment 'Microsoft.CognitiveServices/accounts/deployments@2024-10-01' = {
+// Optional chat completion deployment. The locked design (Copilot Studio + AI Search
+// hybrid index + integrated vectorizer) does NOT consume a chat completion model —
+// Copilot Studio uses its own host model for generative answers. Only provisioned
+// when chatModelName is non-empty (engagement-specific opt-in: custom app code,
+// Foundry agent runtime, or Copilot Studio bring-your-own-model).
+resource chatDeployment 'Microsoft.CognitiveServices/accounts/deployments@2024-10-01' = if (!empty(chatModelName)) {
   parent: foundry
   name: 'chat'
   sku: {
@@ -119,4 +140,4 @@ output openAIEndpoint string = 'https://${foundry.properties.customSubDomainName
 output cognitiveServicesEndpoint string = foundry.properties.endpoint
 output systemAssignedPrincipalId string = foundry.identity.principalId
 output embeddingDeploymentName string = embeddingDeployment.name
-output chatDeploymentName string = chatDeployment.name
+output chatDeploymentName string = empty(chatModelName) ? '' : chatDeployment.name

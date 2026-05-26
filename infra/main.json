@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.43.8.12551",
-      "templateHash": "11349243527878607216"
+      "templateHash": "14670052364356136708"
     }
   },
   "parameters": {
@@ -61,16 +61,16 @@
     },
     "chatModelName": {
       "type": "string",
-      "defaultValue": "gpt-4o",
+      "defaultValue": "",
       "metadata": {
-        "description": "OpenAI chat model. Recommended: gpt-4o. Acceptable cost-down: gpt-4o-mini."
+        "description": "OpenAI chat model. Default is EMPTY (no chat deployment is provisioned) because the locked design — Copilot Studio + AI Search hybrid index + integrated vectorizer — does NOT consume a chat completion model. Copilot Studio uses its own host model for generative answers. Set this to `gpt-4o` (or `gpt-4o-mini` for cost-down) only when an engagement explicitly needs a chat endpoint: custom app code calling completions, Foundry agent runtime, or a Copilot Studio bring-your-own-model configuration."
       }
     },
     "chatModelVersion": {
       "type": "string",
       "defaultValue": "",
       "metadata": {
-        "description": "OpenAI chat model version. Leave blank to let Azure pick latest."
+        "description": "OpenAI chat model version. Leave blank to let Azure pick latest. Ignored when chatModelName is empty."
       }
     },
     "chatModelTpm": {
@@ -79,7 +79,14 @@
       "minValue": 1,
       "maxValue": 2000,
       "metadata": {
-        "description": "OpenAI chat deployment TPM capacity in units of 1000 (e.g. 10 = 10K TPM)."
+        "description": "OpenAI chat deployment TPM capacity in units of 1000 (e.g. 10 = 10K TPM). Ignored when chatModelName is empty."
+      }
+    },
+    "restoreFoundryFromSoftDelete": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Set to true ONLY when redeploying after a `FlagMustBeSetForRestore` failure (Azure soft-delete recovery). When true, the Foundry account is restored in place from soft-delete, preserving the system-assigned MI principal ID and any role assignments granted to it. CAUTION: setting this to true on a fresh deploy (no soft-deleted account to restore) fails with `CanNotRestoreANonExistingResource`. Default false. See docs/06-troubleshooting.md § 0.5."
       }
     },
     "searchSku": {
@@ -446,6 +453,9 @@
           },
           "chatModelTpm": {
             "value": "[parameters('chatModelTpm')]"
+          },
+          "restoreFromSoftDelete": {
+            "value": "[parameters('restoreFoundryFromSoftDelete')]"
           }
         },
         "template": {
@@ -455,7 +465,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.43.8.12551",
-              "templateHash": "18300392908819803916"
+              "templateHash": "1627793001201825828"
             }
           },
           "parameters": {
@@ -502,16 +512,16 @@
             },
             "chatModelName": {
               "type": "string",
-              "defaultValue": "gpt-4o",
+              "defaultValue": "",
               "metadata": {
-                "description": "Chat model name (Azure OpenAI catalog)."
+                "description": "Chat model name (Azure OpenAI catalog). Leave EMPTY to skip the chat deployment entirely — the default locked design (Copilot Studio + AI Search hybrid index + integrated vectorizer) does NOT consume a chat completion model, because Copilot Studio uses its own host model for generative answers. Only set this when you have an explicit engagement-specific need: custom app code calling completions, Foundry agent runtime, or a Copilot Studio bring-your-own-model configuration."
               }
             },
             "chatModelVersion": {
               "type": "string",
               "defaultValue": "",
               "metadata": {
-                "description": "Chat model version. Leave blank to let Azure pick latest GA."
+                "description": "Chat model version. Leave blank to let Azure pick latest GA. Ignored when chatModelName is empty."
               }
             },
             "chatModelTpm": {
@@ -519,7 +529,14 @@
               "defaultValue": 10,
               "minValue": 1,
               "metadata": {
-                "description": "Chat deployment TPM capacity in units of 1000."
+                "description": "Chat deployment TPM capacity in units of 1000. Ignored when chatModelName is empty."
+              }
+            },
+            "restoreFromSoftDelete": {
+              "type": "bool",
+              "defaultValue": false,
+              "metadata": {
+                "description": "Set to true ONLY when an existing Foundry account with the same name is in Azure soft-delete state and you want Bicep to restore it in place (preserves the system-assigned MI principal ID and any role assignments granted to it). Default false. CAUTION: when this is true and there is no soft-deleted account to restore, the deploy fails with `CanNotRestoreANonExistingResource`. Set this to true only after a deploy fails with `FlagMustBeSetForRestore`. See docs/06-troubleshooting.md § 0.5."
               }
             }
           },
@@ -537,14 +554,7 @@
               "identity": {
                 "type": "SystemAssigned"
               },
-              "properties": {
-                "customSubDomainName": "[parameters('name')]",
-                "publicNetworkAccess": "Enabled",
-                "networkAcls": {
-                  "defaultAction": "Allow"
-                },
-                "disableLocalAuth": true
-              }
+              "properties": "[union(createObject('customSubDomainName', parameters('name'), 'publicNetworkAccess', 'Enabled', 'networkAcls', createObject('defaultAction', 'Allow'), 'disableLocalAuth', true()), if(parameters('restoreFromSoftDelete'), createObject('restore', true()), createObject()))]"
             },
             {
               "type": "Microsoft.CognitiveServices/accounts/deployments",
@@ -568,6 +578,7 @@
               ]
             },
             {
+              "condition": "[not(empty(parameters('chatModelName')))]",
               "type": "Microsoft.CognitiveServices/accounts/deployments",
               "apiVersion": "2024-10-01",
               "name": "[format('{0}/{1}', parameters('name'), 'chat')]",
@@ -617,7 +628,7 @@
             },
             "chatDeploymentName": {
               "type": "string",
-              "value": "chat"
+              "value": "[if(empty(parameters('chatModelName')), '', 'chat')]"
             }
           }
         }
@@ -993,6 +1004,7 @@
         "embeddingModel": "[parameters('embeddingModelName')]",
         "chatDeployment": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('rgName')), 'Microsoft.Resources/deployments', 'foundry-deploy'), '2025-04-01').outputs.chatDeploymentName.value]",
         "chatModel": "[parameters('chatModelName')]",
+        "chatDeployed": "[not(empty(parameters('chatModelName')))]",
         "searchService": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('rgName')), 'Microsoft.Resources/deployments', 'search-deploy'), '2025-04-01').outputs.name.value]",
         "searchEndpoint": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('rgName')), 'Microsoft.Resources/deployments', 'search-deploy'), '2025-04-01').outputs.endpoint.value]",
         "searchPrincipalId": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('rgName')), 'Microsoft.Resources/deployments', 'search-deploy'), '2025-04-01').outputs.systemAssignedPrincipalId.value]",

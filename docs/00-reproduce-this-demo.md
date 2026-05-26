@@ -25,7 +25,7 @@
 │   ├─ Storage account      stragdeveastus2 (containers: raw, chunks)     │
 │   ├─ AI Foundry resource  aif-rag-dev-eastus2                           │
 │   │     ├─ embedding deployment: text-embedding-3-large                 │
-│   │     ├─ chat deployment:      gpt-4o                                 │
+│   │     ├─ chat deployment:      (opt-in — not deployed by default)      │
 │   │     └─ Document Intelligence: prebuilt-read (same account, kind=AIServices) │
 │   └─ AI Search (Standard) srch-rag-dev-eastus2                          │
 │         ├─ index:    idx-rag-documents (hybrid + semantic ranker)       │
@@ -56,7 +56,7 @@
 
 - [ ] **Azure subscription** with Contributor + User Access Administrator on the target RG (or subscription scope for greenfield)
 - [ ] **Region chosen** from [02-prerequisites.md § 11](./02-prerequisites.md) Tier-1 list — default: **East US 2** for US, **Sweden Central** for EU, **Australia East** / **Japan East** for APAC
-- [ ] **Azure OpenAI access approved** in the subscription with TPM quota for `text-embedding-3-large` (10K TPM minimum for demo) and `gpt-4o` (10K TPM minimum)
+- [ ] **Azure OpenAI access approved** in the subscription with TPM quota for `text-embedding-3-large` (10K TPM minimum for demo). `gpt-4o` quota is only required if you opt in to a chat deployment for engagement-specific extensions (the locked design doesn't consume one).
 - [ ] **Fabric capacity** allocated (F4+ for demo, F16+ for production) and a workspace where you have Admin or Member role
 - [ ] **Copilot Studio license** for the building user — and channel-publishing pre-approvals **initiated** (Teams + M365 Copilot admin approvals take ~1-2 business days)
 - [ ] **Local tools**: `git`, `pwsh` 7+, **Python 3.11+**, **Azure CLI 2.60+** with the `bicep` extension installed (`az bicep install`)
