@@ -171,13 +171,10 @@ Initiate these admin asks **before** you start building so they're cleared by th
 
 ### Required
 
-- **No separate resource** — Document Intelligence is provided by the **Azure AI Foundry resource** from § 6. A Foundry resource (`kind=AIServices`) is a multi-service Cognitive Services account that exposes Azure OpenAI **and** Document Intelligence (and Vision, Translator, Speech, …) from the same endpoint, managed identity, and RBAC surface.
-- The DI SDK / REST endpoint is the Foundry resource's `https://<name>.cognitiveservices.azure.com/` URL (note the host suffix — different from the OpenAI-compatible `<name>.openai.azure.com` host used by the vectorizer; same resource, two host names).
-- Foundry's `S0` pricing tier covers DI usage. No `prebuilt-read` page quota beyond standard Cognitive Services billing.
-
-The pattern uses only the `prebuilt-read` model — no custom training, no Document Intelligence Studio work required.
-
-> **Why consolidated?** Provisioning a separate `Microsoft.CognitiveServices/accounts` of `kind=FormRecognizer` alongside the Foundry account adds a redundant resource, a duplicate managed identity, and an extra set of role assignments without unlocking any capability that Foundry's built-in DI doesn't already provide. See [01-architecture.md § 8](./01-architecture.md#8-document-intelligence-prebuilt-read-served-by-the-foundry-resource) for the full rationale.
+- **No separate resource.** Document Intelligence is provided by the Foundry resource from § 6 — a `kind=AIServices` account is a multi-service Cognitive Services account that exposes both Azure OpenAI and Document Intelligence (and the rest of the Cognitive Services catalogue) from the same resource. See [01-architecture.md § 8](./01-architecture.md#8-document-intelligence-prebuilt-read-served-by-the-foundry-resource) for the design rationale.
+- The DI SDK / REST endpoint is the Foundry resource's `https://<name>.cognitiveservices.azure.com/` host (the OpenAI vectorizer uses the `<name>.openai.azure.com/` host on the same resource).
+- Foundry's `S0` SKU covers DI usage — no separate page quota.
+- Only the `prebuilt-read` model is used — no custom training or Document Intelligence Studio work required.
 
 ---
 
@@ -368,7 +365,7 @@ Copilot agent:    agent-<workload>                       e.g.  agent-rag-kb
 | Foundry | Number of OpenAI deployments | 2 (embedding + chat) | Same |
 | AI Search | Services per subscription | 1 | Azure portal → subscription → Usage + quotas → Search |
 | AI Search | Semantic ranker queries / month | Free quota or paid | AI Search service → Semantic ranker blade |
-| Document Intelligence | Pages per month | Standard tier: ≥ 1M | DI resource → Quotas |
+| Document Intelligence (served by the Foundry resource) | Pages per month | Standard tier: ≥ 1M | Azure portal → Foundry resource → Quotas (the DI sub-namespace shares Foundry's Cognitive Services quota plane) |
 | Storage | Account count + capacity | 1 account, ≤ 100 GB for demo | Subscription quotas |
 | Fabric | Capacity headroom | Demo: F4–F8 | Fabric Admin Portal |
 

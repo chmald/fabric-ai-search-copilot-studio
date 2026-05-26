@@ -11,7 +11,7 @@ A reusable, low-code-first **Retrieval-Augmented Generation (RAG) knowledge-base
 A working end-to-end RAG agent that:
 
 - Ingests an unstructured document corpus from **Fabric OneLake** (or any Fabric-attached source)
-- OCRs documents with **Azure Document Intelligence** (prebuilt-read model)
+- OCRs documents with **Azure Document Intelligence** `prebuilt-read` (served by the same Azure AI Foundry resource as the OpenAI models — no separate FormRecognizer resource is provisioned)
 - Chunks text and writes to **Azure Blob Storage** as the permanent canonical store
 - Indexes content in **Azure AI Search** using **integrated vectorization** (no custom embedding code) into a **hybrid index** (keyword + vector + metadata)
 - Re-ranks results with the **AI Search semantic ranker** for production-grade relevance
@@ -34,7 +34,7 @@ These are the design decisions locked for this pattern's primary use case — si
 | 5 | Storage split | **OneLake = source / staging, Blob = permanent + indexed** | Reuses customer's existing Fabric investment for ingestion; Blob is cheaper, easier to secure, and is the simplest source for the AI Search indexer |
 | 6 | Pipeline orchestrator | **Fabric Data Pipelines** | Drag-and-drop, native to Fabric, no extra service to license |
 | 7 | Ingestion control | **Fabric Lakehouse Delta table** | Tracks file metadata, processing state, and run history for idempotency + incremental processing |
-| 8 | OCR | **Document Intelligence prebuilt-read** model | No model training; handles printed + handwritten text, multiple languages, mixed file types |
+| 8 | OCR | **Document Intelligence prebuilt-read** model, served by the **Azure AI Foundry resource** (`kind=AIServices`) | No model training; handles printed + handwritten text, multiple languages, mixed file types. A Foundry resource is a multi-service Cognitive Services account, so the same resource provisioned for OpenAI deployments also exposes the DI endpoint — no separate `FormRecognizer` resource is needed |
 | 9 | Front-end channels | **Teams + M365 Copilot** | Two native channels with zero additional hosting; demo-ready in minutes |
 | 10 | AI Search tier | **Standard (S1) or higher** | Required for semantic ranker; provides headroom for production scale |
 
@@ -77,7 +77,7 @@ You will need (full detail in [docs/02-prerequisites.md](./docs/02-prerequisites
 - **Azure subscription** with Contributor + User Access Administrator on the target resource group
 - **Microsoft Fabric tenant** with a workspace you can create artifacts in (Lakehouse + Data Pipelines)
 - **Copilot Studio license** for the building user (Maker access)
-- **Azure AI Foundry resource** (the unified Azure AI Services resource) with capacity for one chat completion deployment (e.g. `gpt-4o`) and one embedding deployment (e.g. `text-embedding-3-large`) — Foundry is the strategic model-gateway resource and supersedes the legacy standalone Azure OpenAI resource for new deployments
+- **Azure AI Foundry resource** (the unified Azure AI Services resource, `kind=AIServices`) with capacity for one chat completion deployment (e.g. `gpt-4o`) and one embedding deployment (e.g. `text-embedding-3-large`). The same resource also exposes **Document Intelligence** (`prebuilt-read` OCR) from its built-in Cognitive Services surface — no separate Document Intelligence / FormRecognizer resource is required. Foundry is the strategic model-gateway resource and supersedes the legacy standalone Azure OpenAI resource for new deployments.
 - **Region alignment**: all services (AI Search, Azure AI Foundry — which hosts both the OpenAI models and the Document Intelligence OCR endpoint — Blob, Fabric) ideally in the **same Azure region**, or at least the same data residency boundary
 - **AI Search**: **Standard (S1) or higher** SKU (semantic ranker is not available on Basic)
 
@@ -102,13 +102,18 @@ You will need (full detail in [docs/02-prerequisites.md](./docs/02-prerequisites
 
 ---
 
-## Note on Azure AI Foundry — model gateway vs agent runtime
+## Note on Azure AI Foundry — model gateway, Document Intelligence, and agent runtime
 
-This pattern uses an **Azure AI Foundry resource** as the **model-hosting gateway** (where the OpenAI embedding + chat deployments live). It does **not** use Foundry's agent runtime (Agent Service, Hub, Projects) — that role is filled by Copilot Studio's native AI Search knowledge source. Foundry's two capabilities are independent and chosen per engagement need:
+This pattern uses an **Azure AI Foundry resource** (`kind=AIServices`) as the **multi-service Cognitive Services account** that hosts:
+
+- the OpenAI embedding + chat deployments used by the AI Search vectorizer and Copilot Studio, and
+- the **Document Intelligence** `prebuilt-read` endpoint used by the Fabric OCR notebook (same resource ID, same managed identity, same RBAC surface — just a different host: `<foundry>.cognitiveservices.azure.com` for DI vs `<foundry>.openai.azure.com` for OpenAI).
+
+It does **not** use Foundry's agent runtime (Agent Service, Hub, Projects) — that role is filled by Copilot Studio's native AI Search knowledge source. Foundry's capabilities are independent and chosen per engagement need:
 
 | Foundry capability | Recommendation | When to use |
 |---|---|---|
-| **Model gateway** (Azure AI Foundry resource hosting OpenAI + catalog models) | **Default for OpenAI hosting** | The strategic Azure direction for all new AI model deployments; same OpenAI-compatible endpoint as legacy standalone AOAI resource; provides flexibility to add non-OpenAI catalog models later under one resource |
+| **Model gateway + Document Intelligence** (Azure AI Foundry resource hosting OpenAI + catalog models + the Cognitive Services API surface including DI prebuilt-read) | **Default for this pattern** | The strategic Azure direction for all new AI model deployments; single multi-service account avoids a separate FormRecognizer resource and a duplicate managed identity; same OpenAI-compatible endpoint as legacy standalone AOAI; flexibility to add non-OpenAI catalog models later under one resource |
 | **Agent runtime** (Foundry Agent Service / Hub / Projects) | **Add when needed** | When the agent must do **more than knowledge-base Q&A** — multi-agent routing, custom tool calling, query triage logic, or non-standard grounding. For pure knowledge-base Q&A — the focus of this pattern — Copilot Studio's native AI Search knowledge source delivers retrieval + grounding + citation without code. Adding Foundry agent runtime is an additional infrastructure + code layer; only adopt it when an engagement need demands it. |
 
 ---
@@ -142,7 +147,9 @@ This Demos folder is intended to be **checked into Azure DevOps** as a standalon
 |---|---|---|
 | 2026-05-21 | Locked architecture decisions: Copilot Studio orchestration for knowledge-base Q&A, Foundry as model gateway, integrated vectorizer, hybrid + semantic ranker, OneLake + Blob storage, Fabric Data Pipelines | the CHANGELOG entry |
 | 2026-05-22 | Artifact restructure: docs/ folder layout, Bicep IaC + 5 modules, dual deployment path (manual + automated), ADO pipeline | the CHANGELOG entry |
+| 2026-05-25 | **Document Intelligence consolidated into the Azure AI Foundry resource.** Removed the standalone `Microsoft.CognitiveServices/accounts` of `kind=FormRecognizer` (and its `modules/docintelligence.bicep` module + its dedicated managed identity + duplicate Storage Blob Data Reader role assignment). DI is now served by the Foundry account (`kind=AIServices` is a multi-service Cognitive Services account). Net result: 4 Azure resources instead of 5, single MI for both OpenAI and DI storage access, single RBAC surface. See [docs/01-architecture.md § 8](./docs/01-architecture.md#8-document-intelligence-prebuilt-read-served-by-the-foundry-resource) for the design rationale. |
+| 2026-05-25 | **AI Search Bicep auth fix.** Removed the `authOptions: { aadOrApiKey: ... }` block from `modules/search.bicep` — the Azure Search API treats `authOptions` and `disableLocalAuth: true` as mutually exclusive (`BadRequest: AuthOptions must be null if DisableLocalAuth is true`). Bearer challenges still work by default when local auth is disabled. See [docs/06-troubleshooting.md § 0.4](./docs/06-troubleshooting.md#04-bicep-deploy-fails-authoptions-must-be-null-if-disablelocalauth-is-true). |
 
 ---
 
-*Last updated: 2026-05-22*
+*Last updated: 2026-05-25*

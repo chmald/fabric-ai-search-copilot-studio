@@ -30,7 +30,7 @@ Common failure modes and fixes for the RAG knowledge-base pattern. Organized by 
 
 ## 0 — Entra-only auth (local auth disabled)
 
-This pattern provisions Foundry, Document Intelligence, AI Search with `disableLocalAuth=true` and Storage with `allowSharedKeyAccess=false`. Most auth failures end up here.
+This pattern provisions the **Azure AI Foundry resource** (which serves both Azure OpenAI deployments **and** the Document Intelligence `prebuilt-read` API — single multi-service Cognitive Services account, `kind=AIServices`) and **AI Search** with `disableLocalAuth=true`, and **Storage** with `allowSharedKeyAccess=false`. Most auth failures end up here.
 
 ### 0.1 401 from services with local auth disabled
 
@@ -72,7 +72,7 @@ If the bearer call also returns 401/403, the caller's identity is missing the re
 
 - **Azure CLI / interactive:** add `--auth-mode login` to `az storage` commands.
 - **AI Search datasource:** use `"connectionString": "ResourceId=/subscriptions/.../storageAccounts/<st>;"` — the indexer authenticates with its system-assigned MI (Storage Blob Data Reader required).
-- **Document Intelligence `urlSource`:** DI must have a managed identity with Storage Blob Data Reader on the account; the request is then a plain `https://<st>.blob.core.windows.net/raw/<file>` URL without a SAS.
+- **Document Intelligence `urlSource`:** DI must authenticate to Blob via a managed identity with Storage Blob Data Reader on the account. DI is served by the Foundry resource in this pattern, so the identity is the **Foundry MI**. The request is then a plain `https://<st>.blob.core.windows.net/raw/<file>` URL without a SAS.
 - **Fabric pipeline Copy activity:** the Blob connection must use **Organizational account** or **Service principal** auth, not **Account key**; the runtime identity (workspace identity or SP) needs Storage Blob Data Contributor.
 - **App code:** swap `BlobServiceClient(account_url, credential=AzureKeyCredential(key))` for `BlobServiceClient(account_url, credential=DefaultAzureCredential())`.
 
@@ -199,14 +199,14 @@ curl -i https://<svc>.search.windows.net/indexes?api-version=2024-07-01
 
 ### 3.1 Document Intelligence call fails
 
-**Symptom.** Web activity calling Document Intelligence returns 401 / 403 / 404 / 500.
+**Symptom.** The OCR step in `nb_ocr_chunk_upload` (which calls the Document Intelligence `prebuilt-read` model on the Azure AI Foundry resource) returns 401 / 403 / 404 / 500. This pattern uses a Fabric **notebook** — not a pipeline Web activity — to call DI; see [03b-fabric-setup.md Appendix A.1](./03b-fabric-setup.md#a1-no-web-activity-until-or-child-pipeline) for the rationale.
 
 | Status | Common cause | Fix |
 |---|---|---|
-| 401 (with `WWW-Authenticate: Bearer`) | This pattern disables local auth on DI; a client tried to call DI without a bearer token (or with an `Ocp-Apim-Subscription-Key` header). | The DI call runs from `nb_ocr_chunk_upload`, which uses MSAL + the DI-caller service principal (secret fetched from Key Vault by the workspace identity) to get a bearer token for `https://cognitiveservices.azure.com/.default`. See [03b-fabric-setup.md § F7.2](./03b-fabric-setup.md#f72-nb_ocr_chunk_upload) and [§ 3.7](#37-nb_ocr_chunk_upload-cant-authenticate-to-document-intelligence). Fabric notebooks don't support `DefaultAzureCredential` and `notebookutils.credentials.getToken` has no `cognitiveservices` audience key — hence the MSAL+SP detour. |
-| 403 (from DI) | Workspace identity lacks **Cognitive Services User** on the DI resource | Grant the role per [03b-fabric-setup.md § F2.1](./03b-fabric-setup.md#f21-grant-the-workspace-identity-the-required-roles); wait up to 15 min for propagation |
-| 403 (from DI fetching `urlSource`) | DI's own managed identity lacks **Storage Blob Data Reader** on the storage account; required because shared-key access on Storage is disabled | Grant the role per [03-deployment-manual.md § 1.7 step 3](./03-deployment-manual.md#17-rbac-wiring) |
-| 404 | Wrong URL or model name | Confirm endpoint includes `/documentintelligence/...` and uses `prebuilt-read` |
+| 401 (with `WWW-Authenticate: Bearer`) | Local auth is disabled on the Foundry resource (which serves DI); the caller used an `Ocp-Apim-Subscription-Key` header instead of a bearer token. | `nb_ocr_chunk_upload` uses MSAL + the DI-caller service principal (secret fetched from Key Vault by the workspace identity) to get a bearer token for `https://cognitiveservices.azure.com/.default`. See [03b-fabric-setup.md § F7.2](./03b-fabric-setup.md#f72-nb_ocr_chunk_upload) and [§ 3.7](#37-nb_ocr_chunk_upload-cant-authenticate-to-document-intelligence). Fabric notebooks don't support `DefaultAzureCredential` and `notebookutils.credentials.getToken` has no `cognitiveservices` audience key — hence the MSAL+SP detour. |
+| 403 (from DI) | The DI-caller service principal (`sp-rag-di-caller`) lacks **Cognitive Services User** on the Foundry resource. The Fabric workspace identity is *not* used for DI calls in this pattern. | Grant the role per [03b-fabric-setup.md § F2.2 step 2](./03b-fabric-setup.md#f22-create-a-di-caller-service-principal-for-mssal-from-the-notebook); wait up to 15 min for propagation |
+| 403 (from DI fetching `urlSource`) | The Foundry MI lacks **Storage Blob Data Reader** on the storage account; required because shared-key access on Storage is disabled | Grant the role per [03-deployment-manual.md § 1.7 step 3](./03-deployment-manual.md#17-rbac-wiring) (Bicep deployments wire this automatically via `rbac.bicep`) |
+| 404 | Wrong URL or model name | Confirm endpoint is the Foundry resource's `https://<foundry>.cognitiveservices.azure.com/documentintelligence/...` host (not `<foundry>.openai.azure.com`) and uses `prebuilt-read` |
 | 500 | DI service-side error | Retry; if persistent, check Azure status page; verify file is not corrupt and is < DI per-call size limit |
 
 ### 3.2 Chunking notebook fails
@@ -346,7 +346,7 @@ And `notebookutils.credentials.getToken` exposes only **four** audience keys: `s
 
 **Fix.** Use the MSAL + DI-caller service principal pattern documented in [03b-fabric-setup.md § F7.2](./03b-fabric-setup.md#f72-nb_ocr_chunk_upload) and [F2.2](./03b-fabric-setup.md#f22-create-a-di-caller-service-principal-for-mssal-from-the-notebook):
 
-1. Create a dedicated service principal (`sp-rag-di-caller`) and grant it **Cognitive Services User** on the DI resource.
+1. Create a dedicated service principal (`sp-rag-di-caller`) and grant it **Cognitive Services User** on the **Foundry resource** (which serves the Document Intelligence endpoint in this pattern — no separate FormRecognizer account is provisioned).
 2. Store the SP's client secret in Key Vault under `di-sp-secret`.
 3. Grant the Fabric workspace identity **Key Vault Secrets User** on the Key Vault.
 4. In the notebook, read the SP secret via `notebookutils.credentials.getSecret(kv_uri, 'di-sp-secret')`, then use MSAL `ConfidentialClientApplication.acquire_token_for_client()` with scope `https://cognitiveservices.azure.com/.default` to get a DI bearer token.
@@ -406,9 +406,9 @@ Inner error: {
 }
 ```
 
-**Cause.** Document Intelligence tried to fetch `urlSource` (the `https://<storage>.blob.core.windows.net/raw/<file_id>/<filename>` URL the notebook passed) and got rejected. Since this pattern disables shared-key access on the storage account (`allowSharedKeyAccess: false`), DI **must** authenticate to Blob using a managed identity. Document Intelligence is served by the **Foundry resource** (`kind=AIServices`) in this pattern — so the relevant identity is the Foundry resource's system-assigned MI, not a separate DI MI. If the Foundry MI is missing the **Storage Blob Data Reader** role on the storage account, the storage service returns 401/403 and DI surfaces that as `InvalidContent`.
+**Cause.** Document Intelligence tried to fetch `urlSource` (the `https://<storage>.blob.core.windows.net/raw/<file_id>/<filename>` URL the notebook passed) and got rejected. With shared-key access disabled on the storage account (`allowSharedKeyAccess: false`), DI must authenticate to Blob via a managed identity — specifically the Foundry resource's system-assigned MI (DI runs inside the Foundry account). If that MI lacks **Storage Blob Data Reader** on the storage account, storage returns 401/403 and DI surfaces it as `InvalidContent`.
 
-(Other less common causes: the blob doesn't actually exist at the URL the notebook constructed; the storage account firewall blocks the Foundry resource; the Foundry resource's managed identity is disabled altogether.)
+(Other less common causes: the blob doesn't exist at the URL the notebook constructed; the storage firewall blocks the Foundry resource; the Foundry MI is disabled.)
 
 **Diagnostic flow.** Run these checks against your environment (replace `<sub>`, `<rg>`, `<foundry>`, `<storage>` with values from `demo-ids.local.json`):
 

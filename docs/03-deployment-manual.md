@@ -80,17 +80,13 @@ az storage container create --account-name $ST --name chunks --auth-mode login
 
 > **`--allow-shared-key-access false`** disables the storage account access keys. Every reader and writer (AI Search indexer, Document Intelligence — served from the Foundry account — Fabric pipeline, you) must authenticate with Entra ID via a managed identity / service principal / signed-in user. The container-creation commands above use `--auth-mode login` so they go through your Azure CLI identity rather than account keys.
 
-### 1.4 Document Intelligence — served by the Foundry resource (no separate resource to create)
+### 1.4 Document Intelligence — no separate resource
 
-The pattern does **not** provision a standalone `Microsoft.CognitiveServices/accounts` of `kind=FormRecognizer`. Document Intelligence is exposed by the **Azure AI Foundry resource** you create in [§ 1.5](#15-create-azure-ai-foundry-resource--openai-deployments) below — a Foundry account (`kind=AIServices`) is a multi-service Cognitive Services resource that provides Azure OpenAI **and** Document Intelligence **and** Vision **and** Translator **and** Speech from the same resource ID, the same managed identity, and a single set of RBAC role assignments.
-
-The Fabric OCR notebook (see [03b-fabric-setup.md § F7.2](./03b-fabric-setup.md#f72-nb_ocr_chunk_upload)) points the `azure-ai-documentintelligence` Python SDK at the Foundry resource's **Cognitive Services endpoint** — i.e. `https://<foundry-name>.cognitiveservices.azure.com/` (note: different host suffix from the OpenAI-compatible `<foundry-name>.openai.azure.com/` host used by the AI Search vectorizer, but the same underlying resource).
-
-No action in this section. Continue to § 1.5.
+DI is served by the Foundry resource you create in § 1.5. The Fabric OCR notebook calls it at `https://<foundry-name>.cognitiveservices.azure.com/`. No action in this section — continue to § 1.5. See [01-architecture.md § 8](./01-architecture.md#8-document-intelligence-prebuilt-read-served-by-the-foundry-resource) for the design rationale.
 
 ### 1.5 Create Azure AI Foundry resource + OpenAI deployments
 
-> **Why a Foundry resource, not a standalone Azure OpenAI resource?** The Azure AI Foundry resource (kind `AIServices`) is the strategic Microsoft model-gateway resource. It hosts OpenAI models (and the broader Foundry catalog: Cohere, Llama, Phi, Mistral, …) under a single resource and exposes an OpenAI-compatible endpoint at `https://<resource>.openai.azure.com/` — so the AI Search integrated `azureOpenAI` vectorizer works against it unchanged. It is **also a multi-service Cognitive Services account**, so the same resource serves the **Document Intelligence** `prebuilt-read` endpoint used by the Fabric OCR notebook (at `https://<resource>.cognitiveservices.azure.com/`) — no separate FormRecognizer resource is needed. This pattern uses Foundry's model-gateway capability + the built-in DI endpoint; Foundry's agent runtime (Agent Service / Hub / Projects) is **not** used here — Copilot Studio fills the agent role. Foundry agent runtime is the right addition for engagements that need multi-agent routing, custom tool calling, or query triage beyond knowledge-base Q&A.
+> **Why a Foundry resource, not a standalone Azure OpenAI resource?** The Azure AI Foundry resource (`kind=AIServices`) is the strategic Microsoft model-gateway resource and a multi-service Cognitive Services account. It hosts OpenAI deployments (`https://<name>.openai.azure.com/` — used unchanged by the AI Search `azureOpenAI` vectorizer) **and** the Document Intelligence `prebuilt-read` endpoint used by the Fabric OCR notebook (`https://<name>.cognitiveservices.azure.com/`) from the same resource, single MI, single RBAC surface. Foundry's agent runtime (Agent Service / Hub / Projects) is **not** used here — Copilot Studio fills the agent role; add Foundry agent runtime only for engagements that need multi-agent routing, custom tool calling, or query triage beyond knowledge-base Q&A.
 
 In the Azure portal:
 
