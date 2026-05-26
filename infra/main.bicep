@@ -207,6 +207,7 @@ module rbac 'modules/rbac.bicep' = {
     storageAccountName: storage.outputs.name
     foundryAccountName: foundry.outputs.name
     searchServiceName: search.outputs.name
+    keyVaultName: keyVault.outputs.name
     deployerPrincipalId: deployerPrincipalId
     deployerPrincipalType: deployerPrincipalType
   }

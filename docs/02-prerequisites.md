@@ -4,6 +4,33 @@ Everything required before you can start building. Work through this list in ord
 
 > **Plan ahead.** Several items (Copilot Studio licensing, Foundry access approval, Fabric capacity allocation, AI Search tier selection) involve administrative approvals that can take hours to days. Start the slowest-moving ones first.
 
+> **Shell convention.** Every shell snippet in this doc set is **PowerShell** (`pwsh` 7+), tagged ```` ```pwsh ````. The deployment wrapper is [`infra/deploy.ps1`](../infra/deploy.ps1). Variables use `$VAR = "value"`; line continuations use backtick `` ` ``; HTTP examples use `curl.exe` (not `Invoke-WebRequest` aliases) or `Invoke-RestMethod`. JSON responses are handled with native `ConvertFrom-Json` / `Select-Object` — **no `jq` dependency**. See [README § Shell convention](../README.md#shell-convention) for the full convention map.
+
+---
+
+## 0 — Local developer tooling
+
+Install these on the workstation you'll use to drive the build before working through the Azure / Fabric / Copilot Studio prerequisites below.
+
+| Tool | Minimum version | Used for |
+|---|---|---|
+| [PowerShell 7+ (`pwsh`)](https://learn.microsoft.com/powershell/scripting/install/installing-powershell) | 7.4+ | Running every shell snippet in `docs/*.md` and `infra/deploy.ps1` (cross-platform: Windows, macOS, Linux) |
+| [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli) | 2.60+ | All `az ...` commands; `az login` for interactive auth |
+| [Bicep](https://learn.microsoft.com/azure/azure-resource-manager/bicep/install) (CLI extension) | latest | `az bicep build` + `az deployment sub create`. Install once: `az bicep install` |
+| [Python](https://www.python.org/downloads/) | 3.11+ | `scripts/post_deploy_search.py` and `scripts/tests/*` |
+| [Git](https://git-scm.com/downloads) | any recent | Clone / commit |
+
+Verify your environment in one shot:
+
+```pwsh
+$PSVersionTable.PSVersion          # PowerShell version (>= 7.4)
+az --version                       # Azure CLI version (>= 2.60); Bicep CLI shown in same output
+python --version                   # Python version (>= 3.11)
+az bicep install                   # idempotent; ensures Bicep CLI is present
+```
+
+> **Why pwsh and not bash.** The deployment wrapper [`infra/deploy.ps1`](../infra/deploy.ps1) is a PowerShell script (parameters, switches, error-handling all use PowerShell idioms). Standardizing the docs on the same shell removes a copy-paste failure mode and means the same examples work identically on Windows, macOS, and Linux. The `az` CLI itself is shell-agnostic — if you prefer bash for one-off commands, the `az ...` invocations are unchanged; you only need to convert `$VAR = "value"` to `VAR=value` and backtick line continuations to `\`.
+
 ---
 
 ## 1 — Azure subscription
@@ -35,14 +62,14 @@ In the target subscription, register these resource providers (one-time, takes a
 - `Microsoft.KeyVault`
 - `Microsoft.Fabric` (if not auto-registered by the tenant)
 
-```bash
+```pwsh
 # CLI check
 az provider list --query "[?registrationState=='Registered'].namespace" -o tsv
 ```
 
 If any are missing:
 
-```bash
+```pwsh
 az provider register --namespace Microsoft.CognitiveServices --wait
 ```
 
@@ -68,10 +95,10 @@ Not every model is available in every region. Confirm before provisioning:
 - Microsoft Learn: "Azure AI Foundry models and region availability" / "Azure OpenAI models and region availability" (search current Microsoft Learn — region matrix updates frequently)
 - Or query the resource directly:
 
-```bash
-az cognitiveservices account list-models \
-  --name <your-foundry-resource> \
-  --resource-group <your-rg> \
+```pwsh
+az cognitiveservices account list-models `
+  --name <your-foundry-resource> `
+  --resource-group <your-rg> `
   --query "[].{model:name, version:version, locations:capabilities.locations}"
 ```
 
@@ -318,11 +345,11 @@ Other regions (UAE North, South Africa North, Brazil South, Central India, etc.)
 
 The matrix above is a **publication-time snapshot**. Region × model availability moves monthly. Always confirm before provisioning:
 
-```bash
+```pwsh
 # 1. List OpenAI models available in your target region
-az cognitiveservices model list \
-  --location <region> \
-  --query "[?contains(model.name, 'text-embedding-3-large') || contains(model.name, 'gpt-4o')].{model:model.name, version:model.version}" \
+az cognitiveservices model list `
+  --location <region> `
+  --query "[?contains(model.name, 'text-embedding-3-large') || contains(model.name, 'gpt-4o')].{model:model.name, version:model.version}" `
   -o table
 
 # 2. Check Azure AI Search SKU availability in your target region (Standard S1+ required for semantic ranker)

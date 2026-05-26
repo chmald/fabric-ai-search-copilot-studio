@@ -36,42 +36,54 @@ In between Phase 1 and Phase 4 you switch to **[03b-fabric-setup.md](./03b-fabri
 
 **Total Azure-only manual build: roughly 2–3 hours of hands-on time.** Full demo (Azure + Fabric + Copilot Studio): **4–6 hours** — see [00-reproduce-this-demo.md](./00-reproduce-this-demo.md) for the orchestrated time budget.
 
+> **Shell convention.** All snippets are PowerShell (`pwsh` 7+). Variables use `$VAR = "value"`; line continuations use backtick `` ` ``. See [README § Shell convention](../README.md#shell-convention) for the project-wide convention and [02-prerequisites.md § 0](./02-prerequisites.md#0--local-developer-tooling) for the local tooling install matrix.
+
 ---
 
 ## Phase 1 — Foundation
 
 ### 1.1 Create the resource group
 
-```bash
-LOC=eastus
-RG=rg-rag-demo-eus
+```pwsh
+$LOC = "eastus"
+$RG  = "rg-rag-demo-eus"
 
 az group create --name $RG --location $LOC
 ```
 
 ### 1.2 Create Key Vault
 
-```bash
-KV=kv-rag-demo-eus
+```pwsh
+$KV = "kv-rag-demo-eus"
 
-az keyvault create \
-  --name $KV --resource-group $RG --location $LOC \
+az keyvault create `
+  --name $KV --resource-group $RG --location $LOC `
   --enable-rbac-authorization true
+
+# Grant yourself Key Vault Secrets Officer on the vault — required for the rest of
+# the build (DI-caller SP secret in 03b § F2.2 step 3, any future connector creds).
+# Without this you'll hit `403 Forbidden` on `az keyvault secret set` later.
+$ME_OBJID  = az ad signed-in-user show --query id -o tsv
+$KV_RES_ID = az keyvault show --name $KV --query id -o tsv
+az role assignment create `
+  --assignee-object-id $ME_OBJID --assignee-principal-type User `
+  --role "Key Vault Secrets Officer" `
+  --scope $KV_RES_ID
 ```
 
-Grant yourself **Key Vault Secrets Officer** on the vault for the duration of the build.
+> The Bicep path grants this automatically when `deployerPrincipalId` is set in `main.parameters.local.json` (see [04-deployment-automated.md](./04-deployment-automated.md)). For the manual path you grant it yourself.
 
 ### 1.3 Create Storage account + containers
 
-```bash
-ST=stragdemoeus
+```pwsh
+$ST = "stragdemoeus"
 
-az storage account create \
-  --name $ST --resource-group $RG --location $LOC \
-  --sku Standard_LRS \
-  --kind StorageV2 \
-  --min-tls-version TLS1_2 \
-  --allow-blob-public-access false \
+az storage account create `
+  --name $ST --resource-group $RG --location $LOC `
+  --sku Standard_LRS `
+  --kind StorageV2 `
+  --min-tls-version TLS1_2 `
+  --allow-blob-public-access false `
   --allow-shared-key-access false
 
 az storage container create --account-name $ST --name raw --auth-mode login
@@ -102,10 +114,10 @@ In the Azure portal:
    - `https://aif-rag-demo-eus.cognitiveservices.azure.com/` — used by the Fabric OCR notebook to call Document Intelligence `prebuilt-read`
 6. **Identity → System assigned → Status: On → Save**. Note the **Object (principal) ID** — the same MI handles both Azure OpenAI calls **and** Document Intelligence `urlSource` blob fetches, so you grant this single MI **Storage Blob Data Reader** in step 1.7.
 7. **Disable local authentication**:
-   ```bash
-   az cognitiveservices account update \
-     --name aif-rag-demo-eus --resource-group $RG \
-     --custom-domain aif-rag-demo-eus \
+   ```pwsh
+   az cognitiveservices account update `
+     --name aif-rag-demo-eus --resource-group $RG `
+     --custom-domain aif-rag-demo-eus `
      --properties '{"disableLocalAuth": true}'
    ```
 
@@ -122,9 +134,9 @@ In the Azure portal:
 5. **Networking** — leave Public network access enabled for demo; lock down with private endpoints for production
 6. **Identity → System assigned → Status: On → Save** (note the object ID — needed in step 1.7)
 7. **Keys** — set **API access control** to **Role-based access control** and disable local auth:
-   ```bash
-   az search service update \
-     --name srch-rag-demo-eus --resource-group $RG \
+   ```pwsh
+   az search service update `
+     --name srch-rag-demo-eus --resource-group $RG `
      --disable-local-auth true
    ```
    > **Do NOT pass `--auth-options aadOrApiKey` together with `--disable-local-auth true`.** The Azure Search API treats the two as mutually exclusive and rejects the call with `BadRequest: AuthOptions must be null if DisableLocalAuth is true`. With local auth disabled, unauthenticated requests already receive a proper `401` with a `WWW-Authenticate: Bearer ...` challenge by default — no `authOptions` configuration is required.
@@ -136,16 +148,16 @@ No admin or query keys are stored anywhere. All callers (your post-deploy work, 
 
 With API keys disabled across Foundry, AI Search, and Storage, **every** data-plane interaction depends on a role assignment. Skip any of these and the corresponding service call will return 401 or 403.
 
-```bash
+```pwsh
 # Identities
-SEARCH_OBJID=<AI Search system-assigned MI object ID from step 1.6>
-AIF_OBJID=<Foundry resource system-assigned MI object ID from step 1.5>
-ME_OBJID=$(az ad signed-in-user show --query id -o tsv)
+$SEARCH_OBJID = "<AI Search system-assigned MI object ID from step 1.6>"
+$AIF_OBJID    = "<Foundry resource system-assigned MI object ID from step 1.5>"
+$ME_OBJID     = az ad signed-in-user show --query id -o tsv
 
 # Resource IDs
-AIF_RES_ID=$(az cognitiveservices account show --name aif-rag-demo-eus -g $RG --query id -o tsv)
-SRCH_RES_ID=$(az search service show --name srch-rag-demo-eus -g $RG --query id -o tsv)
-ST_RES_ID=$(az storage account show --name $ST -g $RG --query id -o tsv)
+$AIF_RES_ID  = az cognitiveservices account show --name aif-rag-demo-eus -g $RG --query id -o tsv
+$SRCH_RES_ID = az search service show --name srch-rag-demo-eus -g $RG --query id -o tsv
+$ST_RES_ID   = az storage account show --name $ST -g $RG --query id -o tsv
 
 # 1. AI Search → Foundry (integrated vectorizer calls the embedding deployment)
 #    CRITICAL: This must be "Cognitive Services OpenAI User" — NOT the similarly
@@ -154,41 +166,50 @@ ST_RES_ID=$(az storage account show --name $ST -g $RG --query id -o tsv)
 #    does NOT cover Azure OpenAI / Foundry OpenAI deployments. Using the wrong
 #    role causes the indexer to succeed while silently committing documents with
 #    a null content_vector (see docs/06-troubleshooting.md § 4.1).
-az role assignment create \
-  --assignee-object-id $SEARCH_OBJID --assignee-principal-type ServicePrincipal \
-  --role "Cognitive Services OpenAI User" \
+az role assignment create `
+  --assignee-object-id $SEARCH_OBJID --assignee-principal-type ServicePrincipal `
+  --role "Cognitive Services OpenAI User" `
   --scope $AIF_RES_ID
 
 # 2. AI Search → Blob (indexer pulls chunk JSON from chunks/)
-az role assignment create \
-  --assignee-object-id $SEARCH_OBJID --assignee-principal-type ServicePrincipal \
-  --role "Storage Blob Data Reader" \
+az role assignment create `
+  --assignee-object-id $SEARCH_OBJID --assignee-principal-type ServicePrincipal `
+  --role "Storage Blob Data Reader" `
   --scope $ST_RES_ID
 
 # 3. Foundry MI → Blob (Document Intelligence runs inside the Foundry account; it
 #    uses the Foundry MI to fetch raw/<file> via urlSource. Required because
 #    shared-key access on Storage is disabled and you can't pass a SAS.)
-az role assignment create \
-  --assignee-object-id $AIF_OBJID --assignee-principal-type ServicePrincipal \
-  --role "Storage Blob Data Reader" \
+az role assignment create `
+  --assignee-object-id $AIF_OBJID --assignee-principal-type ServicePrincipal `
+  --role "Storage Blob Data Reader" `
   --scope $ST_RES_ID
 
 # 4. You → AI Search (lets you create + manage the index, datasource, indexer via bearer
 #    token; lets you run sample queries during build/test)
-az role assignment create \
-  --assignee-object-id $ME_OBJID --assignee-principal-type User \
-  --role "Search Service Contributor" \
+az role assignment create `
+  --assignee-object-id $ME_OBJID --assignee-principal-type User `
+  --role "Search Service Contributor" `
   --scope $SRCH_RES_ID
-az role assignment create \
-  --assignee-object-id $ME_OBJID --assignee-principal-type User \
-  --role "Search Index Data Contributor" \
+az role assignment create `
+  --assignee-object-id $ME_OBJID --assignee-principal-type User `
+  --role "Search Index Data Contributor" `
   --scope $SRCH_RES_ID
 
 # 5. You → Storage (lets you upload / inspect blobs through Azure CLI / portal)
-az role assignment create \
-  --assignee-object-id $ME_OBJID --assignee-principal-type User \
-  --role "Storage Blob Data Contributor" \
+az role assignment create `
+  --assignee-object-id $ME_OBJID --assignee-principal-type User `
+  --role "Storage Blob Data Contributor" `
   --scope $ST_RES_ID
+
+# 6. You → Key Vault (set/read secrets — needed for 03b § F2.2 step 3 where you
+#    store the DI-caller SP secret, and any later connector credentials).
+#    If you already ran this in § 1.2, this re-issue is idempotent.
+$KV_RES_ID = az keyvault show --name $KV --query id -o tsv
+az role assignment create `
+  --assignee-object-id $ME_OBJID --assignee-principal-type User `
+  --role "Key Vault Secrets Officer" `
+  --scope $KV_RES_ID
 ```
 
 > **Propagation:** Azure role assignments take up to **15 minutes** to be honored, especially cross-resource-type assignments (Search MI → Foundry, Search MI → Storage). If subsequent steps return 401 or 403, wait and retry before debugging further.
@@ -223,8 +244,8 @@ The Fabric workspace, Lakehouse, OneLake shortcut, control Delta table, connecti
 
 > **Auth model.** Admin keys are disabled on the AI Search service (from Phase 1.6). Every REST call below must include an Entra bearer token:
 >
-> ```bash
-> TOKEN=$(az account get-access-token --resource https://search.azure.com --query accessToken -o tsv)
+> ```pwsh
+> $TOKEN = az account get-access-token --resource https://search.azure.com --query accessToken -o tsv
 > # then add the header to every PUT/POST/GET:
 > #   -H "Authorization: Bearer $TOKEN"
 > ```
@@ -359,10 +380,10 @@ Content-Type: application/json
 
 The skill calls the Foundry OpenAI endpoint using the search service's system-assigned managed identity (`"authIdentity": null`). Phase 1.7 step 1 already granted that MI **Cognitive Services OpenAI User** on the Foundry resource. Verify with:
 
-```bash
-SEARCH_OBJID=<AI Search system-assigned MI object ID>
-AIF_RES_ID=$(az cognitiveservices account show --name aif-rag-demo-eus -g $RG --query id -o tsv)
-az role assignment list --scope $AIF_RES_ID --fill-principal-name false \
+```pwsh
+$SEARCH_OBJID = "<AI Search system-assigned MI object ID>"
+$AIF_RES_ID   = az cognitiveservices account show --name aif-rag-demo-eus -g $RG --query id -o tsv
+az role assignment list --scope $AIF_RES_ID --fill-principal-name false `
   --query "[?principalId=='$SEARCH_OBJID'].roleDefinitionName" -o tsv
 ```
 
@@ -409,18 +430,18 @@ Content-Type: application/json
 
 ### 4.5 Run the indexer manually
 
-```bash
-TOKEN=$(az account get-access-token --resource https://search.azure.com --query accessToken -o tsv)
+```pwsh
+$TOKEN = az account get-access-token --resource https://search.azure.com --query accessToken -o tsv
 
-curl -X POST \
-  -H "Authorization: Bearer $TOKEN" \
+curl.exe -X POST `
+  -H "Authorization: Bearer $TOKEN" `
   "https://srch-rag-demo-eus.search.windows.net/indexers/ixr-chunks/run?api-version=2024-07-01"
 ```
 
 Then watch status:
 
-```bash
-curl -H "Authorization: Bearer $TOKEN" \
+```pwsh
+curl.exe -H "Authorization: Bearer $TOKEN" `
   "https://srch-rag-demo-eus.search.windows.net/indexers/ixr-chunks/status?api-version=2024-07-01"
 ```
 
@@ -428,10 +449,13 @@ A successful run shows `lastResult.status = "success"` and `itemsProcessed` matc
 
 > **Confirm vectors are actually being generated, not just text.** A successful indexer run with `itemsProcessed > 0` is necessary but not sufficient. Also check the service's `vectorIndexSize` counter — it should be > 0 once documents are indexed:
 >
-> ```bash
-> curl -sH "Authorization: Bearer $TOKEN" \
->   "https://srch-rag-demo-eus.search.windows.net/servicestats?api-version=2024-07-01" \
->   | jq '.counters | {documentCount, vectorIndexSize, storageSize}'
+> ```pwsh
+> # PowerShell-native: no jq needed. Invoke-RestMethod auto-parses the JSON response.
+> Invoke-RestMethod `
+>   -Uri "https://srch-rag-demo-eus.search.windows.net/servicestats?api-version=2024-07-01" `
+>   -Headers @{ Authorization = "Bearer $TOKEN" } `
+>   | Select-Object -ExpandProperty counters `
+>   | Select-Object documentCount, vectorIndexSize, storageSize
 > ```
 >
 > If `documentCount > 0` but `vectorIndexSize: 0`, you're hitting silent vectorizer failure — almost always the missing skillset (§ 4.3 skipped) or the wrong role on the AI Search MI (plain `Cognitive Services User` instead of `Cognitive Services OpenAI User`). See [06-troubleshooting.md § 4.1](./06-troubleshooting.md#41-vectorizer-auth-failure-loud-or-silent).

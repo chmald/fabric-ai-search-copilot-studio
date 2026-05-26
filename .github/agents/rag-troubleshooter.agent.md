@@ -51,11 +51,13 @@ The user's environment IDs live in `demo-ids.local.json` (gitignored). Read this
 5. **Fix.** Either give exact `az` commands the user can run, or edit the Bicep / Python / notebook code in the repo. For RBAC fixes, always include the propagation wait (5–15 minutes). For any change to an AI Search indexer / skillset / vectorizer role, **always include the indexer reset + run** — documents already committed with bad / null vectors will NOT be revisited by a plain run.
 6. **Verify the fix actually worked — don't trust a single "success" status.** Several failure modes in this stack are silent (vectorizer auth fail, missing skillset, AI Search service-side MI token cache). For AI Search fixes, the canonical post-fix check is:
 
-   ```bash
-   TOKEN=$(az account get-access-token --resource https://search.azure.com --query accessToken -o tsv)
-   curl -sH "Authorization: Bearer $TOKEN" \
-     "https://<search>.search.windows.net/servicestats?api-version=2024-07-01" \
-     | jq '.counters | {documentCount, vectorIndexSize}'
+   ```pwsh
+   $TOKEN = az account get-access-token --resource https://search.azure.com --query accessToken -o tsv
+   Invoke-RestMethod `
+     -Uri "https://<search>.search.windows.net/servicestats?api-version=2024-07-01" `
+     -Headers @{ Authorization = "Bearer $TOKEN" } `
+     | Select-Object -ExpandProperty counters `
+     | Select-Object documentCount, vectorIndexSize
    ```
 
    `vectorIndexSize > 0` whenever `documentCount > 0` is the success condition. If still 0, the fix didn't actually land — propagate further (wait 15 min, reset + run again) or look for a second compounding cause (e.g., you fixed the role but the skillset is still missing).

@@ -128,22 +128,22 @@ The pipeline writes raw files to `raw/` and chunk JSON to `chunks/`, and it read
 
 From the **Azure portal** (or `az cli` — both shown):
 
-```bash
+```pwsh
 # Identities + scopes
-WS_OBJID=<workspace-identity-object-id>   # Microsoft Entra ID → Enterprise applications → search workspace name
-ST_RES_ID=$(az storage account show --name <storage-account> -g <rg> --query id -o tsv)
-KV_RES_ID=$(az keyvault show --name <key-vault-name> --query id -o tsv)
+$WS_OBJID  = "<workspace-identity-object-id>"   # Microsoft Entra ID → Enterprise applications → search workspace name
+$ST_RES_ID = az storage account show --name <storage-account> -g <rg> --query id -o tsv
+$KV_RES_ID = az keyvault show --name <key-vault-name> --query id -o tsv
 
 # 1. Write raw/ and chunks/ from Copy and chunk-upload activities
-az role assignment create \
-  --assignee-object-id $WS_OBJID --assignee-principal-type ServicePrincipal \
-  --role "Storage Blob Data Contributor" \
+az role assignment create `
+  --assignee-object-id $WS_OBJID --assignee-principal-type ServicePrincipal `
+  --role "Storage Blob Data Contributor" `
   --scope $ST_RES_ID
 
 # 2. Read the DI-caller service-principal secret from Key Vault at notebook runtime
-az role assignment create \
-  --assignee-object-id $WS_OBJID --assignee-principal-type ServicePrincipal \
-  --role "Key Vault Secrets User" \
+az role assignment create `
+  --assignee-object-id $WS_OBJID --assignee-principal-type ServicePrincipal `
+  --role "Key Vault Secrets User" `
   --scope $KV_RES_ID
 ```
 
@@ -157,7 +157,7 @@ For Document Intelligence (`https://cognitiveservices.azure.com/`), the supporte
 
 1. **Create the service principal:**
 
-   ```bash
+   ```pwsh
    az ad sp create-for-rbac --name "sp-rag-di-caller" --years 1
    # Output:
    #   appId       = <client-id>      ← the SP's clientId (public)
@@ -169,22 +169,22 @@ For Document Intelligence (`https://cognitiveservices.azure.com/`), the supporte
 
 2. **Grant the SP `Cognitive Services User` on the Foundry resource** (which serves the DI endpoint — see [01-architecture.md § 8](./01-architecture.md#8-document-intelligence-prebuilt-read-served-by-the-foundry-resource)):
 
-   ```bash
-   SP_OBJID=$(az ad sp show --id <client-id> --query id -o tsv)
-   AIF_RES_ID=$(az cognitiveservices account show --name <foundry-resource> -g <rg> --query id -o tsv)
+   ```pwsh
+   $SP_OBJID   = az ad sp show --id <client-id> --query id -o tsv
+   $AIF_RES_ID = az cognitiveservices account show --name <foundry-resource> -g <rg> --query id -o tsv
 
-   az role assignment create \
-     --assignee-object-id $SP_OBJID --assignee-principal-type ServicePrincipal \
-     --role "Cognitive Services User" \
+   az role assignment create `
+     --assignee-object-id $SP_OBJID --assignee-principal-type ServicePrincipal `
+     --role "Cognitive Services User" `
      --scope $AIF_RES_ID
    ```
 
 3. **Store the SP secret in Key Vault** under a name the notebook will reference (default: `di-sp-secret`):
 
-   ```bash
-   az keyvault secret set \
-     --vault-name <key-vault-name> \
-     --name di-sp-secret \
+   ```pwsh
+   az keyvault secret set `
+     --vault-name <key-vault-name> `
+     --name di-sp-secret `
      --value '<the-password-from-step-1>'
    ```
 
@@ -963,7 +963,7 @@ If the second run re-processes files, your `file_id` hash isn't stable. See [06-
 
 The AI Search indexer (Bicep- or manually-created, see [03-deployment-manual.md § Phase 4](./03-deployment-manual.md#phase-4--ai-search-index) or [04-deployment-automated.md § Step 4](./04-deployment-automated.md)) polls `chunks/` every 5 minutes. Within ~5 min of pipeline completion, the chunks should appear in the search index. Confirm:
 
-```bash
+```http
 GET https://<search-svc>.search.windows.net/indexers/ixr-chunks/status?api-version=2024-07-01
 # Expected: lastResult.status = "success", itemsProcessed > 0
 ```

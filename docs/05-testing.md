@@ -71,7 +71,7 @@ For one sample document:
 
 Query the index document count:
 
-```bash
+```http
 GET https://srch-rag-demo-eus.search.windows.net/indexes/idx-rag-documents/docs/$count?api-version=2024-07-01
 api-key: <admin key>
 ```
@@ -92,7 +92,7 @@ POST .../indexes/idx-rag-documents/docs/search?api-version=2024-07-01
 
 Then pick one ID and fetch its document with all fields:
 
-```bash
+```http
 GET .../indexes/idx-rag-documents/docs/<id>?api-version=2024-07-01&$select=id,content_vector
 ```
 

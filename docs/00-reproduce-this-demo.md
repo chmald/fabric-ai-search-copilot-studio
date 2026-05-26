@@ -59,7 +59,7 @@
 - [ ] **Azure OpenAI access approved** in the subscription with TPM quota for `text-embedding-3-large` (10K TPM minimum for demo). `gpt-4o` quota is only required if you opt in to a chat deployment for engagement-specific extensions (the locked design doesn't consume one).
 - [ ] **Fabric capacity** allocated (F4+ for demo, F16+ for production) and a workspace where you have Admin or Member role
 - [ ] **Copilot Studio license** for the building user — and channel-publishing pre-approvals **initiated** (Teams + M365 Copilot admin approvals take ~1-2 business days)
-- [ ] **Local tools**: `git`, `pwsh` 7+, **Python 3.11+**, **Azure CLI 2.60+** with the `bicep` extension installed (`az bicep install`)
+- [ ] **Local tools** (full table in [02-prerequisites.md § 0](./02-prerequisites.md#0--local-developer-tooling)): **PowerShell 7+ (`pwsh`)**, **Azure CLI 2.60+** with the `bicep` extension installed (`az bicep install`), **Python 3.11+**, `git`. All shell snippets in the docs are PowerShell — see [README § Shell convention](../README.md#shell-convention).
 - [ ] **(For automated path only)** Ability to authenticate to Azure with an identity that has the role assignments above (e.g. `az login` with your user, or a service principal for ADO)
 
 If any of these are missing, see [02-prerequisites.md](./02-prerequisites.md) for the full breakdown.

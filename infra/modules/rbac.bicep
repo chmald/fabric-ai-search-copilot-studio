@@ -53,6 +53,9 @@ param foundryAccountName string
 @description('AI Search service name (same RG as this deployment). Required for scoping deployer roles.')
 param searchServiceName string
 
+@description('Key Vault name (same RG as this deployment). Required for scoping the deployer\'s Key Vault Secrets Officer role.')
+param keyVaultName string
+
 @description('Optional: object ID of the user / service principal running the post-deploy script. When provided, grants Search Service Contributor + Search Index Data Contributor on the AI Search service so the script can authenticate with a bearer token instead of an admin key.')
 param deployerPrincipalId string = ''
 
@@ -82,9 +85,11 @@ var roleIds = {
   storageBlobDataReader:        '2a2b9908-6ea1-4ae2-8e65-a410df84e7d1'
   searchServiceContributor:     '7ca78c08-252a-4471-8644-bb5ff32d4ba0'
   searchIndexDataContributor:   '8ebe5a00-799e-43f5-93ac-243d3dce84a7'
+  keyVaultSecretsOfficer:       'b86a8fe4-44ce-4948-aee5-eccb2c155cd7'
   // Reference (not assigned here):
   //   Storage Blob Data Contributor    = ba92f5b4-2d11-453d-a403-e96b0029c9fe
   //   Cognitive Services User          = a97b65f3-24c7-4388-baec-2e87135dc908  (DO NOT use for OpenAI vectorizer)
+  //   Key Vault Secrets User           = 4633458b-17de-408a-b874-0445c86b69e6  (read-only secret access — used by Fabric workspace identity at runtime)
 }
 
 // Resource references (existing — created by sibling modules)
@@ -98,6 +103,10 @@ resource foundry 'Microsoft.CognitiveServices/accounts@2024-10-01' existing = {
 
 resource searchSvc 'Microsoft.Search/searchServices@2024-03-01-preview' existing = {
   name: searchServiceName
+}
+
+resource keyVault 'Microsoft.KeyVault/vaults@2024-04-01-preview' existing = {
+  name: keyVaultName
 }
 
 // =====================================================================================
@@ -171,8 +180,26 @@ resource deployerToSearchIndexData 'Microsoft.Authorization/roleAssignments@2022
   }
 }
 
+// =====================================================================================
+// (Optional) deployer -> Key Vault Secrets Officer on the Key Vault.
+// Lets the deployer (operator running 03b-fabric-setup.md § F2.2 step 3, or any
+// later step that creates/rotates secrets in the vault) write the DI-caller SP
+// secret (and any future connector credentials). Without this assignment, the
+// `az keyvault secret set` call in F2.2 step 3 fails with `403 Forbidden`.
+// =====================================================================================
+resource deployerToKeyVault 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(deployerPrincipalId)) {
+  scope: keyVault
+  name: guid(keyVault.id, deployerPrincipalId, roleIds.keyVaultSecretsOfficer)
+  properties: {
+    principalId: deployerPrincipalId
+    principalType: deployerPrincipalType
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roleIds.keyVaultSecretsOfficer)
+  }
+}
+
 output searchToFoundryAssignmentId string = searchToFoundry.id
 output searchToStorageAssignmentId string = searchToStorage.id
 output foundryToStorageAssignmentId string = foundryToStorage.id
 output deployerToSearchServiceAssignmentId string = empty(deployerPrincipalId) ? '' : deployerToSearchService.id
 output deployerToSearchIndexDataAssignmentId string = empty(deployerPrincipalId) ? '' : deployerToSearchIndexData.id
+output deployerToKeyVaultAssignmentId string = empty(deployerPrincipalId) ? '' : deployerToKeyVault.id

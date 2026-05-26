@@ -47,18 +47,18 @@ This pattern provisions the **Azure AI Foundry resource** (which serves both Azu
 | Document Intelligence / Foundry / Azure OpenAI | `https://cognitiveservices.azure.com/.default` |
 | Storage (data plane) | `https://storage.azure.com/.default` |
 
-Quick local test (PowerShell or bash):
+Quick local test (PowerShell):
 
-```bash
+```pwsh
 # AI Search
-TOKEN=$(az account get-access-token --resource https://search.azure.com --query accessToken -o tsv)
-curl -H "Authorization: Bearer $TOKEN" \
-  "https://<svc>.search.windows.net/indexes/idx-rag-documents/docs/\$count?api-version=2024-07-01"
+$TOKEN = az account get-access-token --resource https://search.azure.com --query accessToken -o tsv
+curl.exe -H "Authorization: Bearer $TOKEN" `
+  'https://<svc>.search.windows.net/indexes/idx-rag-documents/docs/$count?api-version=2024-07-01'
 
-# Document Intelligence
-TOKEN=$(az account get-access-token --resource https://cognitiveservices.azure.com --query accessToken -o tsv)
-curl -H "Authorization: Bearer $TOKEN" \
-  "https://<di>.cognitiveservices.azure.com/documentintelligence/info?api-version=2024-11-30"
+# Document Intelligence (served by the Foundry resource)
+$TOKEN = az account get-access-token --resource https://cognitiveservices.azure.com --query accessToken -o tsv
+curl.exe -H "Authorization: Bearer $TOKEN" `
+  "https://<foundry>.cognitiveservices.azure.com/documentintelligence/info?api-version=2024-11-30"
 ```
 
 If the bearer call also returns 401/403, the caller's identity is missing the required RBAC role — see [02-prerequisites.md § 10](./02-prerequisites.md#10--rbac-role-assignments-cheat-sheet) for the canonical role list.
@@ -127,22 +127,22 @@ resource search 'Microsoft.Search/searchServices@2024-03-01-preview' = {
 
 **Fix — az CLI (manual deploy path § 1.6).** Do not pass `--auth-options` together with `--disable-local-auth true`:
 
-```bash
+```pwsh
 # WRONG — returns BadRequest: AuthOptions must be null if DisableLocalAuth is true
-az search service update --name <svc> --resource-group <rg> \
-  --auth-options aadOrApiKey \
-  --aad-auth-failure-mode http401WithBearerChallenge \
+az search service update --name <svc> --resource-group <rg> `
+  --auth-options aadOrApiKey `
+  --aad-auth-failure-mode http401WithBearerChallenge `
   --disable-local-auth true
 
 # CORRECT
-az search service update --name <svc> --resource-group <rg> \
+az search service update --name <svc> --resource-group <rg> `
   --disable-local-auth true
 ```
 
 **Verify after fix.** The deployment redeploys cleanly, and any unauthenticated request to the service returns the proper bearer challenge automatically:
 
-```bash
-curl -i https://<svc>.search.windows.net/indexes?api-version=2024-07-01
+```pwsh
+curl.exe -i "https://<svc>.search.windows.net/indexes?api-version=2024-07-01"
 # HTTP/1.1 401 Unauthorized
 # WWW-Authenticate: Bearer authorization_uri="https://login.microsoftonline.com/...", ...
 ```
@@ -183,12 +183,12 @@ pwsh ./infra/deploy.ps1 -RestoreFoundry
 
 **Recover with raw `az` CLI**:
 
-```bash
-az deployment sub create \
-  --name rag-kb-bicep-restore \
-  --location <region> \
-  --template-file infra/main.bicep \
-  --parameters infra/main.parameters.local.json \
+```pwsh
+az deployment sub create `
+  --name rag-kb-bicep-restore `
+  --location <region> `
+  --template-file infra/main.bicep `
+  --parameters infra/main.parameters.local.json `
   --parameters restoreFoundryFromSoftDelete=true
 ```
 
@@ -198,10 +198,10 @@ After the recovery deploy succeeds, **drop the switch / parameter** on subsequen
 
 Use this only when you intentionally want a clean-slate Foundry resource (new MI, all role assignments need re-wiring):
 
-```bash
-az cognitiveservices account purge \
-  --name aif-rag-<env>-<region> \
-  --resource-group rg-rag-<env>-<region> \
+```pwsh
+az cognitiveservices account purge `
+  --name aif-rag-<env>-<region> `
+  --resource-group rg-rag-<env>-<region> `
   --location <region>
 ```
 
@@ -213,9 +213,9 @@ Then `pwsh ./infra/deploy.ps1` (no switch). After the deploy:
 
 #### Verify after fix
 
-```bash
+```pwsh
 # Confirm the account is in 'Succeeded' provisioning state and the MI is populated
-az cognitiveservices account show --name aif-rag-<env>-<region> -g rg-rag-<env>-<region> \
+az cognitiveservices account show --name aif-rag-<env>-<region> -g rg-rag-<env>-<region> `
   --query "{state:properties.provisioningState, mi:identity.principalId}" -o json
 
 # Confirm no soft-deleted ghost exists with the same name in the region
@@ -490,23 +490,23 @@ Inner error: {
 
 **Diagnostic flow.** Run these checks against your environment (replace `<sub>`, `<rg>`, `<foundry>`, `<storage>` with values from `demo-ids.local.json`):
 
-```bash
+```pwsh
 # 1. Confirm the Foundry resource (which serves DI) has a system-assigned MI and capture its principal ID
-AIF_OBJID=$(az cognitiveservices account show --name <foundry> -g <rg> \
-  --query identity.principalId -o tsv)
-echo "Foundry MI: $AIF_OBJID"
+$AIF_OBJID = az cognitiveservices account show --name <foundry> -g <rg> `
+  --query identity.principalId -o tsv
+Write-Host "Foundry MI: $AIF_OBJID"
 
 # 2. Confirm shared-key is disabled on Storage (this pattern's default)
-az storage account show --name <storage> \
+az storage account show --name <storage> `
   --query "{allowSharedKeyAccess:allowSharedKeyAccess, bypass:networkRuleSet.bypass}" -o json
 
 # 3. Check whether the Foundry MI has any role on the storage account
-ST_RES_ID=$(az storage account show --name <storage> -g <rg> --query id -o tsv)
+$ST_RES_ID = az storage account show --name <storage> -g <rg> --query id -o tsv
 az role assignment list --assignee $AIF_OBJID --scope $ST_RES_ID -o table
 
 # 4. Confirm the blob actually exists (sign in as your az identity, which has
 #    Storage Blob Data Contributor from Phase 1.7)
-az storage blob list --account-name <storage> --container-name raw \
+az storage blob list --account-name <storage> --container-name raw `
   --auth-mode login --query "[].name" -o tsv
 ```
 
@@ -514,13 +514,13 @@ If step 3 returns no rows, that's the cause.
 
 **Fix.** Grant Storage Blob Data Reader to the Foundry MI:
 
-```bash
-AIF_OBJID=$(az cognitiveservices account show --name <foundry> -g <rg> --query identity.principalId -o tsv)
-ST_RES_ID=$(az storage account show --name <storage> -g <rg> --query id -o tsv)
+```pwsh
+$AIF_OBJID = az cognitiveservices account show --name <foundry> -g <rg> --query identity.principalId -o tsv
+$ST_RES_ID = az storage account show --name <storage> -g <rg> --query id -o tsv
 
-az role assignment create \
-  --assignee-object-id $AIF_OBJID --assignee-principal-type ServicePrincipal \
-  --role "Storage Blob Data Reader" \
+az role assignment create `
+  --assignee-object-id $AIF_OBJID --assignee-principal-type ServicePrincipal `
+  --role "Storage Blob Data Reader" `
   --scope $ST_RES_ID
 ```
 
@@ -660,11 +660,13 @@ The indexer's overall `success` status hides the failure entirely — there's no
 
 **Quick diagnostic.** Hit the service-stats endpoint — if `vectorIndexSize: 0` while `documentCount: N>0`, you're looking at silent vectorizer failure:
 
-```bash
-TOKEN=$(az account get-access-token --resource https://search.azure.com --query accessToken -o tsv)
-curl -sH "Authorization: Bearer $TOKEN" \
-  "https://<search-svc>.search.windows.net/servicestats?api-version=2024-07-01" \
-  | jq '.counters | {documentCount, vectorIndexSize, storageSize}'
+```pwsh
+$TOKEN = az account get-access-token --resource https://search.azure.com --query accessToken -o tsv
+Invoke-RestMethod `
+  -Uri "https://<search-svc>.search.windows.net/servicestats?api-version=2024-07-01" `
+  -Headers @{ Authorization = "Bearer $TOKEN" } `
+  | Select-Object -ExpandProperty counters `
+  | Select-Object documentCount, vectorIndexSize, storageSize
 ```
 
 **Cause — in order of likelihood:**
@@ -679,28 +681,27 @@ See [Azure OpenAI vectorizer reference — vectorizer parameters](https://learn.
 
 **Verify configuration.** Run these against your environment to nail down which of the three causes you're hitting:
 
-```bash
-SEARCH=<search-svc-name>
-TOKEN=$(az account get-access-token --resource https://search.azure.com --query accessToken -o tsv)
+```pwsh
+$SEARCH = "<search-svc-name>"
+$TOKEN  = az account get-access-token --resource https://search.azure.com --query accessToken -o tsv
+$headers = @{ Authorization = "Bearer $TOKEN" }
 
 # 1. Is a skillset attached to the indexer?
-curl -sH "Authorization: Bearer $TOKEN" \
-  "https://$SEARCH.search.windows.net/indexers/<indexer-name>?api-version=2024-07-01" \
-  | jq '{skillsetName, outputFieldMappings}'
+Invoke-RestMethod -Uri "https://$SEARCH.search.windows.net/indexers/<indexer-name>?api-version=2024-07-01" -Headers $headers `
+  | Select-Object skillsetName, outputFieldMappings
 # Expected:
 #   skillsetName: "skill-rag-embeddings"
 #   outputFieldMappings includes a mapping to "content_vector"
 # If skillsetName is null — cause #1. Skip to Fix § A.
 
 # 2. Does the skillset exist?
-curl -sH "Authorization: Bearer $TOKEN" \
-  "https://$SEARCH.search.windows.net/skillsets?api-version=2024-07-01" \
-  | jq '.value[].name'
+(Invoke-RestMethod -Uri "https://$SEARCH.search.windows.net/skillsets?api-version=2024-07-01" -Headers $headers).value `
+  | Select-Object -ExpandProperty name
 
 # 3. What role does the AI Search MI have on Foundry?
-SEARCH_OBJID=<AI Search system-assigned MI object ID>
-AIF_RES_ID=$(az cognitiveservices account show --name <foundry-resource> -g <rg> --query id -o tsv)
-az role assignment list --scope $AIF_RES_ID --fill-principal-name false \
+$SEARCH_OBJID = "<AI Search system-assigned MI object ID>"
+$AIF_RES_ID   = az cognitiveservices account show --name <foundry-resource> -g <rg> --query id -o tsv
+az role assignment list --scope $AIF_RES_ID --fill-principal-name false `
   --query "[?principalId=='$SEARCH_OBJID'].{role:roleDefinitionName}" -o table
 # Expected: Cognitive Services OpenAI User
 # If "Cognitive Services User" or nothing — cause #2 or #3. Skip to Fix § B.
@@ -708,24 +709,27 @@ az role assignment list --scope $AIF_RES_ID --fill-principal-name false \
 
 **Fix A — missing skillset (cause #1).** Create the skillset + update the indexer to reference it:
 
-```bash
+```pwsh
 # Create the AzureOpenAIEmbeddingSkill skillset
-curl -X PUT -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  "https://$SEARCH.search.windows.net/skillsets/skill-rag-embeddings?api-version=2024-07-01" \
-  -d '{
-    "name": "skill-rag-embeddings",
-    "skills": [{
-      "@odata.type": "#Microsoft.Skills.Text.AzureOpenAIEmbeddingSkill",
-      "name": "embed-content",
-      "context": "/document",
-      "resourceUri": "https://<foundry-resource>.openai.azure.com",
-      "deploymentId": "embedding",
-      "modelName": "text-embedding-3-large",
-      "dimensions": 3072,
-      "inputs": [{"name": "text", "source": "/document/content"}],
-      "outputs": [{"name": "embedding", "targetName": "content_vector_embedding"}]
-    }]
-  }'
+$skillsetBody = @{
+    name = "skill-rag-embeddings"
+    skills = @(@{
+        "@odata.type" = "#Microsoft.Skills.Text.AzureOpenAIEmbeddingSkill"
+        name          = "embed-content"
+        context       = "/document"
+        resourceUri   = "https://<foundry-resource>.openai.azure.com"
+        deploymentId  = "embedding"
+        modelName     = "text-embedding-3-large"
+        dimensions    = 3072
+        inputs        = @(@{ name = "text"; source = "/document/content" })
+        outputs       = @(@{ name = "embedding"; targetName = "content_vector_embedding" })
+    })
+} | ConvertTo-Json -Depth 10
+
+Invoke-RestMethod -Method Put `
+  -Uri "https://$SEARCH.search.windows.net/skillsets/skill-rag-embeddings?api-version=2024-07-01" `
+  -Headers @{ Authorization = "Bearer $TOKEN"; "Content-Type" = "application/json" } `
+  -Body $skillsetBody
 
 # Re-PUT the indexer with skillsetName + outputFieldMappings
 # (Get the current indexer with GET first, then add these two fields; PUT replaces the whole resource.)
@@ -737,10 +741,10 @@ For the manual portal walkthrough, see [03-deployment-manual.md § 4.3](./03-dep
 
 **Fix B — wrong / missing role (causes #2 and #3).** Apply the right role:
 
-```bash
-az role assignment create \
-  --assignee-object-id $SEARCH_OBJID --assignee-principal-type ServicePrincipal \
-  --role "Cognitive Services OpenAI User" \
+```pwsh
+az role assignment create `
+  --assignee-object-id $SEARCH_OBJID --assignee-principal-type ServicePrincipal `
+  --role "Cognitive Services OpenAI User" `
   --scope $AIF_RES_ID
 
 # (Optional) remove the misleading non-OpenAI role to keep the principal clean:
@@ -749,11 +753,13 @@ az role assignment create \
 
 **After either fix — force re-vectorization.** Reset the indexer (clears its high-water-mark so it reprocesses the existing documents that were committed with null vectors), then trigger a run:
 
-```bash
-curl -X POST -H "Authorization: Bearer $TOKEN" \
-  "https://$SEARCH.search.windows.net/indexers/<indexer-name>/reset?api-version=2024-07-01"
-curl -X POST -H "Authorization: Bearer $TOKEN" \
-  "https://$SEARCH.search.windows.net/indexers/<indexer-name>/run?api-version=2024-07-01"
+```pwsh
+Invoke-RestMethod -Method Post `
+  -Uri "https://$SEARCH.search.windows.net/indexers/<indexer-name>/reset?api-version=2024-07-01" `
+  -Headers @{ Authorization = "Bearer $TOKEN" }
+Invoke-RestMethod -Method Post `
+  -Uri "https://$SEARCH.search.windows.net/indexers/<indexer-name>/run?api-version=2024-07-01" `
+  -Headers @{ Authorization = "Bearer $TOKEN" }
 ```
 
 Wait 60–90 seconds (longer for large indexes) and re-check `vectorIndexSize` — it should now be > 0. Copilot Studio queries will start returning results immediately.
@@ -772,12 +778,12 @@ Wait 60–90 seconds (longer for large indexes) and re-check `vectorIndexSize` �
 
 **Fix.**
 
-```bash
-ST_RES_ID=$(az storage account show --name <st> -g <rg> --query id -o tsv)
+```pwsh
+$ST_RES_ID = az storage account show --name <st> -g <rg> --query id -o tsv
 
-az role assignment create \
-  --assignee-object-id $SEARCH_OBJID --assignee-principal-type ServicePrincipal \
-  --role "Storage Blob Data Reader" \
+az role assignment create `
+  --assignee-object-id $SEARCH_OBJID --assignee-principal-type ServicePrincipal `
+  --role "Storage Blob Data Reader" `
   --scope $ST_RES_ID
 ```
 
@@ -808,7 +814,7 @@ az role assignment create \
 
 **Fix.** Check tier, request body, and quota:
 
-```bash
+```pwsh
 # Check tier
 az search service show --name <srch> -g <rg> --query "sku.name"
 # Expected: "standard" or higher
@@ -824,7 +830,7 @@ az search service show --name <srch> -g <rg> --query "sku.name"
 
 **Fix.**
 
-```bash
+```http
 GET https://<srch>.search.windows.net/indexers/<name>?api-version=2024-07-01
 # Confirm "disabled": false
 ```
@@ -1006,7 +1012,7 @@ POST .../indexes/<name>/docs/search?api-version=2024-07-01
 
 **Indexer execution history:**
 
-```bash
+```http
 GET .../indexers/<name>/status?api-version=2024-07-01
 ```
 

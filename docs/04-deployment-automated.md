@@ -22,7 +22,7 @@ The automated deployment path. Provisions the Azure platform layer via Bicep, th
 | Storage account + `raw/` + `chunks/` containers | `modules/storage.bicep` | Permanent canonical store |
 | Azure AI Foundry resource | `modules/aifoundry.bicep` | Multi-service Cognitive Services account (`kind=AIServices`). Always deploys the `text-embedding-3-large` deployment (required by the AI Search vectorizer). The `gpt-4o` chat deployment is **opt-in**: set `chatModelName` in `main.parameters.local.json` to `gpt-4o` (or `gpt-4o-mini`) to provision it; leave it empty (the default) to skip — the locked design does not consume a chat completion model. The same Foundry account also serves Document Intelligence (`prebuilt-read` OCR) — no separate FormRecognizer resource is provisioned. |
 | AI Search Standard S1 | `modules/search.bicep` | Hybrid + semantic ranker enabled, system-assigned MI |
-| RBAC role assignments | `modules/rbac.bicep` | Search MI → `Cognitive Services OpenAI User` on Foundry; Search MI → `Storage Blob Data Reader` on Storage; Foundry MI → `Storage Blob Data Reader` on Storage (so DI can fetch `raw/<file>` via `urlSource`) |
+| RBAC role assignments | `modules/rbac.bicep` | Search MI → `Cognitive Services OpenAI User` on Foundry; Search MI → `Storage Blob Data Reader` on Storage; Foundry MI → `Storage Blob Data Reader` on Storage (so DI can fetch `raw/<file>` via `urlSource`); when `deployerPrincipalId` is set, also grants the deployer **Search Service Contributor** + **Search Index Data Contributor** on AI Search (for `post_deploy_search.py`) **and Key Vault Secrets Officer on Key Vault** (so you can write the DI-caller SP secret in [03b § F2.2 step 3](./03b-fabric-setup.md#f22-create-a-di-caller-service-principal-for-mssal-from-the-notebook) without a manual `az role assignment create`) |
 
 **What is NOT deployed by Bicep** (configured by the post-deploy script):
 
@@ -40,10 +40,10 @@ The automated deployment path. Provisions the Azure platform layer via Bicep, th
 ## Prerequisites
 
 - All boxes in [02-prerequisites.md § Pre-flight checklist](./02-prerequisites.md#15--pre-flight-checklist) confirmed
-- Azure CLI 2.60+ with Bicep extension: `az bicep install && az bicep upgrade`
-- PowerShell 7+ (`pwsh`)
-- Python 3.11+ with `pip`
+- Local developer tooling per [02-prerequisites.md § 0](./02-prerequisites.md#0--local-developer-tooling): **PowerShell 7+ (`pwsh`)**, **Azure CLI 2.60+** with the Bicep extension (`az bicep install`), **Python 3.11+** with `pip`
 - `az login` succeeded with an identity that has **Contributor + User Access Administrator** at the **subscription** scope (the deployment targets subscription scope and creates the RG)
+
+> All shell snippets below are PowerShell (`pwsh`). The deployment wrapper is `infra/deploy.ps1`. See [README § Shell convention](../README.md#shell-convention) for the project-wide convention.
 
 ---
 
@@ -149,12 +149,12 @@ The script reads the deployment outputs from `demo-ids.local.json` and issues RE
 
 > **Auth model.** Admin keys are disabled on the AI Search service. The script authenticates with an Entra bearer token via `DefaultAzureCredential` — resolves to your `az login` user when run locally, or to the pipeline's workload identity in CI. The caller needs **Search Service Contributor** + **Search Index Data Contributor** on the search service. If you set `deployerPrincipalId` in [Step 1](#step-1--configure-parameters), Bicep granted these for you; otherwise assign them manually:
 >
-> ```bash
-> SRCH_RES_ID=$(az search service show --name <svc> -g <rg> --query id -o tsv)
-> ME_OBJID=$(az ad signed-in-user show --query id -o tsv)
-> az role assignment create --assignee-object-id $ME_OBJID --assignee-principal-type User \
+> ```pwsh
+> $SRCH_RES_ID = az search service show --name <svc> -g <rg> --query id -o tsv
+> $ME_OBJID    = az ad signed-in-user show --query id -o tsv
+> az role assignment create --assignee-object-id $ME_OBJID --assignee-principal-type User `
 >   --role "Search Service Contributor"     --scope $SRCH_RES_ID
-> az role assignment create --assignee-object-id $ME_OBJID --assignee-principal-type User \
+> az role assignment create --assignee-object-id $ME_OBJID --assignee-principal-type User `
 >   --role "Search Index Data Contributor" --scope $SRCH_RES_ID
 > ```
 >
