@@ -3,3 +3,4 @@
 # in the internal source repo but never reach the GitHub snapshot.
 scripts/publish-to-github.ps1 export-ignore
 .gitattributes                 export-ignore
+CHANGELOG.md                   export-ignore
