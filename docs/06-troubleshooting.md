@@ -21,6 +21,7 @@ Common failure modes and fixes for the RAG knowledge-base pattern. Organized by 
 | Bicep deploy fails on `search-deploy` with `BadRequest: AuthOptions must be null if DisableLocalAuth is true` | Search service body has both `authOptions` and `disableLocalAuth: true` — the API rejects this combination | [§0.4](#04-bicep-deploy-fails-authoptions-must-be-null-if-disablelocalauth-is-true) |
 | Bicep deploy fails on `foundry-deploy` with `FlagMustBeSetForRestore: An existing resource ... has been soft-deleted` | The Foundry / Cognitive Services account name still exists in soft-deleted state from a prior deploy; ARM won't recreate without `restore: true` | [§0.5](#05-bicep-deploy-fails-flagmustbesetforrestore-soft-deleted-foundry--cognitive-services-account) |
 | Copilot Studio knowledge source save fails with "key not valid" | Trying to use admin / query key on a service that has `disableLocalAuth=true` | [§5.7](#57-knowledge-source-save-fails-with-key-not-valid) |
+| Agent works for the builder, but every other user gets "I don't have any information" / empty results | Knowledge source connection uses **Microsoft Entra ID Integrated** auth, which flows the **end-user** identity to AI Search; only users with **Search Index Data Reader** on the search service can retrieve | [§5.8](#58-agent-works-for-me-but-fails-for-other-users-or-i-had-to-add-search-index-data-reader-to-my-own-account) |
 | Pipeline activity fails on OCR call | DI auth or wrong endpoint / API version | [§3.1](#31-document-intelligence-call-fails) |
 | Pipeline chunk activity fails | Notebook auth or dependency missing | [§3.2](#32-chunking-notebook-fails) |
 | Control table not updating | Notebook → Lakehouse permission issue | [§3.3](#33-control-table-stuck) |
@@ -918,6 +919,40 @@ Manually run once to confirm health, then check scheduling settings.
 - For broad rollout: configure a Copilot Studio connection that uses a service principal with **Search Index Data Reader** — the agent then resolves the SP identity for every user.
 
 See [03-deployment-manual.md § 5.2](./03-deployment-manual.md#52-add-ai-search-as-a-knowledge-source) for the full configuration.
+
+### 5.8 Agent works for me but fails for other users (or: "I had to add Search Index Data Reader to my own account")
+
+**Symptom.** As the agent builder you can chat with the agent and get grounded answers, but other users (testers, end users, or even the same builder account signed into Teams instead of the Copilot Studio test pane) get **"I don't have any information"** or empty results. You may also notice that the very first query you ran failed until you granted **Search Index Data Reader** on the AI Search service to your **own user**.
+
+**Cause.** This is **by design**, not a missed configuration. Copilot Studio's AI Search knowledge source authenticates through a Power Platform **data connection**, not through an Azure managed identity. With local auth disabled on the search service (this pattern's default), the connection can only use one of two Entra auth types — and the default the UI nudges you toward is **Microsoft Entra ID Integrated**, which flows the **calling end-user's** token to AI Search:
+
+| Connection auth type | Identity that hits AI Search | RBAC requirement |
+|---|---|---|
+| **Microsoft Entra ID Integrated** | The calling **end user** (different per chat session) | **Every user** of the agent needs `Search Index Data Reader` on the search service |
+| **Service principal (Microsoft Entra ID application)** | A single SP stored in the connection | Only the **SP** needs `Search Index Data Reader`; end users need no direct search RBAC |
+| ~~Access Key~~ | n/a | Disabled in this pattern (`disableLocalAuth=true`) |
+
+There is no "agent managed identity" option for the AI Search knowledge source today — managed identities only cover the Azure-side hops in this pattern (Foundry → Search, Search → Storage / embeddings, indexer auth — see [`infra/modules/search.bicep`](../infra/modules/search.bicep) and [`infra/modules/rbac.bicep`](../infra/modules/rbac.bicep)). Copilot Studio runs in Power Platform and has no Azure managed identity surface for this binding.
+
+**Fix — pick the option that matches your audience:**
+
+- **Demo / pilot with a known, small set of users.** Keep **Microsoft Entra ID Integrated**. Grant **Search Index Data Reader** on the AI Search service to:
+  - an Entra **security group**, and add every tester / end user to that group (preferred — avoids drift), **or**
+  - each individual user account.
+
+  Role propagation can take up to 15 minutes. Until the role lands, the user sees the same "no information" / empty-results behavior.
+
+- **Broad / production rollout.** Switch the connection to **Service principal (Microsoft Entra ID application)** — see [03c — Phase C0.3](./03c-copilot-studio-setup.md#c03-ai-search-access-pattern) and [03c — Phase C2.1](./03c-copilot-studio-setup.md#c21-add-the-knowledge-source):
+  1. Create (or reuse) an Entra app registration + client secret.
+  2. Grant the SP **Search Index Data Reader** on the AI Search service — **once**.
+  3. In Copilot Studio, edit the AI Search knowledge source → **Edit connection** → recreate with **Service principal**, pasting the SP's tenant ID, client ID, and client secret.
+  4. Remove any per-user `Search Index Data Reader` assignments you added during demo — end users no longer need them.
+
+  The agent's access surface is then governed by **who you share the agent with** in Teams / M365 Copilot, not by per-user search RBAC. This is the recommended pattern for anything beyond a demo audience.
+
+**Is this a way to restrict who can use the agent?** Yes — `Microsoft Entra ID Integrated` is the *strongest* of the available options for a small audience because only users with explicit search-service RBAC can retrieve, even via the agent. It is intentional, not a missing config.
+
+**Reference.** [Add Azure AI Search as a knowledge source — Microsoft Copilot Studio docs](https://learn.microsoft.com/microsoft-copilot-studio/knowledge-azure-ai-search) (see the **Authentication** section for the full matrix of supported connection types and what each one means for end-user RBAC).
 
 ---
 

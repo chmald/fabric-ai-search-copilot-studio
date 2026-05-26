@@ -154,6 +154,8 @@ Reference: [Return citations](https://learn.microsoft.com/microsoft-copilot-stud
    - Check role propagation (up to 15 minutes), then refresh the Knowledge page
 3. If the row reports an unrecoverable error, see [Troubleshooting pointers](#troubleshooting-pointers) (broken connections can persist at the environment level).
 
+> **Heads-up — "Microsoft Entra ID Integrated" flows the end-user identity to AI Search.** If you pick this auth type, **every user who chats with the agent** must hold `Search Index Data Reader` on the search service — not just the builder. That is why the *very first* query you run as the builder may fail until you grant the role to your own account, and why other testers will see "I don't have any information" until they are granted the role too. This is by design, not a missing config. For anything beyond a small demo audience, switch the connection to **Service principal** (see [C0.3](#c03-ai-search-access-pattern)) so the SP holds the role once and end users need no direct search RBAC. Full FAQ in [06-troubleshooting.md § 5.8](./06-troubleshooting.md#58-agent-works-for-me-but-fails-for-other-users-or-i-had-to-add-search-index-data-reader-to-my-own-account).
+
 ### C2.4 (Optional) Virtual Network support
 
 If the AI Search service is locked down with a [private endpoint](https://learn.microsoft.com/azure/search/search-security-overview), Copilot Studio can still connect via the Power Platform VNet integration. Configure VNet support for your Power Platform environment first ([Set up Virtual Network support](https://learn.microsoft.com/power-platform/admin/vnet-support-setup-configure)), then proceed with the C2.1 steps unchanged. Out of scope for the default demo build.
