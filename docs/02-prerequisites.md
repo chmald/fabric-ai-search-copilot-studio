@@ -192,6 +192,22 @@ If the customer has shared Fabric capacity, confirm there is headroom; ingestion
 
 Initiate these admin asks **before** you start building so they're cleared by the time you're ready to publish.
 
+### Alternative — Azure AI Foundry agent path (03d)
+
+If you are building the agent on **Azure AI Foundry Agent Service** instead of Copilot Studio (see [03d](./03d-foundry-agent-setup.md) and the decision guide [07](./07-copilot-studio-vs-foundry.md)), the Layer-3 prerequisites change:
+
+| Requirement | Copilot Studio path (03c) | Foundry agent path (03d) |
+|---|---|---|
+| **Builder license/RBAC** | Copilot Studio Maker | **Azure AI Developer** (or Project Manager) on a Foundry project |
+| **Chat-model deployment** | Not required (host model answers) | **Required** — deploy `gpt-4o` (or `gpt-4o-mini`) on the `aif-rag-<env>` resource; confirm TPM quota |
+| **Fabric Data Agent** | Optional connector (premium) | A **published Fabric Data Agent** in the workspace (for structured-data Q&A); Fabric admin enables Copilot/Azure OpenAI + Data Agents |
+| **Runtime billing** | Copilot Studio **message capacity** / per-user license | **Azure consumption** (tokens + tool calls + search QU + Fabric capacity) |
+| **Channel** | Native combined Teams + M365 Copilot (GA) | **Custom engine agent** via M365 Agents SDK/Toolkit (**preview**) |
+| **End-user license** | Microsoft 365 Copilot | Microsoft 365 Copilot (**unchanged**) |
+| **Teams admin approval** | One-time per environment | One-time per app (same gate) |
+
+The end-user license is identical on both paths; the difference is **where the runtime is billed** (Power Platform message packs vs. Azure consumption) and **who builds it** (maker vs. Azure AI developer). This is the licensing lever for engagements blocked by premium-connector / message-capacity cost.
+
 ---
 
 ## 7 — Azure Document Intelligence
@@ -258,6 +274,20 @@ These are the role assignments required by the pattern's Entra-only auth posture
 | Building user | **Key Vault Secrets Officer** | Key Vault | Manage any secrets you add later for downstream connector credentials |
 
 > When using the automated path, set the `deployerPrincipalId` parameter in `infra/main.parameters.local.json` to your object ID; Bicep then assigns the two Search roles for you. The remaining builder roles still need to be granted manually (typically once per environment, not per deploy).
+
+### Foundry agent path (03d) — additional assignments
+
+Only needed if you build Layer 3 on **Azure AI Foundry Agent Service** instead of Copilot Studio. These are **incremental** to the machine-to-machine grants above (which stay in place — the index, indexer, and vectorizer are unchanged).
+
+| Principal | Role | Scope | Why | New? |
+|---|---|---|---|---|
+| **Foundry *project* managed identity** | **Search Index Data Reader** | AI Search service | The agent's **AI Search tool** runs read-only queries against `idx-rag-documents` | New |
+| **Foundry project MI / caller** | **Cognitive Services OpenAI User** | Foundry resource | Agent generates answers on the chat deployment | New |
+| **Caller user identity (on-behalf-of)** | **Viewer** (+ read/build on the model/Lakehouse) | Fabric workspace | Fabric Data Agent answers within the **user's** RLS/OLS scope (per-user HR-data trimming) | New |
+| Building user / deploy SP | **Azure AI Developer** (or **Project Manager**) | Foundry project | Create the agent, tools, connections, deployments | New |
+| Custom-engine-agent **bot** (Entra app) | **Azure AI User** (or the toolkit-configured project connection) | Foundry project / agent | Teams bot forwards user turns to the agent endpoint | New |
+
+> **Two-line summary of the RBAC delta:** grant the **Foundry project managed identity `Search Index Data Reader`** on the search service (so the agent can query the index), and flow the **caller's user identity (on-behalf-of)** into the Fabric Data Agent (so HR row-level security is enforced per user). Everything else is already in place from the base deploy or is a standard Foundry builder/bot grant. Full detail: [03d § RBAC summary](./03d-foundry-agent-setup.md#rbac-summary--high-level).
 
 ---
 

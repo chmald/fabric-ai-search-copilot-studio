@@ -48,8 +48,18 @@ def test_index_payload_has_required_fields():
     payload = pds.index_payload(SAMPLE_IDS)
     field_names = {f["name"] for f in payload["fields"]}
     required = {"id", "doc_id", "chunk_id", "content", "content_vector",
-                "doc_type", "source_uri", "page_start", "page_end", "ingest_ts", "metadata"}
+                "doc_type", "source_uri", "page_start", "page_end", "ingest_ts",
+                "group_ids", "metadata"}
     assert required.issubset(field_names), f"Missing fields: {required - field_names}"
+
+
+def test_index_payload_group_ids_is_filterable_string_collection():
+    """v1.2 chunk-level security trimming: group_ids must be a filterable
+    Collection(Edm.String) so query-time $filter trimming works."""
+    payload = pds.index_payload(SAMPLE_IDS)
+    group_ids = next(f for f in payload["fields"] if f["name"] == "group_ids")
+    assert group_ids["type"] == "Collection(Edm.String)"
+    assert group_ids.get("filterable") is True
 
 
 def test_index_payload_key_field_is_id():

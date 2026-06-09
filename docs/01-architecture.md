@@ -141,6 +141,7 @@ index: documents-rag
 ├── page_start        INT      retrievable
 ├── page_end          INT      retrievable
 ├── ingest_ts         DATETIMEOFFSET  filterable, sortable
+├── group_ids         Collection(STRING)  filterable, retrievable (Entra group IDs allowed to see this chunk — chunk-level security trimming; empty = all authenticated users)
 └── metadata          STRING   retrievable (JSON blob for extensibility)
 
 vectorizer: azureOpenAI
@@ -173,6 +174,19 @@ Copilot Studio's native AI Search knowledge source:
 5. Generates the answer with citation linkbacks to `source_uri`
 
 No code touches this path.
+
+### Layer 3 — alternative: Azure AI Foundry Agent Service (licensing-driven)
+
+Layer 3 has **two interchangeable implementations**. The Copilot Studio version above is the default. The **Azure AI Foundry Agent Service** version is the alternative — it grounds on the **same `idx-rag-documents` index** but runs the agent on Foundry and surfaces it in Teams / M365 Copilot as a **custom engine agent** (preview). Layers 1–2 are untouched; only this layer swaps.
+
+| Component | Role |
+|---|---|
+| **Foundry agent** (`agent-rag-kb`) | The agent definition on the Agent Service runtime. Owns query planning, tool routing, grounding, and citation assembly. Generates answers on **your** chat-model deployment (the chat deployment that is *opt-in* for the Copilot Studio path is **required** here). |
+| **Azure AI Search tool** | Grounds the agent on `idx-rag-documents` via a project connection using the **Foundry project managed identity** (granted **Search Index Data Reader**). Same hybrid + semantic + integrated-vectorizer retrieval as the Copilot Studio knowledge source. |
+| **Microsoft Fabric tool** (Fabric Data Agent) | Adds **structured-data** Q&A over a published Fabric Data Agent. Uses **on-behalf-of caller identity** so Fabric **row-/object-level security** is enforced per user — the cleanest per-user trimming story for sensitive (e.g. HR) data. |
+| **Custom engine agent channel** (Teams + M365 Copilot) | A Microsoft 365 Agents SDK / Toolkit wrapper (Entra bot) forwards user turns to the agent endpoint. **Preview** — re-verify before production. End users consume on their existing M365 Copilot license. |
+
+**Why pick this layer:** primarily **licensing** — connecting Azure AI Search *and* a Fabric Data Agent in Copilot Studio pulls them in as premium / message-capacity-billed connectors on top of M365 Copilot; the Foundry runtime shifts that to **Azure consumption**. Secondary reasons: richer orchestration (multi-tool routing, agentic actions) and unified Azure RBAC / Private Link. Full build steps in [03d-foundry-agent-setup.md](03d-foundry-agent-setup.md); the decision guide is [07-copilot-studio-vs-foundry.md](07-copilot-studio-vs-foundry.md).
 
 ---
 
@@ -226,12 +240,32 @@ No code touches this path.
   - Fabric Data Pipeline → Foundry resource: managed identity (where supported in your region; otherwise Key Vault secret)
   - AI Search → Blob: search service managed identity (Storage Blob Data Reader on the chunks/ container)
   - AI Search → Foundry resource: search service managed identity (Cognitive Services OpenAI User on the Foundry resource) — **this is what the integrated vectorizer uses**
-  - Copilot Studio → AI Search: API key (Copilot Studio's AI Search knowledge source requires admin or query key today)
+  - Copilot Studio → AI Search: **Microsoft Entra ID** (admin/query keys are disabled on the search service — see [03c § C0.3](03c-copilot-studio-setup.md)). With **Entra ID Integrated**, the data connection resolves to the **calling user's identity** at runtime, which is the prerequisite for document/chunk-level security trimming. **Service principal** is the production alternative (one stable identity).
+
+### Document-level (chunk-level) access control
+
+Because **each chunk is one index document**, "per-chunk security" *is* document-level access control. Azure AI Search offers four approaches ([overview](https://learn.microsoft.com/azure/search/search-document-level-access-overview)):
+
+| Approach | Status | When to use |
+|---|---|---|
+| **Security filters** (group/string trimming via a `group_ids` field) | **GA** | Default for this pattern — chunks are *derived* JSON, so source ACLs don't carry over; a push-model `group_ids` field is the reliable mechanism. |
+| POSIX ACL / RBAC scopes | Preview (2026-05-01) | Source is ADLS Gen2 / Blob with native ACL/RBAC; token-based query-time enforcement. |
+| Purview sensitivity labels | Preview | Strategic for OneLake/Fabric customers — indexer carries MIP labels; enforced via Entra + Purview policy. |
+| SharePoint M365 ACLs | Preview | Source is SharePoint M365 libraries/lists/pages. |
+
+**Pattern default — GA security filters (push model):**
+1. Add a filterable `group_ids` field (`Collection(Edm.String)`) to the index — done in `post_deploy_search.py`.
+2. At **chunk creation** (Fabric pipeline, [03b](03b-fabric-setup.md)), resolve the source document's permissions to Entra **group object IDs** and write them into every chunk's `group_ids` (`[]` = visible to all). Source ACLs do not survive OCR/chunking, so they must be propagated here.
+3. At **query time**, trim with an OData filter on the caller's group memberships:
+   `group_ids/any(g: search.in(g, '<comma-separated caller group IDs>'))`
+
+**Identity flow & honest nuance:** the **Entra ID Integrated** connection puts the **calling user's** token in front of AI Search. For the **preview** ACL/RBAC and Purview-label approaches, query-time enforcement against that token is **automatic**. For the **GA security-filter** approach the orchestration layer must supply the caller's group IDs as the `$filter` — this is demonstrable directly against the index/API ([05-testing.md § G](05-testing.md)); native Copilot Studio knowledge-source per-user filter injection is engagement-specific and not guaranteed out of the box.
+
 
 ### Secrets
 
 - All non-managed-identity credentials live in **Key Vault**
-- Copilot Studio's AI Search admin/query key is the most common secret; rotate quarterly minimum
+- No AI Search admin/query keys are used — local auth is disabled on the search service. The only Copilot Studio-side secret is the **service-principal client secret** when the connection uses the **Service principal** auth type (the **Entra ID Integrated** type stores no secret); rotate quarterly minimum
 
 ### Network
 
@@ -313,10 +347,10 @@ Everything else — pipeline activity wiring, indexer configuration, vectorizer 
 
 | Topic | Why | Where to go |
 |---|---|---|
-| Foundry orchestration | Not needed for knowledge-base Q&A — Copilot Studio fills this role | Add Foundry agent runtime when the engagement requires multi-agent routing, custom tool calling, or query triage |
+| Foundry orchestration | Not needed for knowledge-base Q&A — Copilot Studio fills this role by default | **Documented as the alternative Layer-3 path** — adopt the Foundry agent runtime ([03d](03d-foundry-agent-setup.md)) when the engagement requires multi-agent routing / custom tool calling / query triage **or** hits the Copilot Studio premium-connector licensing wall (AI Search + Fabric Data Agent). Trade-offs: [07](07-copilot-studio-vs-foundry.md) |
 | Custom field extraction | Different problem class (structured data into rows, not retrieval over prose) | Document Intelligence custom-extraction + Fabric / SQL ETL |
 | Cross-document reasoning | LLM-side concern, requires larger context or agentic chains | Add Foundry agent runtime + multi-document retrieval orchestration |
-| User-level personalization | Not in scope for shared knowledge base | Layer on top with Copilot Studio user variables + per-user filters |
+| User-level personalization | Not in scope for shared knowledge base (distinct from **security trimming**, which IS covered — see [Document-level access control](#document-level-chunk-level-access-control)) | Layer on top with Copilot Studio user variables + per-user filters |
 | Multi-tenancy | Single tenant per agent instance in this pattern | Deploy one agent per tenant; revisit if you need cross-tenant routing |
 | Streaming sub-minute ingestion | Fabric Data Pipelines is batch | Swap to Power Automate event-driven flow |
 
@@ -328,6 +362,8 @@ Everything else — pipeline activity wiring, indexer configuration, vectorizer 
 |---|---|---|
 | 1.0 | 2026-05-21 | Initial locked reference architecture |
 | 1.1 | 2026-05-22 | Artifact restructure: docs/ folder layout, Bicep IaC + dual deployment path, ADO pipeline scaffolding |
+| 1.2 | 2026-06-08 | Document/chunk-level access control: `group_ids` security-trim field added to index ([post_deploy_search.py](../scripts/post_deploy_search.py)) + Fabric chunk payload ([03b](03b-fabric-setup.md)) + access-control test category G ([05](05-testing.md)); corrected Copilot Studio → AI Search auth statements to **Entra ID** (admin/query keys are disabled) |
+| 1.3 | 2026-06-09 | Added the **Azure AI Foundry Agent Service** alternative for Layer 3 (licensing-driven — AI Search + Fabric Data Agent premium-connector blocker): new Layer-3 alternative subsection + variant diagram, new runbook [03d](03d-foundry-agent-setup.md), decision guide [07](07-copilot-studio-vs-foundry.md). Architecture decisions unchanged — Copilot Studio remains the default; Foundry agent is the documented alternative. |
 
 Future revisions track changes to the artifact (docs / IaC / scripts), not changes to the architectural decisions. Architectural changes get their own decision records.
 

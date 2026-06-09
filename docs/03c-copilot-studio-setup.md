@@ -78,6 +78,8 @@ Because admin / query keys are disabled on the AI Search service in this pattern
 
 Reference: [Add Azure AI Search as a knowledge source](https://learn.microsoft.com/microsoft-copilot-studio/knowledge-azure-ai-search).
 
+> **Document-level security trimming.** Because **Microsoft Entra ID Integrated** resolves to the calling user's identity, the user's token reaches AI Search — the prerequisite for chunk-level access control (see [01-architecture.md § Document-level access control](01-architecture.md#document-level-chunk-level-access-control)). Service-level access comes from the **Search Index Data Reader** grant above. Document-level trimming then comes from the `group_ids` security filter (GA) populated at chunk creation in [03b](03b-fabric-setup.md), validated in [05-testing.md § G](05-testing.md). **Nuance:** the GA security-filter approach needs the orchestration layer to inject a per-user `$filter` on `group_ids`; native Copilot Studio knowledge-source filter injection is engagement-specific. The preview ACL/RBAC-scope and Purview-label approaches enforce automatically from the user token instead.
+
 > **Connection lifecycle caveat.** Power Platform data connections live at the **environment** level — not per-agent. A misconfigured AI Search connection can break the AI Search add-knowledge dialog **for every agent in the environment** with no in-product way to delete it. Stick to the supported Entra auth types above. If you hit a broken-connection state, see [Troubleshooting pointers](#troubleshooting-pointers).
 
 ---

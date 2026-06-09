@@ -636,6 +636,14 @@ svc = BlobServiceClient(
 )
 container = svc.get_container_client(chunks_container)
 
+# Security trimming (chunk-level access control). Source ACLs do NOT survive
+# OCR/chunking, so the source document's permissions must be propagated into
+# every derived chunk here (push model). Resolve the source doc's permissions to
+# a list of Entra **group object IDs** allowed to see it; [] means "all
+# authenticated users". Implement resolve_source_group_ids() against your source
+# system (SharePoint/Graph, ADLS ACLs, a permissions table, etc.).
+doc_group_ids = resolve_source_group_ids(file_id)  # -> list[str]; [] = visible to all
+
 for i, c in enumerate(chunks):
     payload = {
         "id":         f"{file_id}-{i:04d}",
@@ -647,6 +655,7 @@ for i, c in enumerate(chunks):
         "page_start": c["pages"][0],
         "page_end":   c["pages"][-1],
         "ingest_ts":  spark.sql("SELECT current_timestamp() AS ts").first()["ts"].isoformat(),
+        "group_ids":  doc_group_ids,   # Entra group IDs permitted to see this chunk (security trimming)
         "metadata":   "{}",
     }
     blob_name = f"{chunks_prefix}{file_id}-{i:04d}.json"
@@ -946,7 +955,7 @@ In Azure portal → Storage account → containers:
 - `raw/` has subfolders `<file_id>/<original_filename>`
 - `chunks/` has subfolders `<file_id>/<file_id>-NNNN.json`
 
-Open one chunk JSON and verify it has `id`, `doc_id`, `chunk_id`, `content`, `source_uri`, `page_start`, `page_end`, `ingest_ts`, `metadata`.
+Open one chunk JSON and verify it has `id`, `doc_id`, `chunk_id`, `content`, `source_uri`, `page_start`, `page_end`, `ingest_ts`, `group_ids`, `metadata`. For security-trimmed corpora, confirm `group_ids` holds the expected Entra group object IDs (or `[]` for open documents).
 
 ### F9.3 Idempotency
 

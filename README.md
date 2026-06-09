@@ -52,10 +52,12 @@ See [docs/01-architecture.md](./docs/01-architecture.md) for the full design nar
 | [docs/02-prerequisites.md](./docs/02-prerequisites.md) | Subscriptions, licensing, RBAC, model availability + regional matrix, quotas, naming conventions |
 | [docs/03-deployment-manual.md](./docs/03-deployment-manual.md) | Manual / portal + CLI walkthrough — **Azure platform layer only** (Phase 1 foundation, Phase 4 AI Search index); best for first-time learning |
 | [docs/03b-fabric-setup.md](./docs/03b-fabric-setup.md) | **Fabric setup (always manual)** — workspace, identity, Lakehouse, OneLake shortcut, control table, connections, ingest pipeline. Required after either Azure deployment path. |
-| [docs/03c-copilot-studio-setup.md](./docs/03c-copilot-studio-setup.md) | **Copilot Studio setup (always manual)** — agent creation, AI Search knowledge source, generative answers, Teams + M365 Copilot publishing. Final step after Azure + Fabric. |
-| [docs/04-deployment-automated.md](./docs/04-deployment-automated.md) | Automated path — Bicep + post-deploy script + ADO pipeline for the **Azure layer**; Fabric still uses 03b, Copilot Studio still uses 03c |
+| [docs/03c-copilot-studio-setup.md](./docs/03c-copilot-studio-setup.md) | **Copilot Studio setup (always manual)** — agent creation, AI Search knowledge source, generative answers, Teams + M365 Copilot publishing. Final step after Azure + Fabric. **One of two Layer-3 options** (see 03d). |
+| [docs/03d-foundry-agent-setup.md](./docs/03d-foundry-agent-setup.md) | **Azure AI Foundry agent setup (alternative to 03c)** — builds the agent on the Foundry Agent Service runtime, connecting **AI Search + a Fabric Data Agent** as tools, published to Teams + M365 Copilot via the **preview** custom-engine-agent channel. Added for licensing-driven engagements (premium-connector / message-capacity blocker). Run **either** 03c **or** 03d. |
+| [docs/04-deployment-automated.md](./docs/04-deployment-automated.md) | Automated path — Bicep + post-deploy script + ADO pipeline for the **Azure layer**; Fabric still uses 03b, the agent uses 03c **or** 03d |
 | [docs/05-testing.md](./docs/05-testing.md) | Functional tests, retrieval quality, semantic-ranker validation, end-to-end demo script |
 | [docs/06-troubleshooting.md](./docs/06-troubleshooting.md) | Common failure modes and fixes |
+| [docs/07-copilot-studio-vs-foundry.md](./docs/07-copilot-studio-vs-foundry.md) | **Decision guide** — Copilot Studio vs. Azure AI Foundry Agent Service for Layer 3: side-by-side, licensing deep-dive, pros/cons, decision matrix, migration note |
 | `infra/main.bicep` + `infra/modules/*.bicep` | Bicep IaC for all Azure resources (RG, KV, Storage, Foundry + model deployments + built-in Document Intelligence, AI Search, RBAC) |
 | `infra/main.parameters.json` | Bicep parameters template — copy to `main.parameters.local.json` for your values (gitignored) |
 | `infra/deploy.ps1` | PowerShell wrapper for `az deployment sub create` + output capture |
@@ -76,7 +78,7 @@ You will need (full detail in [docs/02-prerequisites.md](./docs/02-prerequisites
 
 - **Azure subscription** with Contributor + User Access Administrator on the target resource group
 - **Microsoft Fabric tenant** with a workspace you can create artifacts in (Lakehouse + Data Pipelines)
-- **Copilot Studio license** for the building user (Maker access)
+- **Copilot Studio license** for the building user (Maker access) — **for the 03c agent path**. For the **03d Foundry agent path** instead need **Azure AI Developer** (or Project Manager) RBAC on a Foundry project; end users still consume on their **Microsoft 365 Copilot** license on both paths.
 - **Azure AI Foundry resource** (the unified Azure AI Services resource, `kind=AIServices`) with capacity for **one embedding deployment** (e.g. `text-embedding-3-large`). A chat completion deployment (e.g. `gpt-4o`) is **opt-in** — the locked design (Copilot Studio + AI Search + integrated vectorizer) does not consume a chat completion model; Copilot Studio uses its own host model for generative answers. The same Foundry resource also exposes **Document Intelligence** (`prebuilt-read` OCR) from its built-in Cognitive Services surface — no separate Document Intelligence / FormRecognizer resource is required. Foundry is the strategic model-gateway resource and supersedes the legacy standalone Azure OpenAI resource for new deployments.
 - **Region alignment**: all services (AI Search, Azure AI Foundry — which hosts both the OpenAI models and the Document Intelligence OCR endpoint — Blob, Fabric) ideally in the **same Azure region**, or at least the same data residency boundary
 - **AI Search**: **Standard (S1) or higher** SKU (semantic ranker is not available on Basic)
@@ -131,7 +133,7 @@ It does **not** use Foundry's agent runtime (Agent Service, Hub, Projects) — t
 | Foundry capability | Recommendation | When to use |
 |---|---|---|
 | **Model gateway + Document Intelligence** (Azure AI Foundry resource hosting OpenAI + catalog models + the Cognitive Services API surface including DI prebuilt-read) | **Default for this pattern** | The strategic Azure direction for all new AI model deployments; single multi-service account avoids a separate FormRecognizer resource and a duplicate managed identity; same OpenAI-compatible endpoint as legacy standalone AOAI; flexibility to add non-OpenAI catalog models later under one resource |
-| **Agent runtime** (Foundry Agent Service / Hub / Projects) | **Add when needed** | When the agent must do **more than knowledge-base Q&A** — multi-agent routing, custom tool calling, query triage logic, or non-standard grounding. For pure knowledge-base Q&A — the focus of this pattern — Copilot Studio's native AI Search knowledge source delivers retrieval + grounding + citation without code. Adding Foundry agent runtime is an additional infrastructure + code layer; only adopt it when an engagement need demands it. |
+| **Agent runtime** (Foundry Agent Service / Hub / Projects) | **Add when needed** | Adopt when an engagement need demands it: (a) the agent must do **more than knowledge-base Q&A** — multi-agent routing, custom tool calling, query triage; or (b) **licensing** — Copilot Studio surfaces a premium-connector / message-capacity cost when connecting Azure AI Search **and** a Fabric Data Agent, and moving the runtime to Foundry shifts that to Azure consumption while end users stay on their M365 Copilot license. For pure knowledge-base Q&A with a small audience, Copilot Studio's native AI Search knowledge source delivers retrieval + grounding + citation without code. The Foundry agent path is fully documented in **[docs/03d-foundry-agent-setup.md](./docs/03d-foundry-agent-setup.md)**; the trade-off analysis is in **[docs/07-copilot-studio-vs-foundry.md](./docs/07-copilot-studio-vs-foundry.md)**. Note that **publishing a Foundry agent into M365/Teams is currently preview.** |
 
 ---
 
@@ -144,7 +146,7 @@ Two paths produce the same end-state for the **Azure platform layer**:
 | **Manual** — portal + CLI walkthrough | Learning the architecture; one-off demo labs; first time with this pattern | [docs/03-deployment-manual.md](./docs/03-deployment-manual.md) |
 | **Automated** — Bicep + post-deploy script | Repeated deployments; CI/CD; dev + prod environment parity | [docs/04-deployment-automated.md](./docs/04-deployment-automated.md) |
 
-**Both paths require [docs/03b-fabric-setup.md](./docs/03b-fabric-setup.md) for the Fabric layer and [docs/03c-copilot-studio-setup.md](./docs/03c-copilot-studio-setup.md) for the Copilot Studio agent**. Both Fabric and Copilot Studio are always manual — Fabric workspaces, Lakehouses, OneLake shortcuts, and Data Pipelines have no Bicep/Terraform surface today, and Copilot Studio is Power Platform (not Azure) with no IaC surface. [docs/00-reproduce-this-demo.md](./docs/00-reproduce-this-demo.md) is the orchestrator that walks all three layers (Azure platform → Fabric → Copilot Studio) through Parts A–F.
+**Both paths require [docs/03b-fabric-setup.md](./docs/03b-fabric-setup.md) for the Fabric layer and then a Layer-3 agent build — [docs/03c-copilot-studio-setup.md](./docs/03c-copilot-studio-setup.md) (Copilot Studio) *or* [docs/03d-foundry-agent-setup.md](./docs/03d-foundry-agent-setup.md) (Azure AI Foundry Agent Service)**. Pick the agent runtime with [docs/07-copilot-studio-vs-foundry.md](./docs/07-copilot-studio-vs-foundry.md). Fabric and both agent paths are always manual — Fabric workspaces, Lakehouses, OneLake shortcuts, and Data Pipelines have no Bicep/Terraform surface today; Copilot Studio is Power Platform (no IaC); and the Foundry agent + its M365/Teams custom-engine-agent channel are portal/Toolkit-built. [docs/00-reproduce-this-demo.md](./docs/00-reproduce-this-demo.md) is the orchestrator that walks all three layers (Azure platform → Fabric → agent) through Parts A–F.
 
 ---
 
@@ -164,4 +166,4 @@ Decision provenance and change log live in [CHANGELOG.md](./CHANGELOG.md) — in
 
 ---
 
-*Last updated: 2026-05-26*
+*Last updated: 2026-06-09*

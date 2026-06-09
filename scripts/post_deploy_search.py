@@ -158,6 +158,7 @@ def index_payload(ids: dict[str, Any]) -> dict[str, Any]:
             {"name": "page_start",    "type": "Edm.Int32",  "retrievable": True},
             {"name": "page_end",      "type": "Edm.Int32",  "retrievable": True},
             {"name": "ingest_ts",     "type": "Edm.DateTimeOffset", "filterable": True, "sortable": True, "retrievable": True},
+            {"name": "group_ids",     "type": "Collection(Edm.String)", "filterable": True, "retrievable": True},
             {"name": "metadata",      "type": "Edm.String", "retrievable": True},
         ],
         "vectorSearch": {

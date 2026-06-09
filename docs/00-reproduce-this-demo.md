@@ -75,7 +75,7 @@ Two paths produce the same end-state:
 | **A1. Manual / portal + CLI** | Learning the architecture; one-off demo labs; first time you touch this pattern | [03-deployment-manual.md](./03-deployment-manual.md) |
 | **A2. Automated / Bicep** | Repeated deployments; CI/CD; multiple environments (dev/prod); production stand-up | [04-deployment-automated.md](./04-deployment-automated.md) |
 
-Both paths skip Fabric workspace creation and Copilot Studio agent configuration in their respective deep-dives — each is **always manual** (no Bicep / IaC surface exists today) and each has its own dedicated document: Fabric in [03b-fabric-setup.md](./03b-fabric-setup.md), Copilot Studio in [03c-copilot-studio-setup.md](./03c-copilot-studio-setup.md). Both layers are identical regardless of which Azure path you chose in A1 / A2.
+Both paths skip Fabric workspace creation and Layer-3 agent configuration in their respective deep-dives — each is **always manual** (no Bicep / IaC surface exists today) and each has its own dedicated document: Fabric in [03b-fabric-setup.md](./03b-fabric-setup.md), and the agent in [03c-copilot-studio-setup.md](./03c-copilot-studio-setup.md) (Copilot Studio) **or** [03d-foundry-agent-setup.md](./03d-foundry-agent-setup.md) (Azure AI Foundry). Both layers are identical regardless of which Azure path you chose in A1 / A2.
 
 ---
 
@@ -125,7 +125,16 @@ What 03b covers end-to-end (Phases F0–F10):
 
 ---
 
-## Part D — Build the Copilot Studio agent (manual — both paths)
+## Part D — Build the agent (manual — both paths)
+
+Layer 3 has **two interchangeable implementations** — build **one**. Neither is expressible in Bicep. Pick with [07-copilot-studio-vs-foundry.md](./07-copilot-studio-vs-foundry.md):
+
+| Option | Runtime | Best for | Doc |
+|---|---|---|---|
+| **D-CS. Copilot Studio** | Power Platform | Lowest-code, fully GA, small audience or CS capacity already licensed | [03c-copilot-studio-setup.md](./03c-copilot-studio-setup.md) |
+| **D-FA. Azure AI Foundry agent** | Foundry Agent Service | **Licensing blocker** (AI Search + Fabric Data Agent premium connectors), structured-data RLS, richer orchestration — accepts **preview** M365/Teams publishing | [03d-foundry-agent-setup.md](./03d-foundry-agent-setup.md) |
+
+### Option D-CS — Copilot Studio
 
 Copilot Studio agents are not expressible in Bicep (Power Platform, not Azure). The full step-by-step is in its own document: **[03c-copilot-studio-setup.md](./03c-copilot-studio-setup.md)**.
 
@@ -141,7 +150,25 @@ What 03c covers end-to-end (Phases C0–C6):
 | C5 | Publish the agent and add the **Teams and Microsoft 365 Copilot** channel (single combined channel); set Availability options for the right audience |
 | C6 | End-user validation from Teams + M365 Copilot |
 
+### Option D-FA — Azure AI Foundry agent (alternative)
+
+Built on the Foundry Agent Service runtime, grounding on the **same** `idx-rag-documents` index plus an optional **Fabric Data Agent** for structured data, published to Teams + M365 Copilot as a **custom engine agent (preview)**. Full step-by-step: **[03d-foundry-agent-setup.md](./03d-foundry-agent-setup.md)**.
+
+What 03d covers end-to-end (Phases D0–D6):
+
+| 03d Phase | What you build |
+|---|---|
+| D0 | Prerequisites + the **licensing delta**; chat-model deployment becomes **required**; publish the Fabric Data Agent |
+| D1 | Foundry project + chat (`gpt-4o`) deployment |
+| D2 | AI Search tool connection — project MI granted **Search Index Data Reader** |
+| D3 | Fabric Data Agent tool — **on-behalf-of** caller identity (per-user RLS) |
+| D4 | Agent instructions, grounding guardrail, security trimming |
+| D5 | Test in the Foundry playground |
+| D6 | Publish to M365 Copilot + Teams via the M365 Agents Toolkit (**preview**) |
+
 ### Part D validation
+
+> Run the checklist for whichever option you built. The 03d-specific checklist is in [03d § Validation checklist](./03d-foundry-agent-setup.md#validation-checklist). The boxes below are written for the 03c (Copilot Studio) path.
 
 - [ ] Knowledge source bound to `idx-rag-documents` via **Microsoft Entra ID Integrated** or **Service principal** (not Access Key) and showing **Status: Ready** ([03c § C2](./03c-copilot-studio-setup.md#phase-c2--bind-the-ai-search-knowledge-source))
 - [ ] Both **Allow the AI to use its own general knowledge** and **Allow ungrounded responses** are **Off** ([03c § C3](./03c-copilot-studio-setup.md#phase-c3--configure-grounding-behavior))
@@ -187,10 +214,10 @@ Once Parts A–D validate green, follow [05-testing.md](./05-testing.md):
 | A | Deployment path chosen (manual or Bicep) | [ ] |
 | B | Azure platform layer deployed; AI Search indexer succeeded | [ ] |
 | C | Fabric workspace + Lakehouse + pipeline built; control table populated | [ ] |
-| D | Copilot Studio agent built + published to Teams + M365 Copilot | [ ] |
+| D | Agent built (Copilot Studio **or** Foundry) + published to Teams + M365 Copilot | [ ] |
 | E | Golden-set retrieval evaluation passing thresholds | [ ] |
 | F | (Optional) ADO pipeline wired for CI/CD | [ ] |
 
 ---
 
-*Last updated: 2026-05-22*
+*Last updated: 2026-06-09*

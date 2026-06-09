@@ -16,6 +16,7 @@ End-to-end test plan for the RAG knowledge-base pattern. Run these tests after [
 | **D. Semantic ranker A/B** | Quantify the lift from semantic ranker vs hybrid-only | Once per pattern instance |
 | **E. End-to-end demo script** | The lived user experience in Teams / M365 Copilot | Day-of-demo dry run |
 | **F. Regression** | Cumulative checks before any production change | After every change to chunking, index schema, or agent config |
+| **G. Document-level security** | Chunk-level access trimming returns only documents the caller is authorized to see | After any change to `group_ids` population or the security model |
 
 ---
 
@@ -321,6 +322,58 @@ Treat the testing harness as a living artifact in the repo or in the Fabric work
 
 ---
 
+## G — Document-level security tests
+
+Validates **chunk-level access trimming** (the GA security-filter approach — see [01-architecture.md § Document-level access control](01-architecture.md#document-level-chunk-level-access-control)). Each chunk carries a `group_ids` field of Entra group object IDs; a query-time `$filter` returns only chunks the caller's groups are allowed to see. This is the **runnable "working example"** of per-chunk security against the AI Search API — independent of any Copilot Studio filter injection.
+
+**Preconditions**
+- Index has the `group_ids` field (`Collection(Edm.String)`, filterable) from [post_deploy_search.py](../scripts/post_deploy_search.py).
+- At least two chunks indexed: one restricted to a group (e.g. `GROUP_HR = "11111111-1111-1111-1111-111111111111"`), one open (`group_ids: []`).
+- Set `$SEARCH` to the service endpoint and acquire a bearer token (`az account get-access-token --resource https://search.azure.com`).
+
+### G1. In-group caller sees the restricted chunk
+
+```bash
+# Caller IS a member of GROUP_HR → restricted chunk is returned.
+TOKEN=$(az account get-access-token --resource https://search.azure.com --query accessToken -o tsv)
+CALLER_GROUPS="11111111-1111-1111-1111-111111111111"   # caller's Entra group IDs (comma-separated)
+
+curl -s -X POST "$SEARCH/indexes/documents-rag/docs/search?api-version=2024-07-01" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d "{
+        \"search\": \"*\",
+        \"filter\": \"group_ids/any(g: search.in(g, '$CALLER_GROUPS')) or group_ids/any() eq false\",
+        \"select\": \"id,doc_id,group_ids\"
+      }" | jq '.value[].id'
+```
+
+**Pass:** the restricted chunk's `id` appears in the results (plus any open chunks).
+
+### G2. Out-of-group caller is trimmed
+
+```bash
+# Caller is NOT a member of GROUP_HR → restricted chunk is trimmed, open chunk still returned.
+CALLER_GROUPS="99999999-9999-9999-9999-999999999999"   # unrelated group
+
+curl -s -X POST "$SEARCH/indexes/documents-rag/docs/search?api-version=2024-07-01" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d "{
+        \"search\": \"*\",
+        \"filter\": \"group_ids/any(g: search.in(g, '$CALLER_GROUPS')) or group_ids/any() eq false\",
+        \"select\": \"id,doc_id,group_ids\"
+      }" | jq '.value[].id'
+```
+
+**Pass:** the restricted chunk's `id` is **absent**; the open chunk (`group_ids: []`) is still present.
+
+> **Filter explained.** `group_ids/any(g: search.in(g, '<caller groups>'))` returns chunks sharing at least one group with the caller. `group_ids/any() eq false` admits **open** chunks (empty `group_ids` = visible to all). Drop the second clause if every chunk must be explicitly group-scoped (deny-by-default).
+
+### G3. Empty-permission default behaves as intended
+
+Confirm a chunk written with `group_ids: []` is treated as open (G1/G2 both return it). If your security model is deny-by-default, change the chunk pipeline to always populate `group_ids` and remove the `group_ids/any() eq false` clause; then re-run G1/G2 and confirm `[]` chunks are trimmed for everyone.
+
+---
+
 ## When to re-run what
 
 | Trigger | Tests to run |
@@ -329,6 +382,7 @@ Treat the testing harness as a living artifact in the repo or in the Fabric work
 | New corpus uploaded | A + B + C |
 | Chunking strategy change | A + B + C + D |
 | Index schema change | B + C |
+| Security model / `group_ids` change | G + B |
 | Embedding model change | B + C + D |
 | Agent prompt / config change | E |
 | Quarterly health check | C + B |

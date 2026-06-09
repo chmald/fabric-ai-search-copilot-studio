@@ -6,7 +6,36 @@ Entries are listed newest-first.
 
 ---
 
-## 2026-05-26
+## 2026-06-09
+
+### v1.3 — Azure AI Foundry Agent Service as the alternative Layer-3 path (licensing-driven)
+Added a second, interchangeable implementation of **Layer 3 (the conversational layer)**: the agent can now be built on **Azure AI Foundry Agent Service** instead of Copilot Studio, connecting **Azure AI Search** *and* a **Fabric Data Agent** as native Foundry tools and publishing to Teams + M365 Copilot as a **custom engine agent (preview)**. Driven by an **HR knowledge-base scenario**, where Copilot Studio publishing surfaced an additional-licensing requirement — an agent connecting AI Search + a Fabric Data Agent pulls them in as **premium / message-capacity-billed connectors** on top of M365 Copilot. Moving the runtime to Foundry shifts that cost to **Azure consumption** while end users keep consuming on their existing M365 Copilot license. Layers 1–2 (Fabric ingest, Blob, AI Search index, Foundry model gateway) are **unchanged** — only the conversational layer swaps, so the two paths are interchangeable without re-indexing.
+
+**The architectural decisions are unchanged** — Copilot Studio remains the **default** for low-code knowledge-base Q&A; the Foundry agent path is the documented **alternative** for licensing-blocked, structured-data-RLS, or richer-orchestration engagements. Publishing a Foundry agent into M365/Teams is **preview** — flagged throughout as "verify at build time."
+
+Changes:
+- **`docs/03d-foundry-agent-setup.md`** (new) — full alternative runbook (Phases D0–D6): licensing delta, required chat-model deployment, AI Search tool (project MI → **Search Index Data Reader**), Fabric Data Agent tool (**on-behalf-of** caller identity → Fabric RLS), agent authoring + security trimming, playground test, M365/Teams custom-engine-agent publishing (preview), a **high-level RBAC summary**, and a validation checklist.
+- **`docs/07-copilot-studio-vs-foundry.md`** (new) — decision guide: shared-substrate framing, side-by-side table, **licensing deep-dive** (the licensing driver + honest cost-shift caveats), pros/cons for each runtime, decision matrix, and a Layer-3-only migration note.
+- **`README.md`** — file-index rows for 03d + 07; the Foundry note's **Agent runtime** row now cites the licensing driver and links 03d/07; deployment-paths + quick-start prereqs updated to present the 03c-or-03d agent choice.
+- **`docs/01-architecture.md`** — new **Layer 3 alternative** subsection (component table) + a variant Mermaid diagram, updated "intentionally left out" Foundry row, and versioning row 1.3.
+- **`docs/02-prerequisites.md`** — § 6 **Alternative — Azure AI Foundry agent path** prereq table; § 10 **Foundry agent path — additional assignments** RBAC table with the two-line RBAC-delta summary.
+- **`docs/00-reproduce-this-demo.md`** — Part D restructured to present the **D-CS / D-FA** Layer-3 choice (03d phase table D0–D6), single-page checklist + Part A references updated.
+
+## 2026-06-08
+
+### v1.2 — Document/chunk-level access control (security trimming)
+Added a chunk-level access-control story to the pattern, driven by an HR knowledge-base scenario (per-chunk security question in the vector index). **Per-chunk security = document-level access control** because each chunk is one AI Search index document. Of the four Azure AI Search approaches ([overview](https://learn.microsoft.com/azure/search/search-document-level-access-overview)), the pattern adopts **GA security filters** as the production baseline (chunks are *derived* JSON, so source ACLs don't survive OCR/chunking — a push-model `group_ids` field is the reliable mechanism); Purview sensitivity labels (preview) are noted as the strategic OneLake/Fabric-aligned follow-on.
+
+Changes:
+- **`scripts/post_deploy_search.py`** — added `group_ids` field (`Collection(Edm.String)`, filterable + retrievable) to the index schema.
+- **`docs/03b-fabric-setup.md`** — chunk JSON payload now carries `group_ids`, populated from the source document's resolved Entra group object IDs (`resolve_source_group_ids(file_id)`; `[]` = visible to all).
+- **`docs/01-architecture.md`** — added schema field, a "Document-level (chunk-level) access control" subsection under Trust boundaries (4 approaches, GA-vs-preview, push-model trim, derived-chunk caveat, Copilot Studio per-user filter nuance), cross-ref from the "intentionally left out" table, and Versioning row 1.2.
+- **`docs/03c-copilot-studio-setup.md`** — added a security-trimming note under § C0.3 tying **Entra ID Integrated** (calling-user identity) to `group_ids` trimming, with the honest Copilot Studio filter-injection nuance.
+- **`docs/05-testing.md`** — new **test category G (document-level security)** with runnable AI Search `$filter` queries (in-group sees / out-of-group trimmed) — the demonstrable "working example" at the index/API layer.
+
+**Correction:** prior wording in `01-architecture.md` ("Copilot Studio → AI Search: API key / admin/query key") was stale. The locked design **disables local auth** on AI Search and uses **Microsoft Entra ID** for the Copilot Studio data connection (Entra ID Integrated or Service principal), as already documented in 03c § C0.3. Both the Identity and Secrets bullets were corrected.
+
+
 
 ### Deployer Key Vault Secrets Officer grant added to Bicep
 `infra/modules/rbac.bicep` now grants `deployerPrincipalId` the **Key Vault Secrets Officer** role on the Key Vault (gated by the same `!empty(deployerPrincipalId)` check as the Search role grants). Without this, the operator hits `403 Forbidden` on `az keyvault secret set` when storing the DI-caller SP secret in [docs/03b-fabric-setup.md § F2.2 step 3](./docs/03b-fabric-setup.md). The manual path in [docs/03-deployment-manual.md §§ 1.2 and 1.7](./docs/03-deployment-manual.md) now includes the explicit `az role assignment create` command for the same grant.
