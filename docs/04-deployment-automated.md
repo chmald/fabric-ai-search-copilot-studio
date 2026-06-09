@@ -239,9 +239,9 @@ See [00-reproduce-this-demo.md § Part F](./00-reproduce-this-demo.md) for ADO w
 | Scenario | Recommended path |
 |---|---|
 | First time touching this pattern | Manual ([03-deployment-manual.md](./03-deployment-manual.md)) — better learning |
-| Customer demo / one-off lab | Manual — easier to talk through component-by-component |
+| Demo / one-off lab | Manual — easier to talk through component-by-component |
 | Stand up dev + prod environments | Automated — Bicep is faster + ensures parity |
-| Customer wants the IaC | Automated — hand them the Bicep + ADO pipeline |
+| You want the IaC | Automated — the Bicep + ADO pipeline are ready to use |
 | CI-driven deployments | Automated only |
 | Tearing down / rebuilding repeatedly | Automated — `az group delete` + re-run |
 

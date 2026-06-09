@@ -98,7 +98,7 @@ DI is served by the Foundry resource you create in § 1.5. The Fabric OCR notebo
 
 ### 1.5 Create Azure AI Foundry resource + OpenAI deployments
 
-> **Why a Foundry resource, not a standalone Azure OpenAI resource?** The Azure AI Foundry resource (`kind=AIServices`) is the strategic Microsoft model-gateway resource and a multi-service Cognitive Services account. It hosts OpenAI deployments (`https://<name>.openai.azure.com/` — used unchanged by the AI Search `azureOpenAI` vectorizer) **and** the Document Intelligence `prebuilt-read` endpoint used by the Fabric OCR notebook (`https://<name>.cognitiveservices.azure.com/`) from the same resource, single MI, single RBAC surface. Foundry's agent runtime (Agent Service / Hub / Projects) is **not** used here — Copilot Studio fills the agent role; add Foundry agent runtime only for engagements that need multi-agent routing, custom tool calling, or query triage beyond knowledge-base Q&A.
+> **Why a Foundry resource, not a standalone Azure OpenAI resource?** The Azure AI Foundry resource (`kind=AIServices`) is the strategic Microsoft model-gateway resource and a multi-service Cognitive Services account. It hosts OpenAI deployments (`https://<name>.openai.azure.com/` — used unchanged by the AI Search `azureOpenAI` vectorizer) **and** the Document Intelligence `prebuilt-read` endpoint used by the Fabric OCR notebook (`https://<name>.cognitiveservices.azure.com/`) from the same resource, single MI, single RBAC surface. Foundry's agent runtime (Agent Service / Hub / Projects) is **not** used here — Copilot Studio fills the agent role; add Foundry agent runtime only for deployments that need multi-agent routing, custom tool calling, or query triage beyond knowledge-base Q&A.
 
 In the Azure portal:
 
@@ -107,7 +107,7 @@ In the Azure portal:
 3. Pricing tier: **Standard S0**
 4. After deployment: open **Azure AI Foundry portal** (foundry.azure.com) → select the resource → **Models + endpoints → Deploy a model**:
    - Deploy `text-embedding-3-large` → name it `embedding` (set capacity to 10K TPM for demo)
-   - **(Optional)** Deploy `gpt-4o` → name it `chat`. The locked design does **not** consume a chat completion model — Copilot Studio uses its own host model for generative answers. Only deploy a chat model when an engagement explicitly needs a chat endpoint (custom app code, Foundry agent runtime, BYOM Copilot Studio).
+   - **(Optional)** Deploy `gpt-4o` → name it `chat`. The locked design does **not** consume a chat completion model — Copilot Studio uses its own host model for generative answers. Only deploy a chat model when a deployment explicitly needs a chat endpoint (custom app code, Foundry agent runtime, BYOM Copilot Studio).
    - (Optional) browse the Foundry catalog for non-OpenAI models if you plan to extend later; this pattern only requires the embedding deployment above
 5. Confirm endpoints — the **Endpoints** view shows both host names for this single resource:
    - `https://aif-rag-demo-eus.openai.azure.com/` — used by the AI Search OpenAI vectorizer + embedding skill
@@ -224,7 +224,7 @@ Fabric workspace identity → Blob (Data Contributor) and DI-caller SP → Found
 - [ ] AI Search system-assigned MI has both role assignments visible in IAM (**Cognitive Services OpenAI User** on Foundry, **Storage Blob Data Reader** on Storage). Verify the OpenAI variant of the role specifically — a plain `Cognitive Services User` assignment will let the indexer run but produce zero-vector documents.
 - [ ] Foundry resource system-assigned MI has **Storage Blob Data Reader** on the storage account (required for Document Intelligence `urlSource` fetches)
 - [ ] You have **Search Service Contributor** + **Search Index Data Contributor** on the AI Search service
-- [ ] Foundry resource has the `embedding` (text-embedding-3-large) deployment. A `chat` (gpt-4o) deployment is **optional** — only deploy one if you've opted in for an engagement-specific extension (the locked design does not require it).
+- [ ] Foundry resource has the `embedding` (text-embedding-3-large) deployment. A `chat` (gpt-4o) deployment is **optional** — only deploy one if you've opted in for a deployment-specific extension (the locked design does not require it).
 - [ ] Foundry resource exposes **both** host names: `<name>.openai.azure.com` (OpenAI / vectorizer) and `<name>.cognitiveservices.azure.com` (Document Intelligence and other Cognitive Services)
 - [ ] Key Vault exists and you have **Key Vault Secrets Officer** on it (used later if any secret-based fallback becomes necessary; this pattern stores no API keys in it)
 
@@ -524,7 +524,7 @@ Once Phases 1 + 4 validate green and Fabric ([03b](./03b-fabric-setup.md)) + Cop
 - [ ] Copilot Studio agent published to Teams + M365 Copilot — see [03c § C5](./03c-copilot-studio-setup.md#phase-c5--publish-to-channels)
 - [ ] Cost alerts configured on the resource group
 - [ ] Backup / disaster-recovery plan written (at minimum: re-runnable pipeline from `raw/` blob)
-- [ ] Customer + Microsoft owners identified for ongoing operation
+- [ ] Owners identified for ongoing operation
 - [ ] **Auth posture audited:** Foundry / DI / AI Search show **Local authentication: Disabled**; Storage shows **Allow storage account key access: Disabled**
 - [ ] **RBAC inventory exported:** the role assignments from Phase 1.7 documented per environment (these become the rotation surface in place of API keys)
 

@@ -78,7 +78,7 @@ Because admin / query keys are disabled on the AI Search service in this pattern
 
 Reference: [Add Azure AI Search as a knowledge source](https://learn.microsoft.com/microsoft-copilot-studio/knowledge-azure-ai-search).
 
-> **Document-level security trimming.** Because **Microsoft Entra ID Integrated** resolves to the calling user's identity, the user's token reaches AI Search — the prerequisite for chunk-level access control (see [01-architecture.md § Document-level access control](01-architecture.md#document-level-chunk-level-access-control)). Service-level access comes from the **Search Index Data Reader** grant above. Document-level trimming then comes from the `group_ids` security filter (GA) populated at chunk creation in [03b](03b-fabric-setup.md), validated in [05-testing.md § G](05-testing.md). **Nuance:** the GA security-filter approach needs the orchestration layer to inject a per-user `$filter` on `group_ids`; native Copilot Studio knowledge-source filter injection is engagement-specific. The preview ACL/RBAC-scope and Purview-label approaches enforce automatically from the user token instead.
+> **Document-level security trimming.** Because **Microsoft Entra ID Integrated** resolves to the calling user's identity, the user's token reaches AI Search — the prerequisite for chunk-level access control (see [01-architecture.md § Document-level access control](01-architecture.md#document-level-chunk-level-access-control)). Service-level access comes from the **Search Index Data Reader** grant above. Document-level trimming then comes from the `group_ids` security filter (GA) populated at chunk creation in [03b](03b-fabric-setup.md), validated in [05-testing.md § G](05-testing.md). **Nuance:** the GA security-filter approach needs the orchestration layer to inject a per-user `$filter` on `group_ids`; native Copilot Studio knowledge-source filter injection is deployment-specific. The preview ACL/RBAC-scope and Purview-label approaches enforce automatically from the user token instead.
 
 > **Connection lifecycle caveat.** Power Platform data connections live at the **environment** level — not per-agent. A misconfigured AI Search connection can break the AI Search add-knowledge dialog **for every agent in the environment** with no in-product way to delete it. Stick to the supported Entra auth types above. If you hit a broken-connection state, see [Troubleshooting pointers](#troubleshooting-pointers).
 
@@ -89,11 +89,11 @@ Reference: [Add Azure AI Search as a knowledge source](https://learn.microsoft.c
 1. Open **[Copilot Studio](https://copilotstudio.microsoft.com/)**
 2. Confirm the **environment selector** (top right) shows the environment you want the agent in. Switch if needed.
 3. **Create → New agent** (or **Agents → + New agent**)
-4. **Name:** `agent-rag-kb` (or your customer-friendly name — this is what users see in Teams / M365 Copilot)
-5. **Description:** "Knowledge assistant for `<customer / corpus name>`. Answers questions grounded on internal documents with citations."
+4. **Name:** `agent-rag-kb` (or your preferred name — this is what users see in Teams / M365 Copilot)
+5. **Description:** "Knowledge assistant for `<corpus name>`. Answers questions grounded on internal documents with citations."
 6. **Instructions / system prompt** — paste the starter below and tailor:
 
-   > You are a knowledge assistant grounded on the customer's document corpus.
+   > You are a knowledge assistant grounded on your document corpus.
    > Answer concisely and cite the source document for every factual claim.
    > If the knowledge source does not contain enough information to answer
    > confidently, say so and offer to escalate to a human.
@@ -123,8 +123,8 @@ The agent opens to its **Overview** tab. Record the agent's display name and the
 8. Select **Next**.
 9. Enter the **Azure AI Search vector index** name: `idx-rag-documents`. Only one index can be added per knowledge source.
 10. Provide a **Name** and **Description** for the knowledge source:
-    - **Name:** `rag-knowledge-base` (or a customer-friendly name)
-    - **Description:** as detailed as possible — e.g. *"Internal `<customer>` document corpus including policies, handbooks, and standard operating procedures. Use for all factual questions about company practices."* The description is used by Copilot Studio's [generative orchestration](https://learn.microsoft.com/microsoft-copilot-studio/advanced-generative-actions) to decide when to call this source, so be specific.
+    - **Name:** `rag-knowledge-base` (or a friendly name)
+    - **Description:** as detailed as possible — e.g. *"Internal document corpus including policies, handbooks, and standard operating procedures. Use for all factual questions about company practices."* The description is used by Copilot Studio's [generative orchestration](https://learn.microsoft.com/microsoft-copilot-studio/advanced-generative-actions) to decide when to call this source, so be specific.
 11. Select **Add to agent**.
 
 The knowledge source appears in the **Knowledge** table with **Status: In progress** while Copilot Studio indexes the vector index metadata. Status flips to **Ready** within ~30–60 seconds.
@@ -145,7 +145,7 @@ Copilot Studio derives behavior from your index schema:
 
 Reference: [Return citations](https://learn.microsoft.com/microsoft-copilot-studio/knowledge-azure-ai-search#return-citations).
 
-> **Adding a friendly title for citations.** If your customer prefers human-readable citation labels over auto-generated previews, add a `title` string field to the AI Search index and populate it from `source_path` (the original filename) in the chunk JSON. Add it to the index schema in [§ 4.1](./03-deployment-manual.md#41-create-the-index) and to the chunk-build code in [`nb_ocr_chunk_upload`](./03b-fabric-setup.md#f72-nb_ocr_chunk_upload). Copilot Studio will surface the value automatically once it's in the index.
+> **Adding a friendly title for citations.** If you prefer human-readable citation labels over auto-generated previews, add a `title` string field to the AI Search index and populate it from `source_path` (the original filename) in the chunk JSON. Add it to the index schema in [§ 4.1](./03-deployment-manual.md#41-create-the-index) and to the chunk-build code in [`nb_ocr_chunk_upload`](./03b-fabric-setup.md#f72-nb_ocr_chunk_upload). Copilot Studio will surface the value automatically once it's in the index.
 
 ### C2.3 Validate the connection
 
@@ -190,7 +190,7 @@ Reference: [Knowledge sources summary](https://learn.microsoft.com/microsoft-cop
 5. **Content moderation** — leave at **High** unless you have a specific reason to lower it.
 6. **Save**.
 
-> **Why both toggles matter.** The Overview-page "Allow the AI to use its own general knowledge" gates the AI's right to **consult** general knowledge at all. The Generative-AI-settings "Allow ungrounded responses" enforces the per-turn rule that the model must have called the knowledge source for that response. With both off, the agent is in strict-grounding mode. Note: even with both off, the model can still blend general knowledge into a response that *did* retrieve a chunk — these settings prevent ungrounded responses, not ungrounded *phrases*. For per-customer audit-grade verification, validate citations in the [05-testing.md § D](./05-testing.md) golden set.
+> **Why both toggles matter.** The Overview-page "Allow the AI to use its own general knowledge" gates the AI's right to **consult** general knowledge at all. The Generative-AI-settings "Allow ungrounded responses" enforces the per-turn rule that the model must have called the knowledge source for that response. With both off, the agent is in strict-grounding mode. Note: even with both off, the model can still blend general knowledge into a response that *did* retrieve a chunk — these settings prevent ungrounded responses, not ungrounded *phrases*. For per-user audit-grade verification, validate citations in the [05-testing.md § D](./05-testing.md) golden set.
 
 Reference: [Allow ungrounded responses](https://learn.microsoft.com/microsoft-copilot-studio/knowledge-copilot-studio#allow-ungrounded-responses), [Orchestrate agent behavior with generative AI](https://learn.microsoft.com/microsoft-copilot-studio/advanced-generative-actions).
 

@@ -56,7 +56,7 @@
 
 - [ ] **Azure subscription** with Contributor + User Access Administrator on the target RG (or subscription scope for greenfield)
 - [ ] **Region chosen** from [02-prerequisites.md § 11](./02-prerequisites.md) Tier-1 list — default: **East US 2** for US, **Sweden Central** for EU, **Australia East** / **Japan East** for APAC
-- [ ] **Azure OpenAI access approved** in the subscription with TPM quota for `text-embedding-3-large` (10K TPM minimum for demo). `gpt-4o` quota is only required if you opt in to a chat deployment for engagement-specific extensions (the locked design doesn't consume one).
+- [ ] **Azure OpenAI access approved** in the subscription with TPM quota for `text-embedding-3-large` (10K TPM minimum for demo). `gpt-4o` quota is only required if you opt in to a chat deployment for deployment-specific extensions (the locked design doesn't consume one).
 - [ ] **Fabric capacity** allocated (F4+ for demo, F16+ for production) and a workspace where you have Admin or Member role
 - [ ] **Copilot Studio license** for the building user — and channel-publishing pre-approvals **initiated** (Teams + M365 Copilot admin approvals take ~1-2 business days)
 - [ ] **Local tools** (full table in [02-prerequisites.md § 0](./02-prerequisites.md#0--local-developer-tooling)): **PowerShell 7+ (`pwsh`)**, **Azure CLI 2.60+** with the `bicep` extension installed (`az bicep install`), **Python 3.11+**, `git`. All shell snippets in the docs are PowerShell — see [README § Shell convention](../README.md#shell-convention).
@@ -107,7 +107,7 @@ What 03b covers end-to-end (Phases F0–F10):
 | F1 | Workspace creation + capacity assignment |
 | F2 | Workspace identity + Blob Data Contributor grant |
 | F3 | Lakehouse `lh_rag_<env>` |
-| F4 | OneLake shortcut to the customer source (SharePoint / ADLS / S3 / etc.) |
+| F4 | OneLake shortcut to the source system (SharePoint / ADLS / S3 / etc.) |
 | F5 | Control `control_table_files` Delta table |
 | F6 | Fabric connections to Key Vault and Blob Storage |
 | F7 | Three pipeline notebooks (lookup, chunk+upload, control-table upsert) |
@@ -185,7 +185,7 @@ Once Parts A–D validate green, follow [05-testing.md](./05-testing.md):
 
 ### E1. Run the index quality smoke tests (§ B)
 ### E2. Run the golden-set retrieval evaluation (§ C)
-### E3. Run the semantic-ranker A/B comparison (§ D) — document the lift for your customer
+### E3. Run the semantic-ranker A/B comparison (§ D) — document the lift for your stakeholders
 
 ### Part E validation
 

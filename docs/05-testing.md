@@ -2,7 +2,7 @@
 
 End-to-end test plan for the RAG knowledge-base pattern. Run these tests after [03-deployment-manual.md](./03-deployment-manual.md) (or [04-deployment-automated.md](./04-deployment-automated.md)) Phase 4 validation passes **and** the Copilot Studio agent in [03c-copilot-studio-setup.md](./03c-copilot-studio-setup.md) is built — the manual and automated Azure paths converge to the same end-state, and Fabric ([03b](./03b-fabric-setup.md)) + Copilot Studio ([03c](./03c-copilot-studio-setup.md)) layer on top identically for both.
 
-> **Purpose.** Catch regressions early, prove retrieval quality before customer demo, and provide a repeatable evaluation harness that travels with the pattern to new deployments.
+> **Purpose.** Catch regressions early, prove retrieval quality before a demo, and provide a repeatable evaluation harness that travels with the pattern to new deployments.
 
 ---
 
@@ -12,7 +12,7 @@ End-to-end test plan for the RAG knowledge-base pattern. Run these tests after [
 |---|---|---|
 | **A. Pipeline functional** | Ingest → OCR → chunk → index path works end-to-end with no errors | Every deployment; after every pipeline change |
 | **B. Index quality smoke** | Index has correct shape, semantic ranker fires, citations are present | Every deployment |
-| **C. Retrieval quality (golden set)** | Top-K retrieval recall + ranking on a known Q&A set | Before customer demo; quarterly post-launch |
+| **C. Retrieval quality (golden set)** | Top-K retrieval recall + ranking on a known Q&A set | Before a demo; quarterly post-launch |
 | **D. Semantic ranker A/B** | Quantify the lift from semantic ranker vs hybrid-only | Once per pattern instance |
 | **E. End-to-end demo script** | The lived user experience in Teams / M365 Copilot | Day-of-demo dry run |
 | **F. Regression** | Cumulative checks before any production change | After every change to chunking, index schema, or agent config |
@@ -267,7 +267,7 @@ If semantic ranker latency exceeds 1 s, raise an issue (likely a regional or cap
 
 ## E — End-to-end demo script
 
-A demo script for the customer-facing presentation. Use this as the **dry run** the day before any live demo.
+A demo script for a live presentation. Use this as the **dry run** the day before any live demo.
 
 ### E1. Setup
 

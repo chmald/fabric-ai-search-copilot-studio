@@ -4,9 +4,9 @@ This document is an **alternative to [03c-copilot-studio-setup.md](./03c-copilot
 
 > **Run *either* 03c *or* 03d — not both.** They are two implementations of **Layer 3 (the conversational layer)**. Everything underneath — the Fabric ingest pipeline ([03b](./03b-fabric-setup.md)) and the Azure platform layer (Blob + AI Search index + Foundry model gateway, from [03](./03-deployment-manual.md) or [04](./04-deployment-automated.md)) — is **identical and unchanged**. You only swap how users talk to the index.
 
-> **Why this path exists.** It was added for an HR knowledge-base scenario after Copilot Studio publishing surfaced an **additional-licensing requirement**: an agent that connects **Azure AI Search** *and* a **Fabric Data Agent** pulls those in as **premium / capacity-billed connectors**, which is licensed on top of the end users' Microsoft 365 Copilot entitlement (Copilot Studio message-capacity packs or per-user Copilot Studio licenses). Moving the agent runtime to Foundry shifts that cost to **Azure consumption** (pay-as-you-go tokens + tool calls) — which an existing Azure customer already has a billing path for — while end users keep consuming through the M365 Copilot license they already own. See [07-copilot-studio-vs-foundry.md](./07-copilot-studio-vs-foundry.md) for the full trade-off analysis and decision matrix.
+> **Why this path exists.** It exists for cases where Copilot Studio publishing surfaces an **additional-licensing requirement**: an agent that connects **Azure AI Search** *and* a **Fabric Data Agent** pulls those in as **premium / capacity-billed connectors**, which is licensed on top of the end users' Microsoft 365 Copilot entitlement (Copilot Studio message-capacity packs or per-user Copilot Studio licenses). Moving the agent runtime to Foundry shifts that cost to **Azure consumption** (pay-as-you-go tokens + tool calls) — which an existing Azure subscription already has a billing path for — while end users keep consuming through the M365 Copilot license they already own. See [07-copilot-studio-vs-foundry.md](./07-copilot-studio-vs-foundry.md) for the full trade-off analysis and decision matrix.
 
-> **Preview boundary — read before committing to production.** Publishing an Azure AI Foundry agent into **Microsoft 365 Copilot / Teams** (the "custom engine agent" / Microsoft 365 Agents SDK channel) is a **preview** capability at the time of writing. The Foundry agent runtime, the **Azure AI Search tool**, and the **Microsoft Fabric (Data Agent) tool** are generally available or in advanced preview, but the **M365/Teams publishing surface moves quickly** — re-verify the publishing steps (Phase D6) against current Microsoft Learn before you promise a production date. The Copilot Studio path (03c) remains the fully-GA option if the customer cannot take a preview dependency.
+> **Preview boundary — read before committing to production.** Publishing an Azure AI Foundry agent into **Microsoft 365 Copilot / Teams** (the "custom engine agent" / Microsoft 365 Agents SDK channel) is a **preview** capability at the time of writing. The Foundry agent runtime, the **Azure AI Search tool**, and the **Microsoft Fabric (Data Agent) tool** are generally available or in advanced preview, but the **M365/Teams publishing surface moves quickly** — re-verify the publishing steps (Phase D6) against current Microsoft Learn before you promise a production date. The Copilot Studio path (03c) remains the fully-GA option if you cannot take a preview dependency.
 
 > **Time budget.** First-time build: **60–90 minutes** hands-on (longer than 03c — there is more Azure-side wiring), plus the same **1–2 business days** of Teams admin approval for org-wide publishing. Subsequent rebuilds in the same project: **20–30 minutes**.
 
@@ -63,7 +63,7 @@ Confirm these before building. The first three differ materially from the Copilo
 | **End-user access** | Microsoft 365 Copilot license | Microsoft 365 Copilot license (**unchanged**) |
 | **Maker / builder** | Copilot Studio Maker license | **Azure AI Developer** (or Project Manager) RBAC on the Foundry project |
 
-The net: you trade a **Power Platform message-pack line item** for **Azure pay-as-you-go**. For an Azure-committed customer that is usually the cheaper and more predictable path, and it removes the premium-connector blocker entirely. Quantify both for the customer with [07 § Licensing deep-dive](./07-copilot-studio-vs-foundry.md#licensing-deep-dive) before recommending.
+The net: you trade a **Power Platform message-pack line item** for **Azure pay-as-you-go**. For an Azure-committed organization that is usually the cheaper and more predictable path, and it removes the premium-connector blocker entirely. Quantify both for your scenario with [07 § Licensing deep-dive](./07-copilot-studio-vs-foundry.md#licensing-deep-dive) before deciding.
 
 ### D0.2 Chat-model deployment is now REQUIRED
 
@@ -74,7 +74,7 @@ The locked base pattern deploys **only an embedding model** and leaves the chat 
 
 ### D0.3 A published Fabric Data Agent (for the structured-data tool)
 
-The **Azure AI Search tool** grounds on the unstructured HR document corpus you already indexed. The **Fabric Data Agent tool** is the *new* capability the customer wanted — conversational Q&A over **structured** HR data (e.g. headcount, comp bands, tenure pulled from a Lakehouse / Warehouse / semantic model).
+The **Azure AI Search tool** grounds on the unstructured document corpus you already indexed. The **Fabric Data Agent tool** adds a complementary capability — conversational Q&A over **structured** data (e.g. counts, amounts, dates pulled from a Lakehouse / Warehouse / semantic model).
 
 You must **create and publish the Fabric Data Agent in Fabric first**:
 
@@ -85,7 +85,7 @@ You must **create and publish the Fabric Data Agent in Fabric first**:
 
 Reference: [Fabric Data Agent concept](https://learn.microsoft.com/fabric/data-science/concept-data-agent) · [Create a Data Agent](https://learn.microsoft.com/fabric/data-science/how-to-create-data-agent).
 
-> If the engagement only needs unstructured-document RAG, **skip the Fabric tool** (Phase D3) — the AI Search tool alone reproduces the 03c agent on the Foundry runtime, and you still get the licensing benefit. The Fabric Data Agent is customer-specific scope, not a base-pattern requirement.
+> If your deployment only needs unstructured-document RAG, **skip the Fabric tool** (Phase D3) — the AI Search tool alone reproduces the 03c agent on the Foundry runtime, and you still get the licensing benefit. The Fabric Data Agent is an optional add-on, not a base-pattern requirement.
 
 ### D0.4 Builder + tenant prerequisites
 
@@ -126,7 +126,7 @@ Reference: [Azure AI Search tool for Foundry Agent Service](https://learn.micros
 
 ## Phase D3 — Connect the Fabric Data Agent as a tool (structured HR data)
 
-> Skip this phase if the engagement is unstructured-document-only (see D0.3 note).
+> Skip this phase if your deployment is unstructured-document-only (see D0.3 note).
 
 1. In the project, add the **Microsoft Fabric** tool to the agent and create a connection to the **Fabric Data Agent** you published in D0.3 (you supply the Fabric workspace + data-agent identifiers / endpoint).
 2. **Identity model — choose deliberately; this is the HR-data security decision:**
@@ -149,7 +149,7 @@ Reference: [Microsoft Fabric tool for Foundry Agent Service](https://learn.micro
 2. **Tool routing.** Tell the agent **when to use which tool**: AI Search for policy/contract/letter wording; Fabric Data Agent for counts, aggregates, and structured lookups; both when a question spans prose + data.
 3. **Document-level security trimming (same nuance as 03c).** The AI Search index carries a `group_ids` security-trim field ([01 § Document-level access control](./01-architecture.md#document-level-chunk-level-access-control)). For per-user trimming the agent must inject the **caller's Entra group IDs** as an OData `$filter` on the AI Search tool:
    `group_ids/any(g: search.in(g, '<caller group IDs>'))`
-   The custom engine agent channel supplies the caller identity; mapping that identity to group IDs and passing the filter is **engagement-specific wiring** — validate it end-to-end ([05 § G](./05-testing.md)) rather than assuming it is automatic. For structured data, trimming is enforced by Fabric RLS via the on-behalf-of identity (Phase D3) — a cleaner per-user story than the document side.
+   The custom engine agent channel supplies the caller identity; mapping that identity to group IDs and passing the filter is **deployment-specific wiring** — validate it end-to-end ([05 § G](./05-testing.md)) rather than assuming it is automatic. For structured data, trimming is enforced by Fabric RLS via the on-behalf-of identity (Phase D3) — a cleaner per-user story than the document side.
 
 ---
 
@@ -232,7 +232,7 @@ This is the **complete identity map** for the Foundry-agent path. Three identiti
 
 Choose 03c instead of this path when **any** of these hold — full matrix in [07](./07-copilot-studio-vs-foundry.md#decision-matrix):
 
-- The customer **cannot take a preview dependency** for production (M365 publishing from Foundry is preview).
+- You **cannot take a preview dependency** for production (M365 publishing from Foundry is preview).
 - There is **no maker/dev capacity** to operate Azure AI Foundry + the Agents Toolkit wrapper.
 - The agent is **unstructured-document RAG only**, the audience is small, and Copilot Studio message capacity is already licensed — the licensing driver doesn't apply.
 

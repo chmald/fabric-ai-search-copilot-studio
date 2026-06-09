@@ -1,6 +1,5 @@
 # Files in this list are excluded from `git archive` (and therefore from the
 # public mirror produced by scripts/publish-to-github.ps1). They remain tracked
-# in the internal source repo but never reach the GitHub snapshot.
+# in the source repo but never reach the GitHub snapshot.
 scripts/publish-to-github.ps1 export-ignore
 .gitattributes                 export-ignore
-CHANGELOG.md                   export-ignore

@@ -26,7 +26,7 @@ Fabric workspace (ws-rag-<env>)
 │   └── Azure Blob Storage connection (writes raw/ + chunks/ via workspace identity)
 ├── Lakehouse: lh_rag_<env>
 │   ├── Files/
-│   │   └── source_docs/          ← OneLake shortcut to the customer source
+│   │   └── source_docs/          ← OneLake shortcut to the source system
 │   └── Tables/
 │       ├── control_table_files   ← Delta state table (this pattern's source of truth)
 │       └── _tmp_new_files        ← per-run handoff table from Lookup → ForEach
@@ -219,7 +219,7 @@ Reference: [What is a lakehouse in Microsoft Fabric?](https://learn.microsoft.co
 
 ## Phase F4 — Attach the source via OneLake shortcut
 
-The pattern is source-agnostic: the OneLake shortcut layer normalizes whatever upstream document store the customer uses (SharePoint Online, ADLS Gen2, S3, GCS, etc.) into a unified `Files/source_docs/` location that the pipeline reads from.
+The pattern is source-agnostic: the OneLake shortcut layer normalizes whatever upstream document store you use (SharePoint Online, ADLS Gen2, S3, GCS, etc.) into a unified `Files/source_docs/` location that the pipeline reads from.
 
 | Source | Shortcut type | Reference |
 |---|---|---|

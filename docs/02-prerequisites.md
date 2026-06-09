@@ -82,11 +82,11 @@ az provider register --namespace Microsoft.CognitiveServices --wait
 - **Azure AI Foundry resource** (Azure CLI / ARM kind: `AIServices`) in the target subscription + region. This is the **strategic model-gateway resource** that supersedes the legacy standalone Azure OpenAI resource for new deployments. A single Foundry resource hosts all OpenAI models you deploy and also exposes the broader Foundry model catalog (Cohere, Llama, Phi, Mistral, etc.) under one endpoint.
 - **Two OpenAI model deployments** inside the Foundry resource:
   - **Embedding** — recommended: `text-embedding-3-large` (3072 dim). Acceptable fallback: `text-embedding-3-small` (1536 dim) for cost-sensitive demos.
-  - **Chat completion** — **optional**. The locked design does NOT consume a chat completion model (Copilot Studio uses its own host model for generative answers). Only deploy one when an engagement explicitly needs a chat endpoint: custom app code, Foundry agent runtime, or Copilot Studio bring-your-own-model. When you opt in, the recommended model is `gpt-4o` (cost-down: `gpt-4o-mini`). Set `chatModelName` in [infra/main.parameters.local.json](../infra/main.parameters.json) to opt in.
+  - **Chat completion** — **optional**. The locked design does NOT consume a chat completion model (Copilot Studio uses its own host model for generative answers). Only deploy one when a deployment explicitly needs a chat endpoint: custom app code, Foundry agent runtime, or Copilot Studio bring-your-own-model. When you opt in, the recommended model is `gpt-4o` (cost-down: `gpt-4o-mini`). Set `chatModelName` in [infra/main.parameters.local.json](../infra/main.parameters.json) to opt in.
 
 > **Why Foundry resource over the legacy AOAI resource?** The Azure AI Foundry resource is Microsoft's strategic direction for all new AI model deployments. It exposes the same OpenAI-compatible endpoint (`https://<resource>.openai.azure.com/`) so all existing tooling — including the AI Search integrated `azureOpenAI` vectorizer — works unchanged, while giving you a single resource for all model families (current + future) and a single capacity / billing / content-safety plane.
 
-> **Important:** this pattern uses Foundry's **model-gateway** capability only. It does **not** use Foundry's agent runtime (Agent Service / Hub / Projects); Copilot Studio's native AI Search knowledge source fills that role. Foundry agent runtime is the right addition when an engagement needs multi-agent routing, custom tool calling, or query triage — that's an engagement-specific decision, not part of this pattern's default stack.
+> **Important:** this pattern uses Foundry's **model-gateway** capability only. It does **not** use Foundry's agent runtime (Agent Service / Hub / Projects); Copilot Studio's native AI Search knowledge source fills that role. Foundry agent runtime is the right addition when a deployment needs multi-agent routing, custom tool calling, or query triage — that's a deployment-specific decision, not part of this pattern's default stack.
 
 ### Region availability check
 
@@ -159,7 +159,7 @@ Standard tier includes a **free semantic-ranker quota** (currently 1,000 queries
 | **F4 / F8** | Pilot, ≤ 10K docs |
 | **F16+** | Production-grade for this pattern |
 
-If the customer has shared Fabric capacity, confirm there is headroom; ingestion pipelines can spike capacity usage.
+If you have shared Fabric capacity, confirm there is headroom; ingestion pipelines can spike capacity usage.
 
 ### Tenant settings to confirm with the Fabric admin
 
@@ -206,7 +206,7 @@ If you are building the agent on **Azure AI Foundry Agent Service** instead of C
 | **End-user license** | Microsoft 365 Copilot | Microsoft 365 Copilot (**unchanged**) |
 | **Teams admin approval** | One-time per environment | One-time per app (same gate) |
 
-The end-user license is identical on both paths; the difference is **where the runtime is billed** (Power Platform message packs vs. Azure consumption) and **who builds it** (maker vs. Azure AI developer). This is the licensing lever for engagements blocked by premium-connector / message-capacity cost.
+The end-user license is identical on both paths; the difference is **where the runtime is billed** (Power Platform message packs vs. Azure consumption) and **who builds it** (maker vs. Azure AI developer). This is the licensing lever for deployments blocked by premium-connector / message-capacity cost.
 
 ---
 
@@ -295,7 +295,7 @@ Only needed if you build Layer 3 on **Azure AI Foundry Agent Service** instead o
 
 This pattern has a strong **co-location** requirement: AI Search, the Foundry resource (which hosts your OpenAI embedding model and the Document Intelligence OCR endpoint), Blob Storage, Key Vault, and your Fabric capacity should all live in the **same Azure region** wherever possible. The dominant constraint is **OpenAI model availability** — `text-embedding-3-large` (and `gpt-4o` if you opt in to a chat deployment) is not in every region, and these are the only services in the stack whose regional rollout lags meaningfully behind general Azure availability.
 
-Copilot Studio's environment region is independent and can differ from the Azure region; choose it based on customer data-residency policy.
+Copilot Studio's environment region is independent and can differ from the Azure region; choose it based on your data-residency policy.
 
 **Cross-region egress** is the most common silent cost driver and the most common latency surprise in this pattern. Pay attention to it during region selection.
 
@@ -312,7 +312,7 @@ These are the regions where every component of the pattern stack is currently av
 
 ### Tier-2 acceptable regions (full stack, but model rollout may lag)
 
-Choose from Tier 2 when data-residency, latency to the customer, or existing Azure footprint outweighs the model-rollout-lag concern. Always verify the specific model deployments are available **at deployment time** — see verification commands below.
+Choose from Tier 2 when data-residency, latency to your users, or existing Azure footprint outweighs the model-rollout-lag concern. Always verify the specific model deployments are available **at deployment time** — see verification commands below.
 
 | Region | Geography | Notes |
 |---|---|---|
@@ -369,7 +369,7 @@ Other regions (UAE North, South Africa North, Brazil South, Central India, etc.)
 2. **OpenAI model rollouts cluster.** When a new OpenAI model lands in Azure, it typically reaches East US 2, Sweden Central, Australia East, and Japan East within the first wave. These four regions are the "follow Azure OpenAI's roadmap" choices.
 3. **Co-location preserves the no-egress story.** The integrated vectorizer (AI Search → Foundry) and the indexer (AI Search → Blob) both produce non-trivial inter-service traffic. In-region calls are sub-millisecond and free; cross-region calls add cost and meaningfully degrade indexing throughput.
 4. **Semantic ranker latency is region-sensitive.** The semantic ranker adds 300–500 ms at p95 in a single region. Cross-region between AI Search and Foundry can push that to 1+ second.
-5. **Data residency wins ties.** If the customer's residency policy points at a Tier-2 or Tier-3 region, choose that region — the residency win is more valuable than the model-rollout-lag concern. Plan to refresh model deployments quarterly to stay current.
+5. **Data residency wins ties.** If your residency policy points at a Tier-2 or Tier-3 region, choose that region — the residency win is more valuable than the model-rollout-lag concern. Plan to refresh model deployments quarterly to stay current.
 
 ### Verify at deployment time
 
@@ -395,7 +395,7 @@ If any of the three checks fail for your preferred region, fall back to the next
 
 ## 12 — Naming convention (reference)
 
-A consistent naming convention makes the build navigable and replicable. Suggested scaffold (adjust to your customer's standards):
+A consistent naming convention makes the build navigable and replicable. Suggested scaffold (adjust to your organization's standards):
 
 ```
 Resource group:   rg-<workload>-<env>-<region>           e.g.  rg-rag-demo-eus
@@ -441,7 +441,7 @@ Indicative monthly costs for a **demo / pilot** scale (single region, ~10K docs 
 | Blob Storage (Hot, ~50 GB) | ~$2 | |
 | Key Vault | ~$1 | |
 | Fabric F4 capacity | ~$525 (24/7) or pause when idle | Major variable cost; pause aggressively for demos |
-| Copilot Studio license | Per-user | Usually already in customer M365 footprint |
+| Copilot Studio license | Per-user | Usually already in your M365 footprint |
 | **Total (demo, capacity paused off-hours)** | **~$400–$600 / month** | |
 
 **Production** scale (~100K–1M docs, sustained QPS) typically lands **$2K–$10K / month** range with the largest variable being Fabric capacity sizing.
@@ -460,7 +460,7 @@ Confirm all of these before moving to your chosen deployment path — [03-deploy
 - [ ] Copilot Studio license assigned to the builder
 - [ ] Channel publishing pre-approvals initiated (Teams + M365 Copilot)
 - [ ] Naming convention agreed
-- [ ] Customer document source identified + access path (SharePoint shortcut, file share, etc.) planned
+- [ ] Document source identified + access path (SharePoint shortcut, file share, etc.) planned
 
 Once all boxes are checked → proceed to [03-deployment-manual.md](./03-deployment-manual.md) for the portal walkthrough OR [04-deployment-automated.md](./04-deployment-automated.md) for the Bicep + script-driven path.
 

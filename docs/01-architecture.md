@@ -6,9 +6,9 @@ Reference architecture for the low-code RAG knowledge-base pattern. Read this fi
 
 ## Goals
 
-- **Ground a Copilot Studio agent** on a customer document corpus with citation-quality answers
+- **Ground a Copilot Studio agent** on a document corpus with citation-quality answers
 - **Eliminate orchestration code** — every layer is portal-configured or drag-and-drop
-- **Reuse customer Fabric investment** for ingestion + staging
+- **Reuse your existing Fabric investment** for ingestion + staging
 - **Make the indexing path production-ready** by reading from Blob (not OneLake DFS Function-wrapper, which is Early Access Preview)
 - **Be replicable** across multiple document domains (HR, finance, legal, support, sales enablement) with only configuration changes
 
@@ -26,7 +26,7 @@ Reference architecture for the low-code RAG knowledge-base pattern. Read this fi
 ```mermaid
 flowchart TB
     subgraph Sources["📥 Sources"]
-        SP[SharePoint / Customer Source]
+        SP[SharePoint / Source System]
         DOCS[Loose Files / FTP / Mailbox]
     end
 
@@ -85,7 +85,7 @@ The architecture is intentionally three layers. Each layer has a single responsi
 
 | Component | Role |
 |---|---|
-| **OneLake (Lakehouse)** | Source-of-truth landing zone. Receives documents from upstream sources via Fabric shortcuts, mirroring, or direct copy. Authoritative customer-facing data tier. |
+| **OneLake (Lakehouse)** | Source-of-truth landing zone. Receives documents from upstream sources via Fabric shortcuts, mirroring, or direct copy. Authoritative data tier. |
 | **Control table** (Delta in the Lakehouse) | Tracks every file's processing state. One row per file. Enables idempotent runs, incremental processing, audit trail, and pipeline observability. Schema below. |
 | **Fabric Data Pipeline** | Orchestrator. Drag-and-drop activities: lookup new files, register in control table, copy raw to Blob, call Document Intelligence, chunk, write JSON to Blob, mark complete. |
 
@@ -124,7 +124,7 @@ Use Delta merge (`MERGE INTO`) on `file_id` for upserts. Build dashboards on top
 | **Azure Key Vault** | Single source of truth for connection strings, API keys, and secrets. Pipelines and indexers authenticate via **managed identity** wherever possible; Key Vault is the fallback for any secret that cannot be replaced by RBAC. |
 | **Azure Blob Storage** | Permanent canonical store. Two containers: `raw/` (the original files, used for citation linkback from Copilot Studio answers) and `chunks/` (one JSON file per chunk, consumed by the AI Search indexer). |
 | **Azure Document Intelligence** | OCR. Use the **prebuilt-read** model (no training). Returns extracted text, page-aware structure, and confidence scores. **Served by the same Foundry/AIServices account** — there is no separate `Microsoft.CognitiveServices/accounts` of `kind=FormRecognizer` in this pattern; the DI REST/SDK endpoint is the Foundry resource's `*.cognitiveservices.azure.com` URL. |
-| **Azure AI Foundry resource** (model gateway) | Provisioned for the AI Search integrated vectorizer: one **embedding** deployment (recommended: `text-embedding-3-large`) is required. A **chat completion** deployment (e.g. `gpt-4o`) is **opt-in** — the locked design does not consume one because Copilot Studio uses its own host model for generative answers; only deploy a chat model when an engagement explicitly needs a chat endpoint (custom app code, Foundry agent runtime, BYOM Copilot Studio). Foundry resource (kind `AIServices`) supersedes the legacy standalone Azure OpenAI resource for new deployments and exposes an OpenAI-compatible endpoint at `https://<resource>.openai.azure.com/` for backwards-compatible tooling. **This pattern uses Foundry's model-gateway capability only — not its agent runtime (Agent Service / Hub / Projects), which is filled by Copilot Studio. Foundry agent runtime is an engagement-specific addition for cases that need multi-agent routing, custom tool calling, or query triage beyond knowledge-base Q&A.** | need multi-agent routing, custom tool calling, or query triage beyond knowledge-base Q&A.** |
+| **Azure AI Foundry resource** (model gateway) | Provisioned for the AI Search integrated vectorizer: one **embedding** deployment (recommended: `text-embedding-3-large`) is required. A **chat completion** deployment (e.g. `gpt-4o`) is **opt-in** — the locked design does not consume one because Copilot Studio uses its own host model for generative answers; only deploy a chat model when a deployment explicitly needs a chat endpoint (custom app code, Foundry agent runtime, BYOM Copilot Studio). Foundry resource (kind `AIServices`) supersedes the legacy standalone Azure OpenAI resource for new deployments and exposes an OpenAI-compatible endpoint at `https://<resource>.openai.azure.com/` for backwards-compatible tooling. **This pattern uses Foundry's model-gateway capability only — not its agent runtime (Agent Service / Hub / Projects), which is filled by Copilot Studio. Foundry agent runtime is a deployment-specific addition for cases that need multi-agent routing, custom tool calling, or query triage beyond knowledge-base Q&A.** |
 | **Azure AI Search** | The retrieval engine. A single index with text, vector, and metadata fields. **Integrated vectorizer** (`azureOpenAI` kind, pointed at the Foundry resource's OpenAI-compatible endpoint) embeds chunks at index time and embeds user queries at search time — **zero custom embedding code anywhere**. **Hybrid query mode** (BM25 + vector) plus **semantic ranker** on top. **Standard (S1) tier or higher** required. |
 
 #### AI Search index schema (reference)
@@ -194,7 +194,7 @@ Layer 3 has **two interchangeable implementations**. The Copilot Studio version 
 
 ### Ingest path (background, scheduled)
 
-1. **New file arrives** in the customer's upstream source (SharePoint, file share, mailbox, etc.)
+1. **New file arrives** in your upstream source (SharePoint, file share, mailbox, etc.)
 2. **OneLake shortcut / mirror / copy** makes it visible in the Fabric Lakehouse
 3. **Fabric Data Pipeline runs** (on schedule or trigger):
     1. Lookup files in the Lakehouse not yet in the control table → insert with `pending` status
@@ -218,7 +218,7 @@ Layer 3 has **two interchangeable implementations**. The Copilot Studio version 
     2. Hybrid retrieval: BM25 on `content` + vector similarity on `content_vector` → top ~50 candidates
     3. Semantic ranker re-ranks the top candidates with a cross-encoder model → top N (default 5)
     4. Returns chunks with relevance scores, captions, and `source_uri`
-4. **Copilot Studio assembles** the grounding prompt with retrieved chunks + system prompt + conversation history and runs generative answers against **its own host LLM** (the M365 Copilot model in Teams / M365 Copilot channels). The Foundry-hosted chat deployment is **not on the default call path** — it's only used if the engagement opts in to a custom Azure OpenAI endpoint via Copilot Studio bring-your-own-model or replaces Copilot Studio with a Foundry-agent / custom app code stack.
+4. **Copilot Studio assembles** the grounding prompt with retrieved chunks + system prompt + conversation history and runs generative answers against **its own host LLM** (the M365 Copilot model in Teams / M365 Copilot channels). The Foundry-hosted chat deployment is **not on the default call path** — it's only used if the deployment opts in to a custom Azure OpenAI endpoint via Copilot Studio bring-your-own-model or replaces Copilot Studio with a Foundry-agent / custom app code stack.
 5. **Agent responds** with the answer + inline citations linking back to `source_uri` (the original raw file in Blob)
 
 ### Chunking strategy (reference, configurable)
@@ -250,7 +250,7 @@ Because **each chunk is one index document**, "per-chunk security" *is* document
 |---|---|---|
 | **Security filters** (group/string trimming via a `group_ids` field) | **GA** | Default for this pattern — chunks are *derived* JSON, so source ACLs don't carry over; a push-model `group_ids` field is the reliable mechanism. |
 | POSIX ACL / RBAC scopes | Preview (2026-05-01) | Source is ADLS Gen2 / Blob with native ACL/RBAC; token-based query-time enforcement. |
-| Purview sensitivity labels | Preview | Strategic for OneLake/Fabric customers — indexer carries MIP labels; enforced via Entra + Purview policy. |
+| Purview sensitivity labels | Preview | Strategic for OneLake/Fabric environments — indexer carries MIP labels; enforced via Entra + Purview policy. |
 | SharePoint M365 ACLs | Preview | Source is SharePoint M365 libraries/lists/pages. |
 
 **Pattern default — GA security filters (push model):**
@@ -259,7 +259,7 @@ Because **each chunk is one index document**, "per-chunk security" *is* document
 3. At **query time**, trim with an OData filter on the caller's group memberships:
    `group_ids/any(g: search.in(g, '<comma-separated caller group IDs>'))`
 
-**Identity flow & honest nuance:** the **Entra ID Integrated** connection puts the **calling user's** token in front of AI Search. For the **preview** ACL/RBAC and Purview-label approaches, query-time enforcement against that token is **automatic**. For the **GA security-filter** approach the orchestration layer must supply the caller's group IDs as the `$filter` — this is demonstrable directly against the index/API ([05-testing.md § G](05-testing.md)); native Copilot Studio knowledge-source per-user filter injection is engagement-specific and not guaranteed out of the box.
+**Identity flow & honest nuance:** the **Entra ID Integrated** connection puts the **calling user's** token in front of AI Search. For the **preview** ACL/RBAC and Purview-label approaches, query-time enforcement against that token is **automatic**. For the **GA security-filter** approach the orchestration layer must supply the caller's group IDs as the `$filter` — this is demonstrable directly against the index/API ([05-testing.md § G](05-testing.md)); native Copilot Studio knowledge-source per-user filter injection is deployment-specific and not guaranteed out of the box.
 
 
 ### Secrets
@@ -276,7 +276,7 @@ Because **each chunk is one index document**, "per-chunk security" *is* document
 
 - Co-locate **AI Search + Foundry resource (OpenAI models + Document Intelligence) + Blob** in the same Azure region wherever possible
 - Fabric capacity region should match unless cross-region egress is acceptable
-- Copilot Studio environment region is independent but should respect customer data-residency policies
+- Copilot Studio environment region is independent but should respect your data-residency policies
 
 ---
 
@@ -286,7 +286,7 @@ The README table summarized the locked design. The full rationale for each:
 
 ### 1. Copilot Studio orchestration (Foundry agent runtime is the alternative when needed)
 
-Copilot Studio's native AI Search knowledge source delivers retrieval + grounding + citation **without code**. Adding Foundry agent runtime buys orchestration flexibility (multi-agent routing, custom tool calling, query triage logic) but costs the no-code story. For knowledge-base Q&A — the single most common RAG use case and the focus of this pattern — Copilot Studio native is sufficient. **Foundry agent runtime becomes the right choice** when the agent needs to do more than answer questions (e.g. take actions, call tools, route to specialist sub-agents). That is an engagement-specific decision, not a default progression.
+Copilot Studio's native AI Search knowledge source delivers retrieval + grounding + citation **without code**. Adding Foundry agent runtime buys orchestration flexibility (multi-agent routing, custom tool calling, query triage logic) but costs the no-code story. For knowledge-base Q&A — the single most common RAG use case and the focus of this pattern — Copilot Studio native is sufficient. **Foundry agent runtime becomes the right choice** when the agent needs to do more than answer questions (e.g. take actions, call tools, route to specialist sub-agents). That is a deployment-specific decision, not a default progression.
 
 ### 2. Integrated vectorizer (Foundry-hosted OpenAI)
 
@@ -302,25 +302,25 @@ The semantic ranker is a Microsoft-trained cross-encoder model that re-ranks the
 
 ### 5. OneLake source / Blob permanent
 
-OneLake is the customer's authoritative data plane and the natural integration point with their broader Fabric ecosystem. **Indexing directly from OneLake** is possible via the OneLake DFS Function-wrapper but is in **Early Access Preview** today — not appropriate for production. Reading from Blob is fully supported, well documented, and cheaper to operate. The two-tier model — OneLake for source, Blob for indexed canonical store — gets the best of both.
+OneLake is your authoritative data plane and the natural integration point with your broader Fabric ecosystem. **Indexing directly from OneLake** is possible via the OneLake DFS Function-wrapper but is in **Early Access Preview** today — not appropriate for production. Reading from Blob is fully supported, well documented, and cheaper to operate. The two-tier model — OneLake for source, Blob for indexed canonical store — gets the best of both.
 
 ### 6. Fabric Data Pipelines orchestrator
 
-Fabric is already in the customer's footprint. Data Pipelines is drag-and-drop, has native activities for OneLake / notebooks / HTTP / Blob / dataflows, and integrates with the Lakehouse Delta table. ADF is too pro-code for a low-code customer. Power Automate is event-driven (better fit if the trigger is SharePoint file-arrived, but harder to schedule + observe at scale).
+Fabric is already in your footprint. Data Pipelines is drag-and-drop, has native activities for OneLake / notebooks / HTTP / Blob / dataflows, and integrates with the Lakehouse Delta table. ADF is too pro-code for a low-code team. Power Automate is event-driven (better fit if the trigger is SharePoint file-arrived, but harder to schedule + observe at scale).
 
 ### 7. Control table in Fabric Lakehouse Delta
 
-Living the control plane inside Fabric (vs. external SQL) keeps governance, RBAC, and observability inside the customer's Fabric workspace. Delta gives atomic upserts, time-travel for audit, and easy Power BI / Dataflow integration for dashboards.
+Living the control plane inside Fabric (vs. external SQL) keeps governance, RBAC, and observability inside your Fabric workspace. Delta gives atomic upserts, time-travel for audit, and easy Power BI / Dataflow integration for dashboards.
 
 ### 8. Document Intelligence prebuilt-read (served by the Foundry resource)
 
 `prebuilt-read` handles printed + handwritten text, ~70+ languages, and mixed file types (PDF, JPG, PNG, TIFF, BMP, DOCX) with no training required. For RAG over an arbitrary document corpus, no custom extraction is needed — the goal is full text + page structure, which `prebuilt-read` provides.
 
-A Foundry resource (`kind=AIServices`) is a **multi-service Cognitive Services account** — it exposes Azure OpenAI, Document Intelligence, Vision, Translator, Speech, and the rest of the Cognitive Services catalogue from the same resource ID, the same `*.cognitiveservices.azure.com` endpoint, the same managed identity, and a single set of role assignments. This pattern uses the OpenAI sub-namespace (for the embedding deployment — and optionally a chat deployment when an engagement opts in) and the Document Intelligence sub-namespace (for `prebuilt-read`) from the same account. A separate `Microsoft.CognitiveServices/accounts` of `kind=FormRecognizer` is **not** provisioned — doing so would add a redundant resource, a duplicate managed identity, and an extra RBAC surface for no capability gain.
+A Foundry resource (`kind=AIServices`) is a **multi-service Cognitive Services account** — it exposes Azure OpenAI, Document Intelligence, Vision, Translator, Speech, and the rest of the Cognitive Services catalogue from the same resource ID, the same `*.cognitiveservices.azure.com` endpoint, the same managed identity, and a single set of role assignments. This pattern uses the OpenAI sub-namespace (for the embedding deployment — and optionally a chat deployment when a deployment opts in) and the Document Intelligence sub-namespace (for `prebuilt-read`) from the same account. A separate `Microsoft.CognitiveServices/accounts` of `kind=FormRecognizer` is **not** provisioned — doing so would add a redundant resource, a duplicate managed identity, and an extra RBAC surface for no capability gain.
 
 ### 9. Teams + M365 Copilot day-one
 
-Both are native Copilot Studio publishing channels with one-click setup. They cover ~99 % of M365 user surface area with zero additional hosting. Other channels (Web, Direct Line, Slack) are deferred unless the customer has an explicit requirement.
+Both are native Copilot Studio publishing channels with one-click setup. They cover ~99 % of M365 user surface area with zero additional hosting. Other channels (Web, Direct Line, Slack) are deferred unless you have an explicit requirement.
 
 ### 10. AI Search Standard (S1) minimum
 
@@ -347,7 +347,7 @@ Everything else — pipeline activity wiring, indexer configuration, vectorizer 
 
 | Topic | Why | Where to go |
 |---|---|---|
-| Foundry orchestration | Not needed for knowledge-base Q&A — Copilot Studio fills this role by default | **Documented as the alternative Layer-3 path** — adopt the Foundry agent runtime ([03d](03d-foundry-agent-setup.md)) when the engagement requires multi-agent routing / custom tool calling / query triage **or** hits the Copilot Studio premium-connector licensing wall (AI Search + Fabric Data Agent). Trade-offs: [07](07-copilot-studio-vs-foundry.md) |
+| Foundry orchestration | Not needed for knowledge-base Q&A — Copilot Studio fills this role by default | **Documented as the alternative Layer-3 path** — adopt the Foundry agent runtime ([03d](03d-foundry-agent-setup.md)) when the deployment requires multi-agent routing / custom tool calling / query triage **or** hits the Copilot Studio premium-connector licensing wall (AI Search + Fabric Data Agent). Trade-offs: [07](07-copilot-studio-vs-foundry.md) |
 | Custom field extraction | Different problem class (structured data into rows, not retrieval over prose) | Document Intelligence custom-extraction + Fabric / SQL ETL |
 | Cross-document reasoning | LLM-side concern, requires larger context or agentic chains | Add Foundry agent runtime + multi-document retrieval orchestration |
 | User-level personalization | Not in scope for shared knowledge base (distinct from **security trimming**, which IS covered — see [Document-level access control](#document-level-chunk-level-access-control)) | Layer on top with Copilot Studio user variables + per-user filters |

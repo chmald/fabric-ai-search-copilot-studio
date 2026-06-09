@@ -1075,7 +1075,7 @@ Escalate to support / Microsoft if, after working through this guide:
 | Copilot Studio publishing approval stuck > 5 business days | Power Platform admin → escalation |
 | Semantic ranker returning incorrect captions for a specific query class | Microsoft Learn Q&A first; AI Search support if reproducible |
 
-For Microsoft sellers: open a fast-path support case via your account team if the issue is blocking a customer demo or production deployment.
+If the issue is blocking a demo or production deployment, open a support case through your Azure support plan.
 
 ---
 
