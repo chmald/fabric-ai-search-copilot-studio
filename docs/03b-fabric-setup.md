@@ -251,6 +251,8 @@ Confirm `Files/source_docs/` now appears in the Lakehouse Explorer and you can b
 
 For a clean first build, place **5–10 representative documents** in the source location. Cover the file types, lengths, and document categories the production corpus will contain (PDFs, DOCX, scans, mixed-language, etc.). Sample diversity matters more than volume for the initial build.
 
+Use any document set with zero real data. The matching **structured** tables for the optional Fabric Data Agent ship in [`samples/structured/`](../samples/structured/) (see [03e](./03e-fabric-data-agent.md)); the document corpus is uploaded here separately to trigger the flow.
+
 If the shortcut points at an already-populated source, skip this — work with whatever is there.
 
 > **Refresh lag.** Shortcut content listing can lag a few minutes behind the source. If you don't see new files, click the refresh icon on the Lakehouse explorer.

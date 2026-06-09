@@ -152,13 +152,13 @@ What 03c covers end-to-end (Phases C0–C6):
 
 ### Option D-FA — Azure AI Foundry agent (alternative)
 
-Built on the Foundry Agent Service runtime, grounding on the **same** `idx-rag-documents` index plus an optional **Fabric Data Agent** for structured data, published to Teams + M365 Copilot as a **custom engine agent (preview)**. Full step-by-step: **[03d-foundry-agent-setup.md](./03d-foundry-agent-setup.md)**.
+Built on the Foundry Agent Service runtime, grounding on the **same** `idx-rag-documents` index plus an optional **Fabric Data Agent** for structured data (built per **[03e-fabric-data-agent.md](./03e-fabric-data-agent.md)**), published to Teams + M365 Copilot as a **custom engine agent (preview)**. Full step-by-step: **[03d-foundry-agent-setup.md](./03d-foundry-agent-setup.md)**.
 
 What 03d covers end-to-end (Phases D0–D6):
 
 | 03d Phase | What you build |
 |---|---|
-| D0 | Prerequisites + the **licensing delta**; chat-model deployment becomes **required**; publish the Fabric Data Agent |
+| D0 | Prerequisites + the **licensing delta**; chat-model deployment becomes **required**; publish the Fabric Data Agent ([03e](./03e-fabric-data-agent.md)) |
 | D1 | Foundry project + chat (`gpt-4o`) deployment |
 | D2 | AI Search tool connection — project MI granted **Search Index Data Reader** |
 | D3 | Fabric Data Agent tool — **on-behalf-of** caller identity (per-user RLS) |

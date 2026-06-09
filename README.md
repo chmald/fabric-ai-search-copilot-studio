@@ -71,6 +71,7 @@ See [docs/01-architecture.md](./docs/01-architecture.md) for the full design nar
 | [docs/03b-fabric-setup.md](./docs/03b-fabric-setup.md) | **Fabric setup (always manual)** — workspace, identity, Lakehouse, OneLake shortcut, control table, connections, ingest pipeline. Required after either Azure deployment path. |
 | [docs/03c-copilot-studio-setup.md](./docs/03c-copilot-studio-setup.md) | **Copilot Studio setup (always manual)** — agent creation, AI Search knowledge source, generative answers, Teams + M365 Copilot publishing. Final step after Azure + Fabric. **One of two Layer-3 options** (see 03d). |
 | [docs/03d-foundry-agent-setup.md](./docs/03d-foundry-agent-setup.md) | **Azure AI Foundry agent setup (alternative to 03c)** — builds the agent on the Foundry Agent Service runtime, connecting **AI Search + a Fabric Data Agent** as tools, published to Teams + M365 Copilot via the **preview** custom-engine-agent channel. Added for licensing-driven deployments (premium-connector / message-capacity blocker). Run **either** 03c **or** 03d. |
+| [docs/03e-fabric-data-agent.md](./docs/03e-fabric-data-agent.md) | **Fabric Data Agent setup (optional — Foundry path)** — load the structured sample tables, then create + ground + publish a **Microsoft Fabric Data Agent** for structured-data Q&A, with the on-behalf-of security model. Consumed by 03d Phase D3. |
 | [docs/04-deployment-automated.md](./docs/04-deployment-automated.md) | Automated path — Bicep + post-deploy script + ADO pipeline for the **Azure layer**; Fabric still uses 03b, the agent uses 03c **or** 03d |
 | [docs/05-testing.md](./docs/05-testing.md) | Functional tests, retrieval quality, semantic-ranker validation, end-to-end demo script |
 | [docs/06-troubleshooting.md](./docs/06-troubleshooting.md) | Common failure modes and fixes |
@@ -84,6 +85,7 @@ See [docs/01-architecture.md](./docs/01-architecture.md) for the full design nar
 | `.azuredevops/pipelines/deploy-rag-kb.yml` | CI/CD pipeline: Validate → Deploy → Smoke |
 | `.gitignore` | Excludes secrets, venvs, populated demo-ids, IDE state from ADO commits |
 | `demo-ids.template.json` | Reference template for per-deployment IDs. The live file (`demo-ids.local.json`, gitignored) is **hybrid**: top-level Azure fields are auto-written by `infra/deploy.ps1` from the Bicep `deploymentSummary` and overwritten on every deploy; nested objects (`fabric`, `sp-rag-di-caller`, `copilotStudio`) are populated manually during the Fabric / Copilot Studio setup phases and preserved across deploys (`deploy.ps1` merges rather than overwrites). The template's `_meta` block documents the contract — copy it to `demo-ids.local.json` to scaffold a new environment. Never commit a populated copy. |
+| `samples/` | **Structured sample data for the Fabric Data Agent** — `structured/employees.csv` + `agreements.csv` (synthetic HR data) consumed by [03e](./docs/03e-fabric-data-agent.md). The unstructured document corpus is uploaded separately to trigger ingestion (standalone — not in this repo). See [samples/README.md](./samples/README.md). |
 
 Read in order on first build. After that, treat them as a reference set.
 

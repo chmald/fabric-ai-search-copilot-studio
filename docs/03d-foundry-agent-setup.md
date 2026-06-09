@@ -96,16 +96,11 @@ The locked base pattern deploys **only an embedding model** and leaves the chat 
 
 The **Azure AI Search tool** grounds on the unstructured document corpus you already indexed. The **Fabric Data Agent tool** adds a complementary capability — conversational Q&A over **structured** data (e.g. counts, amounts, dates pulled from a Lakehouse / Warehouse / semantic model).
 
-You must **create and publish the Fabric Data Agent in Fabric first**:
+**Build and publish the Fabric Data Agent first** — the full step-by-step (load the structured sample tables → create → ground with instructions + example questions → publish, plus the on-behalf-of security model) is in **[03e-fabric-data-agent.md](./03e-fabric-data-agent.md)**. It uses the in-repo structured sample ([`samples/structured/`](../samples/structured/)), which corresponds to the uploaded document set so the two knowledge sources stay consistent. Phase D3 below connects the published agent.
 
-1. In the Fabric workspace (`ws-rag-<env>` from [03b](./03b-fabric-setup.md)), create a **Data Agent** and attach the data sources it may query (Lakehouse tables, a Warehouse, or a Power BI semantic model).
-2. Give it clear instructions and example questions so its NL-to-query grounding is reliable.
-3. **Publish** it and note the workspace + data-agent identifiers — Phase D3 connects to it.
-4. Tenant settings: the Fabric admin must enable **Copilot and Azure OpenAI** and **users can create and use Data Agents** ([Fabric admin portal](https://learn.microsoft.com/fabric/admin/service-admin-portal-copilot)).
+Tenant settings: the Fabric admin must enable **Copilot and Azure OpenAI** and **Data Agent** creation ([Fabric admin portal](https://learn.microsoft.com/fabric/admin/service-admin-portal-copilot)).
 
-Reference: [Fabric Data Agent concept](https://learn.microsoft.com/fabric/data-science/concept-data-agent) · [Create a Data Agent](https://learn.microsoft.com/fabric/data-science/how-to-create-data-agent).
-
-> If your deployment only needs unstructured-document RAG, **skip the Fabric tool** (Phase D3) — the AI Search tool alone reproduces the 03c agent on the Foundry runtime, and you still get the licensing benefit. The Fabric Data Agent is an optional add-on, not a base-pattern requirement.
+> If your deployment only needs unstructured-document RAG, **skip the Fabric tool** (Phase D3) and 03e — the AI Search tool alone reproduces the 03c agent on the Foundry runtime, and you still get the licensing benefit. The Fabric Data Agent is an optional add-on, not a base-pattern requirement.
 
 ### D0.4 Builder + tenant prerequisites
 
@@ -150,7 +145,7 @@ Reference: [Azure AI Search tool for Foundry Agent Service](https://learn.micros
 
 The Fabric Data Agent is the **second knowledge source** (per the Knowledge vs. Tools section above) — it grounds answers on **structured** data by translating the question to a query, rather than retrieving document chunks.
 
-1. In the project, add the **Microsoft Fabric** tool to the agent and create a connection to the **Fabric Data Agent** you published in D0.3 (you supply the Fabric workspace + data-agent identifiers / endpoint).
+1. In the project, add the **Microsoft Fabric** tool to the agent and create a connection to the **Fabric Data Agent** you published per [03e-fabric-data-agent.md](./03e-fabric-data-agent.md) (you supply the Fabric workspace + data-agent identifiers / endpoint).
 2. **Identity model — choose deliberately; this is the HR-data security decision:**
 
    | Identity mode | Behavior | Use for |
