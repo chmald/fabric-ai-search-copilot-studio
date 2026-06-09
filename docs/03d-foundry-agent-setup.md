@@ -50,6 +50,26 @@ flowchart LR
 
 ---
 
+## Knowledge vs. Tools in Foundry Agent Service (and where Azure AI Search fits)
+
+Foundry organizes everything an agent can reach into two conceptual buckets. Knowing which is which prevents the most common setup confusion — **Azure AI Search appears in both places.**
+
+| | **Knowledge** (grounding / retrieval) | **Tools — "Actions"** (execution) |
+|---|---|---|
+| **Purpose** | Give the model *information* to base answers on (RAG). The runtime retrieves relevant content and feeds it into context. | Let the model *do something* or fetch on demand — run code, call an API, trigger a workflow. |
+| **Examples** | **Azure AI Search**, **Microsoft Fabric (Data Agent)**, File Search (vector store), SharePoint, Grounding with Bing | Code Interpreter, Function calling, OpenAPI 3.0 tools, Azure Functions, Azure Logic Apps |
+| **Who triggers it** | The runtime retrieves to **ground** the answer (with multiple sources, the model picks which to query) | The model **invokes** the action when the task needs it |
+| **This pattern uses** | ✅ Azure AI Search (documents) + Fabric Data Agent (structured data) | ✗ none required for knowledge-base Q&A |
+
+**Why Azure AI Search is "both."** At the API level **every capability — knowledge sources included — lives in the agent's `tools` array**, so Azure AI Search is technically a *tool* (`azure_ai_search`). The portal lists it under **Knowledge** because its *job* is grounding. You will therefore see it described two ways, and they are the **same connection**:
+
+- **As a knowledge source** *(the default, and what this pattern uses)* — the runtime auto-retrieves from `idx-rag-documents` to ground every relevant answer (hybrid + semantic via the integrated vectorizer you already configured). Phase D2 sets this up.
+- **As a model-selectable tool** — when the agent has **more than one** source (here, AI Search *and* the Fabric Data Agent), the model does **tool selection** each turn: search the documents, query the Fabric Data Agent, or both. That routing is the runtime's job; Phase D4 § Tool routing tunes it with instructions.
+
+> **Knowledge ≠ Action.** Both Azure AI Search and the Fabric Data Agent are **knowledge (retrieval) tools** — they *inform* the answer. **Action** tools (Code Interpreter, Functions, Logic Apps) *do* something and are **not needed** for a knowledge-base agent. Add an Action tool only if the agent must take an action beyond answering (e.g. file a ticket, call a line-of-business API). Throughout this doc, "AI Search **tool**" and "AI Search **knowledge source**" mean the same thing.
+
+---
+
 ## Phase D0 — Prerequisites & licensing
 
 Confirm these before building. The first three differ materially from the Copilot Studio path.
@@ -124,9 +144,11 @@ Reference: [Azure AI Search tool for Foundry Agent Service](https://learn.micros
 
 ---
 
-## Phase D3 — Connect the Fabric Data Agent as a tool (structured HR data)
+## Phase D3 — Connect the Fabric Data Agent as a knowledge tool (structured data)
 
 > Skip this phase if your deployment is unstructured-document-only (see D0.3 note).
+
+The Fabric Data Agent is the **second knowledge source** (per the Knowledge vs. Tools section above) — it grounds answers on **structured** data by translating the question to a query, rather than retrieving document chunks.
 
 1. In the project, add the **Microsoft Fabric** tool to the agent and create a connection to the **Fabric Data Agent** you published in D0.3 (you supply the Fabric workspace + data-agent identifiers / endpoint).
 2. **Identity model — choose deliberately; this is the HR-data security decision:**

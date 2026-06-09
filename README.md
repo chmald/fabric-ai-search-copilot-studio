@@ -1,6 +1,6 @@
 # Reusable RAG Knowledge-Base Pattern
 
-A reusable, low-code-first **Retrieval-Augmented Generation (RAG) knowledge-base** pattern for grounding a Copilot Studio agent on a document corpus. This folder is the canonical reference for **demo build + production replication**.
+A reusable, low-code-first **Retrieval-Augmented Generation (RAG) knowledge-base** pattern for grounding a conversational agent on a document corpus. The ingestion and Azure platform layers are shared; the agent itself can be built **two ways — Microsoft Copilot Studio (default) or Azure AI Foundry Agent Service (alternative)**. This folder is the canonical reference for **demo build + production replication**.
 
 > **Generic on purpose.** This pattern is document-domain agnostic. Use it for HR contracts, finance policies, legal templates, support knowledge bases, product docs, sales enablement libraries, or any unstructured document corpus that needs to power a grounded chat experience.
 
@@ -15,9 +15,26 @@ A working end-to-end RAG agent that:
 - Chunks text and writes to **Azure Blob Storage** as the permanent canonical store
 - Indexes content in **Azure AI Search** using **integrated vectorization** (no custom embedding code) into a **hybrid index** (keyword + vector + metadata)
 - Re-ranks results with the **AI Search semantic ranker** for production-grade relevance
-- Surfaces answers through a **Copilot Studio agent** published to **Microsoft Teams** and **M365 Copilot** — Copilot Studio uses its own host LLM for generative answers, so the Foundry resource only needs the embedding model by default (the chat deployment in [`infra/main.bicep`](./infra/main.bicep) is opt-in for deployment-specific extensions; see the Foundry note below)
+- Surfaces answers through a **conversational agent** published to **Microsoft Teams** and **M365 Copilot** — built on **Copilot Studio** (default, lowest-code) **or Azure AI Foundry Agent Service** (alternative). Both agent options share everything above and read the same AI Search index; see [Two ways to build the agent](#two-ways-to-build-the-agent-layer-3) below.
 
-The pattern is intentionally low-code: every step is either a no-code Azure/Fabric portal configuration, a drag-and-drop Fabric Data Pipeline activity, or a Copilot Studio configuration screen. **No application code is required for this pattern.**
+The pattern is intentionally low-code: every step is either a no-code Azure/Fabric portal configuration, a drag-and-drop Fabric Data Pipeline activity, or an agent-configuration screen. **No application code is required for the Copilot Studio path**; the Foundry path adds a thin Microsoft 365 Agents Toolkit wrapper for publishing (still configuration-first).
+
+---
+
+## Two ways to build the agent (Layer 3)
+
+The ingestion (Fabric) and Azure platform (Blob + AI Search + Foundry model gateway) layers are **identical** for both options — the same `idx-rag-documents` index powers either agent. Pick **one** runtime for the conversational layer; you can switch later without re-indexing.
+
+| | **Copilot Studio** *(default)* | **Azure AI Foundry Agent Service** *(alternative)* |
+|---|---|---|
+| **Best when** | Lowest-code, fully-GA, small audience, or Copilot Studio capacity already licensed | Premium-connector / message-capacity **licensing** is a blocker; you need **structured-data row-level security** (Fabric Data Agent) or **richer orchestration**; you prefer Azure consumption billing |
+| **Build doc** | [docs/03c-copilot-studio-setup.md](./docs/03c-copilot-studio-setup.md) | [docs/03d-foundry-agent-setup.md](./docs/03d-foundry-agent-setup.md) |
+| **Answer model** | Copilot Studio host model (none to deploy) | Your `gpt-4o` chat deployment (required) |
+| **Grounding** | AI Search native knowledge source | AI Search **+** a Fabric Data Agent as Foundry **knowledge tools** |
+| **Publish to Teams / M365** | **GA** — one-click combined channel | **Preview** — custom engine agent (M365 Agents SDK) |
+| **Billing** | Copilot Studio message capacity | Azure consumption |
+
+**Default to Copilot Studio** for low-code knowledge-base Q&A. **Choose Foundry** when licensing, per-user structured-data security, or multi-tool orchestration require it. Full trade-off analysis + decision matrix: **[docs/07-copilot-studio-vs-foundry.md](./docs/07-copilot-studio-vs-foundry.md)**.
 
 ---
 
@@ -27,7 +44,7 @@ These are the design decisions locked for this pattern's primary use case — si
 
 | # | Decision | Choice | Why |
 |---|---|---|---|
-| 1 | Orchestration layer | **Copilot Studio native** (no Foundry / no custom orchestrator) | Lowest-code path; Copilot Studio's native AI Search knowledge source handles retrieval, grounding, and citation |
+| 1 | Conversational layer (Layer 3) | **Copilot Studio** (default) **or Azure AI Foundry Agent Service** (alternative) — pick one | Copilot Studio's native AI Search knowledge source handles retrieval, grounding, and citation with no code (lowest-code default); Foundry Agent Service is the alternative when licensing, structured-data RLS, or richer orchestration require it — see [Two ways to build the agent](#two-ways-to-build-the-agent-layer-3) and [07](./docs/07-copilot-studio-vs-foundry.md) |
 | 2 | Vectorization | **AI Search integrated vectorizer** (Foundry-hosted OpenAI embedding) | Index-time + query-time embedding handled by AI Search; eliminates custom embedding code in the pipeline |
 | 3 | Index type | **Hybrid** (BM25 keyword + vector) | Hybrid retrieval consistently beats vector-only on factual / exact-match queries (IDs, dates, names, dollar amounts) |
 | 4 | Semantic ranker | **Enabled** | Second-stage re-ranker delivers 25–50 % relevance lift on Q&A workloads; required for production-grade citation quality |
