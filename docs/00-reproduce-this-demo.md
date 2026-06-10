@@ -75,7 +75,7 @@ Two paths produce the same end-state:
 | **A1. Manual / portal + CLI** | Learning the architecture; one-off demo labs; first time you touch this pattern | [03-deployment-manual.md](./03-deployment-manual.md) |
 | **A2. Automated / Bicep** | Repeated deployments; CI/CD; multiple environments (dev/prod); production stand-up | [04-deployment-automated.md](./04-deployment-automated.md) |
 
-Both paths skip Fabric workspace creation and Layer-3 agent configuration in their respective deep-dives — each is **always manual** (no Bicep / IaC surface exists today) and each has its own dedicated document: Fabric in [03b-fabric-setup.md](./03b-fabric-setup.md), and the agent in [03c-copilot-studio-setup.md](./03c-copilot-studio-setup.md) (Copilot Studio) **or** [03d-foundry-agent-setup.md](./03d-foundry-agent-setup.md) (Azure AI Foundry). Both layers are identical regardless of which Azure path you chose in A1 / A2.
+Both paths skip Fabric workspace creation and Layer-3 agent configuration in their respective deep-dives — each is **always manual** (no Bicep / IaC surface exists today) and each has its own dedicated document: Fabric in [03b-fabric-setup.md](./03b-fabric-setup.md), and the agent in [03c-copilot-studio-setup.md](./03c-copilot-studio-setup.md) (Copilot Studio) **or** [03d-foundry-agent-setup.md](./03d-foundry-agent-setup.md) (Microsoft Foundry). Both layers are identical regardless of which Azure path you chose in A1 / A2.
 
 ---
 
@@ -132,7 +132,7 @@ Layer 3 has **two interchangeable implementations** — build **one**. Neither i
 | Option | Runtime | Best for | Doc |
 |---|---|---|---|
 | **D-CS. Copilot Studio** | Power Platform | Lowest-code, fully GA, small audience or CS capacity already licensed | [03c-copilot-studio-setup.md](./03c-copilot-studio-setup.md) |
-| **D-FA. Azure AI Foundry agent** | Foundry Agent Service | **Licensing blocker** (AI Search + Fabric Data Agent premium connectors), structured-data RLS, richer orchestration — accepts **preview** M365/Teams publishing | [03d-foundry-agent-setup.md](./03d-foundry-agent-setup.md) |
+| **D-FA. Microsoft Foundry agent** | Foundry Agent Service | **Licensing blocker** (AI Search + Fabric Data Agent premium connectors), structured-data RLS, richer orchestration — accepts **preview** M365/Teams publishing | [03d-foundry-agent-setup.md](./03d-foundry-agent-setup.md) |
 
 ### Option D-CS — Copilot Studio
 
@@ -150,7 +150,7 @@ What 03c covers end-to-end (Phases C0–C6):
 | C5 | Publish the agent and add the **Teams and Microsoft 365 Copilot** channel (single combined channel); set Availability options for the right audience |
 | C6 | End-user validation from Teams + M365 Copilot |
 
-### Option D-FA — Azure AI Foundry agent (alternative)
+### Option D-FA — Microsoft Foundry agent (alternative)
 
 Built on the Foundry Agent Service runtime, grounding on the **same** `idx-rag-documents` index plus an optional **Fabric Data Agent** for structured data (built per **[03e-fabric-data-agent.md](./03e-fabric-data-agent.md)**), published to Teams + M365 Copilot as a **custom engine agent (preview)**. Full step-by-step: **[03d-foundry-agent-setup.md](./03d-foundry-agent-setup.md)**.
 

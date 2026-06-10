@@ -4,10 +4,22 @@ Change history for this pattern. Entries are listed newest-first.
 
 ---
 
+## 2026-06-10
+
+### v1.4 — Terminology refresh: Azure AI Foundry → Microsoft Foundry
+Aligned the pattern's product naming with current Microsoft Learn terminology. **Azure AI Foundry is now branded *Microsoft Foundry*** (per the official [Evolution of Foundry](https://learn.microsoft.com/azure/foundry/what-is-foundry) mapping; the former `what-is-azure-ai-foundry` page now redirects under `/azure/foundry/`). The newer `03d` / `03e` / `08` docs already used the current name — this brings the README and the rest of the docs into line. **No architectural or technical change:** the resource is still `Microsoft.CognitiveServices/accounts` `kind=AIServices`, and the OpenAI-compatible (`*.openai.azure.com`) and Cognitive Services (`*.cognitiveservices.azure.com`) endpoints are unchanged.
+
+Verified current against Microsoft Learn (no change needed): Microsoft Foundry Agent Service is **GA** (the classic runtime retires **2027-03-31**); in the agent, the **Azure AI Search tool is GA** and the **Microsoft Fabric (Data Agent) tool is preview**; M365/Teams **custom engine agent** publishing remains **preview**; the **Fabric data agent** itself is **GA**; AI Search **semantic ranker** + **integrated vectorization**, Copilot Studio **knowledge source** + **generative answers**, and Document Intelligence **prebuilt-read** are all current terms.
+
+Changes:
+- **Global rename** `Azure AI Foundry` → `Microsoft Foundry` (64 occurrences) across `README.md`, `CHANGELOG.md`, `docs/00`–`07`, `samples/README.md`, `infra/main.bicep`, and `infra/modules/aifoundry.bicep`. A one-time "(formerly Azure AI Foundry)" note was added on first mention in `README.md` and `docs/01-architecture.md`.
+- **`docs/03d-foundry-agent-setup.md`** — standardized "Microsoft Foundry Agents Service" → **"Microsoft Foundry Agent Service"** (canonical singular).
+- **`README.md` / `docs/01-architecture.md` / `docs/02-prerequisites.md` / `docs/03-deployment-manual.md` / `infra/modules/aifoundry.bicep`** — dropped the now-legacy **"Hub"** from the Foundry-runtime aside (`Agent Service / Hub / Projects` → `Agent Service and projects`); hub-based projects are the classic model and Foundry projects are the current one.
+
 ## 2026-06-09
 
-### v1.3 — Azure AI Foundry Agent Service as the alternative Layer-3 path (licensing-driven)
-Added a second, interchangeable implementation of **Layer 3 (the conversational layer)**: the agent can now be built on **Azure AI Foundry Agent Service** instead of Copilot Studio, connecting **Azure AI Search** *and* a **Fabric Data Agent** as native Foundry tools and publishing to Teams + M365 Copilot as a **custom engine agent (preview)**. This addresses a licensing constraint: when a Copilot Studio agent connects Azure AI Search + a Fabric Data Agent, those are pulled in as **premium / message-capacity-billed connectors** on top of M365 Copilot. Moving the runtime to Foundry shifts that cost to **Azure consumption** while end users keep consuming on their existing M365 Copilot license. Layers 1–2 (Fabric ingest, Blob, AI Search index, Foundry model gateway) are **unchanged** — only the conversational layer swaps, so the two paths are interchangeable without re-indexing.
+### v1.3 — Microsoft Foundry Agent Service as the alternative Layer-3 path (licensing-driven)
+Added a second, interchangeable implementation of **Layer 3 (the conversational layer)**: the agent can now be built on **Microsoft Foundry Agent Service** instead of Copilot Studio, connecting **Azure AI Search** *and* a **Fabric Data Agent** as native Foundry tools and publishing to Teams + M365 Copilot as a **custom engine agent (preview)**. This addresses a licensing constraint: when a Copilot Studio agent connects Azure AI Search + a Fabric Data Agent, those are pulled in as **premium / message-capacity-billed connectors** on top of M365 Copilot. Moving the runtime to Foundry shifts that cost to **Azure consumption** while end users keep consuming on their existing M365 Copilot license. Layers 1–2 (Fabric ingest, Blob, AI Search index, Foundry model gateway) are **unchanged** — only the conversational layer swaps, so the two paths are interchangeable without re-indexing.
 
 **The architectural decisions are unchanged** — Copilot Studio remains the **default** for low-code knowledge-base Q&A; the Foundry agent path is the documented **alternative** for licensing-blocked, structured-data-RLS, or richer-orchestration scenarios. Publishing a Foundry agent into M365/Teams is **preview** — flagged throughout as "verify at build time."
 
@@ -16,7 +28,7 @@ Changes:
 - **`docs/07-copilot-studio-vs-foundry.md`** (new) — decision guide: shared-substrate framing, side-by-side table, **licensing deep-dive** (the licensing driver + honest cost-shift caveats), pros/cons for each runtime, decision matrix, and a Layer-3-only migration note.
 - **`README.md`** — file-index rows for 03d + 07; the Foundry note's **Agent runtime** row now cites the licensing driver and links 03d/07; deployment-paths + quick-start prereqs updated to present the 03c-or-03d agent choice.
 - **`docs/01-architecture.md`** — new **Layer 3 alternative** subsection (component table) + a variant Mermaid diagram, updated "intentionally left out" Foundry row, and versioning row 1.3.
-- **`docs/02-prerequisites.md`** — § 6 **Alternative — Azure AI Foundry agent path** prereq table; § 10 **Foundry agent path — additional assignments** RBAC table with the two-line RBAC-delta summary.
+- **`docs/02-prerequisites.md`** — § 6 **Alternative — Microsoft Foundry agent path** prereq table; § 10 **Foundry agent path — additional assignments** RBAC table with the two-line RBAC-delta summary.
 - **`docs/00-reproduce-this-demo.md`** — Part D restructured to present the **D-CS / D-FA** Layer-3 choice (03d phase table D0–D6), single-page checklist + Part A references updated.
 
 ## 2026-06-08
@@ -49,7 +61,7 @@ Changed `chatModelName` default from `gpt-4o` to `''` in `infra/main.bicep` and 
 ### AI Search Bicep auth fix
 Removed the `authOptions: { aadOrApiKey: ... }` block from `modules/search.bicep` — the Azure Search API treats `authOptions` and `disableLocalAuth: true` as mutually exclusive (`BadRequest: AuthOptions must be null if DisableLocalAuth is true`). Bearer challenges still work by default when local auth is disabled. See [docs/06-troubleshooting.md § 0.4](./docs/06-troubleshooting.md#04-bicep-deploy-fails-authoptions-must-be-null-if-disablelocalauth-is-true).
 
-### Document Intelligence consolidated into the Azure AI Foundry resource
+### Document Intelligence consolidated into the Microsoft Foundry resource
 Removed the standalone `Microsoft.CognitiveServices/accounts` of `kind=FormRecognizer` (and its `modules/docintelligence.bicep` module + its dedicated managed identity + duplicate Storage Blob Data Reader role assignment). DI is now served by the Foundry account (`kind=AIServices` is a multi-service Cognitive Services account). Net result: 4 Azure resources instead of 5, single MI for both OpenAI and DI storage access, single RBAC surface. See [docs/01-architecture.md § 8](./docs/01-architecture.md#8-document-intelligence-prebuilt-read-served-by-the-foundry-resource) for the design rationale.
 
 ## 2026-05-22

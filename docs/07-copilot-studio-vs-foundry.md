@@ -1,8 +1,8 @@
-# 07 — Copilot Studio vs. Azure AI Foundry Agent Service
+# 07 — Copilot Studio vs. Microsoft Foundry Agent Service
 
 A decision guide for **Layer 3 (the conversational layer)** of this pattern. Both options sit on the **same ingestion + platform substrate** — the choice is purely *how users talk to the index*, and it is driven mostly by **licensing, governance model, and how much engineering you want to own.**
 
-> **One-line answer.** Use **Copilot Studio** ([03c](./03c-copilot-studio-setup.md)) for the lowest-code, fully-GA path when the audience is small or Copilot Studio capacity is already licensed. Switch to **Azure AI Foundry Agent Service** ([03d](./03d-foundry-agent-setup.md)) when **premium-connector / message-capacity licensing becomes the blocker**, when you need **richer orchestration**, or when you want everything under **Azure RBAC + consumption billing** — accepting that **M365/Teams publishing from Foundry is currently preview.**
+> **One-line answer.** Use **Copilot Studio** ([03c](./03c-copilot-studio-setup.md)) for the lowest-code, fully-GA path when the audience is small or Copilot Studio capacity is already licensed. Switch to **Microsoft Foundry Agent Service** ([03d](./03d-foundry-agent-setup.md)) when **premium-connector / message-capacity licensing becomes the blocker**, when you need **richer orchestration**, or when you want everything under **Azure RBAC + consumption billing** — accepting that **M365/Teams publishing from Foundry is currently preview.**
 
 ---
 
@@ -22,9 +22,9 @@ So this is **not** a re-platforming decision — you can build one, and swap to 
 
 ## Side-by-side
 
-| Dimension | Copilot Studio (03c) | Azure AI Foundry Agent Service (03d) |
+| Dimension | Copilot Studio (03c) | Microsoft Foundry Agent Service (03d) |
 |---|---|---|
-| **Runtime** | Power Platform (Copilot Studio) | Azure AI Foundry Agent Service |
+| **Runtime** | Power Platform (Copilot Studio) | Microsoft Foundry Agent Service |
 | **Build effort** | Lowest-code — portal config only | Low/medium-code — portal + Agents Toolkit wrapper for publishing |
 | **Answer-generation model** | Copilot Studio **host model** (no deployment to manage) | **Your** chat deployment (e.g. `gpt-4o`) — required, you size + bill it |
 | **AI Search grounding** | Native knowledge source | **Azure AI Search tool** |

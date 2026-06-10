@@ -32,7 +32,7 @@ Common failure modes and fixes for the RAG knowledge-base pattern. Organized by 
 
 ## 0 — Entra-only auth (local auth disabled)
 
-This pattern provisions the **Azure AI Foundry resource** (which serves both Azure OpenAI deployments **and** the Document Intelligence `prebuilt-read` API — single multi-service Cognitive Services account, `kind=AIServices`) and **AI Search** with `disableLocalAuth=true`, and **Storage** with `allowSharedKeyAccess=false`. Most auth failures end up here.
+This pattern provisions the **Microsoft Foundry resource** (which serves both Azure OpenAI deployments **and** the Document Intelligence `prebuilt-read` API — single multi-service Cognitive Services account, `kind=AIServices`) and **AI Search** with `disableLocalAuth=true`, and **Storage** with `allowSharedKeyAccess=false`. Most auth failures end up here.
 
 ### 0.1 401 from services with local auth disabled
 
@@ -278,7 +278,7 @@ Reference: [Recover or purge deleted Azure AI Services resources](https://learn.
 
 ### 3.1 Document Intelligence call fails
 
-**Symptom.** The OCR step in `nb_ocr_chunk_upload` (which calls the Document Intelligence `prebuilt-read` model on the Azure AI Foundry resource) returns 401 / 403 / 404 / 500. This pattern uses a Fabric **notebook** — not a pipeline Web activity — to call DI; see [03b-fabric-setup.md Appendix A.1](./03b-fabric-setup.md#a1-no-web-activity-until-or-child-pipeline) for the rationale.
+**Symptom.** The OCR step in `nb_ocr_chunk_upload` (which calls the Document Intelligence `prebuilt-read` model on the Microsoft Foundry resource) returns 401 / 403 / 404 / 500. This pattern uses a Fabric **notebook** — not a pipeline Web activity — to call DI; see [03b-fabric-setup.md Appendix A.1](./03b-fabric-setup.md#a1-no-web-activity-until-or-child-pipeline) for the rationale.
 
 | Status | Common cause | Fix |
 |---|---|---|

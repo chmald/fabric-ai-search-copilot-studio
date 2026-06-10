@@ -2,7 +2,7 @@
 
 The Fabric layer of this pattern is **always manual**. Neither the manual Azure path ([03-deployment-manual.md](./03-deployment-manual.md)) nor the Bicep-automated path ([04-deployment-automated.md](./04-deployment-automated.md)) can provision Fabric items today — Fabric workspaces, Lakehouses, OneLake shortcuts, and Data Pipelines have no Bicep/ARM resource provider as of this pattern's publication, and the [Fabric REST APIs](https://learn.microsoft.com/en-us/rest/api/fabric/articles/) for items are only partially covered for automation.
 
-> **Run this doc after Azure platform layer is up.** You need the Azure resources from [03-deployment-manual.md § Phase 1](./03-deployment-manual.md#phase-1--foundation) (manual) **or** the deployment outputs from [04-deployment-automated.md § Step 3](./04-deployment-automated.md) (automated) before you can wire the Fabric pipeline to them. Specifically you need: the storage account name, the **Azure AI Foundry resource's Cognitive Services endpoint** (which serves the Document Intelligence `prebuilt-read` API — there is no separate FormRecognizer resource in this pattern), and a Key Vault that holds the DI-caller service principal's client secret (no DI / Foundry API keys are stored anywhere; all DI calls go through the SP via MSAL).
+> **Run this doc after Azure platform layer is up.** You need the Azure resources from [03-deployment-manual.md § Phase 1](./03-deployment-manual.md#phase-1--foundation) (manual) **or** the deployment outputs from [04-deployment-automated.md § Step 3](./04-deployment-automated.md) (automated) before you can wire the Fabric pipeline to them. Specifically you need: the storage account name, the **Microsoft Foundry resource's Cognitive Services endpoint** (which serves the Document Intelligence `prebuilt-read` API — there is no separate FormRecognizer resource in this pattern), and a Key Vault that holds the DI-caller service principal's client secret (no DI / Foundry API keys are stored anywhere; all DI calls go through the SP via MSAL).
 
 > **Time budget.** First-time Fabric build: **2–3 hours** end-to-end. Subsequent rebuilds in the same tenant: **45–60 minutes** once the workspace identity, connections, and notebook artifacts can be reused.
 
@@ -13,7 +13,7 @@ The Fabric layer of this pattern is **always manual**. Neither the manual Azure 
 ```
 Azure side (one-time setup)
 ├── Service principal: sp-rag-di-caller
-│     └── Cognitive Services User on the Azure AI Foundry resource
+│     └── Cognitive Services User on the Microsoft Foundry resource
 │         (Foundry serves the Document Intelligence prebuilt-read API —
 │          no separate FormRecognizer resource in this pattern)
 └── Key Vault secret: di-sp-secret  ← the SP's client secret
@@ -1096,7 +1096,7 @@ Full operating playbook (manual one-off retry, bulk re-process after a fix, tomb
 
 ### A.5 Document Intelligence reaches Blob via the Foundry resource's MI
 
-DI's `urlSource` parameter tells the service to **fetch the blob server-side** from the URL the notebook passes. Because the storage account has `allowSharedKeyAccess=false` and this pattern does not use SAS tokens, that fetch has to authenticate with a managed identity. In this pattern Document Intelligence is served by the **Azure AI Foundry resource** (`kind=AIServices`), so the identity used by DI is the **Foundry resource's system-assigned MI** — not a separate DI MI — and there is no key or token in the URL to fall back to.
+DI's `urlSource` parameter tells the service to **fetch the blob server-side** from the URL the notebook passes. Because the storage account has `allowSharedKeyAccess=false` and this pattern does not use SAS tokens, that fetch has to authenticate with a managed identity. In this pattern Document Intelligence is served by the **Microsoft Foundry resource** (`kind=AIServices`), so the identity used by DI is the **Foundry resource's system-assigned MI** — not a separate DI MI — and there is no key or token in the URL to fall back to.
 
 The Bicep `rbac.bicep` module grants the **Foundry MI** **Storage Blob Data Reader** on the storage account automatically; manual deployments wire it in [03-deployment-manual.md § 1.7 step 3](./03-deployment-manual.md#17-rbac-wiring). Without this role, DI returns `InvalidContent: Could not download the file from the given URL` — see [06-troubleshooting.md § 3.9](./06-troubleshooting.md#39-document-intelligence-invalidcontent-could-not-download-the-file).
 

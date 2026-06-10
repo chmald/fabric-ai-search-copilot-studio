@@ -1,5 +1,5 @@
 // =====================================================================================
-// modules/aifoundry.bicep — Azure AI Foundry resource (kind=AIServices) + model deployments
+// modules/aifoundry.bicep — Microsoft Foundry resource (kind=AIServices) + model deployments
 // =====================================================================================
 //
 // Provisions:
@@ -11,7 +11,7 @@
 // — used directly by AI Search's integrated azureOpenAI vectorizer.
 //
 // This pattern uses Foundry's MODEL GATEWAY capability only. Foundry's agent runtime
-// (Agent Service / Hub / Projects) is NOT used here — Copilot Studio's native AI Search
+// (Agent Service and projects) is NOT used here — Copilot Studio's native AI Search
 // knowledge source fills the agent role for knowledge-base Q&A. Foundry agent runtime
 // is the right addition when an engagement requires multi-agent routing, custom tool
 // calling, or query triage; that is an engagement-specific decision, not part of this

@@ -2,7 +2,7 @@
 
 Step-by-step manual build of the **Azure platform layer** of the RAG knowledge-base pattern. Assumes all of [02-prerequisites.md](./02-prerequisites.md) is complete.
 
-> **What this document is.** A no-IaC, click-through walkthrough that provisions the **Azure resources** in the pattern (RG, Key Vault, Storage, Azure AI Foundry + 2 model deployments + built-in Document Intelligence, AI Search, RBAC, and the AI Search index / data source / indexer). The same Azure end-state is reproducible with [Bicep](./04-deployment-automated.md) — use this manual path when you want to learn the components hands-on or for one-off demo labs; use Bicep for repeatable / CI deployments.
+> **What this document is.** A no-IaC, click-through walkthrough that provisions the **Azure resources** in the pattern (RG, Key Vault, Storage, Microsoft Foundry + 2 model deployments + built-in Document Intelligence, AI Search, RBAC, and the AI Search index / data source / indexer). The same Azure end-state is reproducible with [Bicep](./04-deployment-automated.md) — use this manual path when you want to learn the components hands-on or for one-off demo labs; use Bicep for repeatable / CI deployments.
 
 > **What this document is NOT.** It does **not** cover the Fabric ingestion pipeline or the Copilot Studio agent. Both of those layers are always manual (no IaC surface exists for them today) and have their own dedicated runbooks:
 >
@@ -27,7 +27,7 @@ Step-by-step manual build of the **Azure platform layer** of the RAG knowledge-b
 
 | Phase | What you build | ~Time | Validation at end |
 |---|---|---|---|
-| **1** | **Azure foundation:** RG + Key Vault + Blob + Azure AI Foundry (multi-service — includes both OpenAI deployments and Document Intelligence) + AI Search + RBAC | 60–90 min | All Azure resources deployed; identities + RBAC set |
+| **1** | **Azure foundation:** RG + Key Vault + Blob + Microsoft Foundry (multi-service — includes both OpenAI deployments and Document Intelligence) + AI Search + RBAC | 60–90 min | All Azure resources deployed; identities + RBAC set |
 | **4** | **AI Search index:** schema, integrated vectorizer, hybrid + semantic configuration; indexer pointed at Blob `chunks/` | 45–60 min | Indexer run succeeds; sample query returns chunks with semantic captions |
 
 In between Phase 1 and Phase 4 you switch to **[03b-fabric-setup.md](./03b-fabric-setup.md)** to build the Fabric ingest pipeline (which produces the chunk JSON files in Blob `chunks/` that the Phase 4 indexer consumes). After Phase 4 validates, switch to **[03c-copilot-studio-setup.md](./03c-copilot-studio-setup.md)** to build the agent on top of the populated index.
@@ -96,16 +96,16 @@ az storage container create --account-name $ST --name chunks --auth-mode login
 
 DI is served by the Foundry resource you create in § 1.5. The Fabric OCR notebook calls it at `https://<foundry-name>.cognitiveservices.azure.com/`. No action in this section — continue to § 1.5. See [01-architecture.md § 8](./01-architecture.md#8-document-intelligence-prebuilt-read-served-by-the-foundry-resource) for the design rationale.
 
-### 1.5 Create Azure AI Foundry resource + OpenAI deployments
+### 1.5 Create Microsoft Foundry resource + OpenAI deployments
 
-> **Why a Foundry resource, not a standalone Azure OpenAI resource?** The Azure AI Foundry resource (`kind=AIServices`) is the strategic Microsoft model-gateway resource and a multi-service Cognitive Services account. It hosts OpenAI deployments (`https://<name>.openai.azure.com/` — used unchanged by the AI Search `azureOpenAI` vectorizer) **and** the Document Intelligence `prebuilt-read` endpoint used by the Fabric OCR notebook (`https://<name>.cognitiveservices.azure.com/`) from the same resource, single MI, single RBAC surface. Foundry's agent runtime (Agent Service / Hub / Projects) is **not** used here — Copilot Studio fills the agent role; add Foundry agent runtime only for deployments that need multi-agent routing, custom tool calling, or query triage beyond knowledge-base Q&A.
+> **Why a Foundry resource, not a standalone Azure OpenAI resource?** The Microsoft Foundry resource (`kind=AIServices`) is the strategic Microsoft model-gateway resource and a multi-service Cognitive Services account. It hosts OpenAI deployments (`https://<name>.openai.azure.com/` — used unchanged by the AI Search `azureOpenAI` vectorizer) **and** the Document Intelligence `prebuilt-read` endpoint used by the Fabric OCR notebook (`https://<name>.cognitiveservices.azure.com/`) from the same resource, single MI, single RBAC surface. Foundry's agent runtime (Agent Service and projects) is **not** used here — Copilot Studio fills the agent role; add Foundry agent runtime only for deployments that need multi-agent routing, custom tool calling, or query triage beyond knowledge-base Q&A.
 
 In the Azure portal:
 
-1. **Create a resource → Azure AI Foundry** (look for the "Azure AI Foundry" tile; under the hood this provisions a Cognitive Services resource of kind `AIServices`)
+1. **Create a resource → Microsoft Foundry** (look for the "Microsoft Foundry" tile; under the hood this provisions a Cognitive Services resource of kind `AIServices`)
 2. Same resource group, region (confirm OpenAI model availability for the region)
 3. Pricing tier: **Standard S0**
-4. After deployment: open **Azure AI Foundry portal** (foundry.azure.com) → select the resource → **Models + endpoints → Deploy a model**:
+4. After deployment: open **Microsoft Foundry portal** (foundry.azure.com) → select the resource → **Models + endpoints → Deploy a model**:
    - Deploy `text-embedding-3-large` → name it `embedding` (set capacity to 10K TPM for demo)
    - **(Optional)** Deploy `gpt-4o` → name it `chat`. The locked design does **not** consume a chat completion model — Copilot Studio uses its own host model for generative answers. Only deploy a chat model when a deployment explicitly needs a chat endpoint (custom app code, Foundry agent runtime, BYOM Copilot Studio).
    - (Optional) browse the Foundry catalog for non-OpenAI models if you plan to extend later; this pattern only requires the embedding deployment above

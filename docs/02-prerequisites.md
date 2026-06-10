@@ -56,7 +56,7 @@ Contributor-only is **not enough**; you will hit "Authorization failed" errors w
 
 In the target subscription, register these resource providers (one-time, takes a few minutes):
 
-- `Microsoft.CognitiveServices` (Azure AI Foundry — same provider also covers Document Intelligence, served from the same Foundry account)
+- `Microsoft.CognitiveServices` (Microsoft Foundry — same provider also covers Document Intelligence, served from the same Foundry account)
 - `Microsoft.Search`
 - `Microsoft.Storage`
 - `Microsoft.KeyVault`
@@ -75,24 +75,24 @@ az provider register --namespace Microsoft.CognitiveServices --wait
 
 ---
 
-## 3 — Azure AI Foundry (model gateway)
+## 3 — Microsoft Foundry (model gateway)
 
 ### Required
 
-- **Azure AI Foundry resource** (Azure CLI / ARM kind: `AIServices`) in the target subscription + region. This is the **strategic model-gateway resource** that supersedes the legacy standalone Azure OpenAI resource for new deployments. A single Foundry resource hosts all OpenAI models you deploy and also exposes the broader Foundry model catalog (Cohere, Llama, Phi, Mistral, etc.) under one endpoint.
+- **Microsoft Foundry resource** (Azure CLI / ARM kind: `AIServices`) in the target subscription + region. This is the **strategic model-gateway resource** that supersedes the legacy standalone Azure OpenAI resource for new deployments. A single Foundry resource hosts all OpenAI models you deploy and also exposes the broader Foundry model catalog (Cohere, Llama, Phi, Mistral, etc.) under one endpoint.
 - **Two OpenAI model deployments** inside the Foundry resource:
   - **Embedding** — recommended: `text-embedding-3-large` (3072 dim). Acceptable fallback: `text-embedding-3-small` (1536 dim) for cost-sensitive demos.
   - **Chat completion** — **optional**. The locked design does NOT consume a chat completion model (Copilot Studio uses its own host model for generative answers). Only deploy one when a deployment explicitly needs a chat endpoint: custom app code, Foundry agent runtime, or Copilot Studio bring-your-own-model. When you opt in, the recommended model is `gpt-4o` (cost-down: `gpt-4o-mini`). Set `chatModelName` in [infra/main.parameters.local.json](../infra/main.parameters.json) to opt in.
 
-> **Why Foundry resource over the legacy AOAI resource?** The Azure AI Foundry resource is Microsoft's strategic direction for all new AI model deployments. It exposes the same OpenAI-compatible endpoint (`https://<resource>.openai.azure.com/`) so all existing tooling — including the AI Search integrated `azureOpenAI` vectorizer — works unchanged, while giving you a single resource for all model families (current + future) and a single capacity / billing / content-safety plane.
+> **Why Foundry resource over the legacy AOAI resource?** The Microsoft Foundry resource is Microsoft's strategic direction for all new AI model deployments. It exposes the same OpenAI-compatible endpoint (`https://<resource>.openai.azure.com/`) so all existing tooling — including the AI Search integrated `azureOpenAI` vectorizer — works unchanged, while giving you a single resource for all model families (current + future) and a single capacity / billing / content-safety plane.
 
-> **Important:** this pattern uses Foundry's **model-gateway** capability only. It does **not** use Foundry's agent runtime (Agent Service / Hub / Projects); Copilot Studio's native AI Search knowledge source fills that role. Foundry agent runtime is the right addition when a deployment needs multi-agent routing, custom tool calling, or query triage — that's a deployment-specific decision, not part of this pattern's default stack.
+> **Important:** this pattern uses Foundry's **model-gateway** capability only. It does **not** use Foundry's agent runtime (Agent Service and projects); Copilot Studio's native AI Search knowledge source fills that role. Foundry agent runtime is the right addition when a deployment needs multi-agent routing, custom tool calling, or query triage — that's a deployment-specific decision, not part of this pattern's default stack.
 
 ### Region availability check
 
 Not every model is available in every region. Confirm before provisioning:
 
-- Microsoft Learn: "Azure AI Foundry models and region availability" / "Azure OpenAI models and region availability" (search current Microsoft Learn — region matrix updates frequently)
+- Microsoft Learn: "Microsoft Foundry models and region availability" / "Azure OpenAI models and region availability" (search current Microsoft Learn — region matrix updates frequently)
 - Or query the resource directly:
 
 ```pwsh
@@ -192,9 +192,9 @@ If you have shared Fabric capacity, confirm there is headroom; ingestion pipelin
 
 Initiate these admin asks **before** you start building so they're cleared by the time you're ready to publish.
 
-### Alternative — Azure AI Foundry agent path (03d)
+### Alternative — Microsoft Foundry agent path (03d)
 
-If you are building the agent on **Azure AI Foundry Agent Service** instead of Copilot Studio (see [03d](./03d-foundry-agent-setup.md) and the decision guide [07](./07-copilot-studio-vs-foundry.md)), the Layer-3 prerequisites change:
+If you are building the agent on **Microsoft Foundry Agent Service** instead of Copilot Studio (see [03d](./03d-foundry-agent-setup.md) and the decision guide [07](./07-copilot-studio-vs-foundry.md)), the Layer-3 prerequisites change:
 
 | Requirement | Copilot Studio path (03c) | Foundry agent path (03d) |
 |---|---|---|
@@ -279,7 +279,7 @@ These are the role assignments required by the pattern's Entra-only auth posture
 
 ### Foundry agent path (03d) — additional assignments
 
-Only needed if you build Layer 3 on **Azure AI Foundry Agent Service** instead of Copilot Studio. These are **incremental** to the machine-to-machine grants above (which stay in place — the index, indexer, and vectorizer are unchanged).
+Only needed if you build Layer 3 on **Microsoft Foundry Agent Service** instead of Copilot Studio. These are **incremental** to the machine-to-machine grants above (which stay in place — the index, indexer, and vectorizer are unchanged).
 
 | Principal | Role | Scope | Why | New? |
 |---|---|---|---|---|

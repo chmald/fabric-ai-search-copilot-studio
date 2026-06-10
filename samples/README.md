@@ -1,6 +1,6 @@
 # Structured sample data — Fabric Data Agent
 
-This folder holds the **structured data** for the optional **Microsoft Fabric Data Agent** integration on the [Azure AI Foundry agent path (03d)](../docs/03d-foundry-agent-setup.md). Load these tables into a Fabric Lakehouse and point a Data Agent at them — full steps in [docs/03e-fabric-data-agent.md](../docs/03e-fabric-data-agent.md).
+This folder holds the **structured data** for the optional **Microsoft Fabric Data Agent** integration on the [Microsoft Foundry agent path (03d)](../docs/03d-foundry-agent-setup.md). Load these tables into a Fabric Lakehouse and point a Data Agent at them — full steps in [docs/03e-fabric-data-agent.md](../docs/03e-fabric-data-agent.md).
 
 > **The document corpus is *not* in this repo — by design.** The unstructured sample files (offer letters, NDAs, severance, contractor agreements) are **standalone**: you upload your own document set into the ingestion source to trigger the Fabric → Blob → AI Search flow ([03b § F4](../docs/03b-fabric-setup.md)). This repo ships only the **structured** companion data, which is all the Fabric Data Agent integration needs.
 

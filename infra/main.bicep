@@ -6,7 +6,7 @@
 //   * Resource group
 //   * Key Vault (RBAC-mode)
 //   * Storage account + raw/ and chunks/ containers
-//   * Azure AI Foundry resource (kind=AIServices) — multi-service Cognitive Services
+//   * Microsoft Foundry resource (kind=AIServices) — multi-service Cognitive Services
 //     account that provides:
 //        - Azure OpenAI embedding deployment (text-embedding-3-large) — required
 //        - Azure OpenAI chat deployment (gpt-4o) — OPTIONAL (only provisioned when
