@@ -6,7 +6,9 @@ This document is an **alternative to [03c-copilot-studio-setup.md](./03c-copilot
 
 > **Why this path exists.** It exists for cases where Copilot Studio publishing surfaces an **additional-licensing requirement**: an agent that connects **Azure AI Search** *and* a **Fabric Data Agent** pulls those in as **premium / capacity-billed connectors**, which is licensed on top of the end users' Microsoft 365 Copilot entitlement (Copilot Studio message-capacity packs or per-user Copilot Studio licenses). Moving the agent runtime to Foundry shifts that cost to **Azure consumption** (pay-as-you-go tokens + tool calls) — which an existing Azure subscription already has a billing path for — while end users keep consuming through the M365 Copilot license they already own. See [07-copilot-studio-vs-foundry.md](./07-copilot-studio-vs-foundry.md) for the full trade-off analysis and decision matrix.
 
-> **Preview boundary — read before committing to production.** Publishing an Azure AI Foundry agent into **Microsoft 365 Copilot / Teams** (the "custom engine agent" / Microsoft 365 Agents SDK channel) is a **preview** capability at the time of writing. The Foundry agent runtime, the **Azure AI Search tool**, and the **Microsoft Fabric (Data Agent) tool** are generally available or in advanced preview, but the **M365/Teams publishing surface moves quickly** — re-verify the publishing steps (Phase D6) against current Microsoft Learn before you promise a production date. The Copilot Studio path (03c) remains the fully-GA option if you cannot take a preview dependency.
+> **Preview boundary — read before committing to production.** Publishing a Foundry agent into **Microsoft 365 Copilot / Teams** (the "custom engine agent" / Microsoft 365 Agents SDK channel) is a **preview** capability. The Foundry agent runtime and the **Azure AI Search tool** are GA; the **Microsoft Fabric (Data Agent) tool is in preview**. The **M365/Teams publishing surface moves quickly** — re-verify the publishing steps (Phase D6) against current Microsoft Learn before you promise a production date. The Copilot Studio path (03c) remains the fully-GA option if you cannot take a preview dependency.
+
+> **Targets the GA Microsoft Foundry Agents Service.** Build on the **generally available Microsoft Foundry Agents Service**, *not* the deprecated **Foundry Agent Service (classic)** (retires **2027-03-31**). Microsoft also renamed the Foundry RBAC roles — **Foundry User / Foundry Owner / Foundry Project Manager** were formerly *Azure AI User / Azure AI Owner / Azure AI Project Manager* (role IDs and permissions unchanged); this doc uses the current names.
 
 > **Time budget.** First-time build: **60–90 minutes** hands-on (longer than 03c — there is more Azure-side wiring), plus the same **1–2 business days** of Teams admin approval for org-wide publishing. Subsequent rebuilds in the same project: **20–30 minutes**.
 
@@ -20,7 +22,7 @@ Azure AI Foundry project  (proj-rag-kb)
     ├── Instructions / system prompt   (grounding + refusal rules)
     ├── Tools / knowledge
     │     ├── Azure AI Search tool  → idx-rag-documents
-    │     │     (project connection → Managed identity → Search Index Data Reader)
+    │     │     (project connection → managed identity → Search Index Data Contributor)
     │     └── Microsoft Fabric tool → Fabric Data Agent (structured HR data)
     │           (on-behalf-of caller identity → Fabric workspace + RLS honored)
     └── Channel
@@ -50,23 +52,30 @@ flowchart LR
 
 ---
 
-## Knowledge vs. Tools in Foundry Agent Service (and where Azure AI Search fits)
+## Tools vs. knowledge bases — and why both sources are Tools here
 
-Foundry organizes everything an agent can reach into two conceptual buckets. Knowing which is which prevents the most common setup confusion — **Azure AI Search appears in both places.**
+In Microsoft Foundry Agent Service you give an agent capabilities by adding **tools**. On every turn the model decides **which tool(s) to call** based on the user's question and your agent instructions (this is *tool selection*). Tools come in two kinds:
 
-| | **Knowledge** (grounding / retrieval) | **Tools — "Actions"** (execution) |
+| Kind | Job | Examples |
 |---|---|---|
-| **Purpose** | Give the model *information* to base answers on (RAG). The runtime retrieves relevant content and feeds it into context. | Let the model *do something* or fetch on demand — run code, call an API, trigger a workflow. |
-| **Examples** | **Azure AI Search**, **Microsoft Fabric (Data Agent)**, File Search (vector store), SharePoint, Grounding with Bing | Code Interpreter, Function calling, OpenAPI 3.0 tools, Azure Functions, Azure Logic Apps |
-| **Who triggers it** | The runtime retrieves to **ground** the answer (with multiple sources, the model picks which to query) | The model **invokes** the action when the task needs it |
-| **This pattern uses** | ✅ Azure AI Search (documents) + Fabric Data Agent (structured data) | ✗ none required for knowledge-base Q&A |
+| **Knowledge tools** | retrieve / **ground** the answer on data | **Azure AI Search**, **Microsoft Fabric (Data Agent)**, File Search, SharePoint, Grounding with Bing |
+| **Action tools** | **execute** something | Function calling, Code Interpreter, OpenAPI, Azure Functions, Logic Apps, MCP |
 
-**Why Azure AI Search is "both."** At the API level **every capability — knowledge sources included — lives in the agent's `tools` array**, so Azure AI Search is technically a *tool* (`azure_ai_search`). The portal lists it under **Knowledge** because its *job* is grounding. You will therefore see it described two ways, and they are the **same connection**:
+**This pattern adds Azure AI Search and the Fabric Data Agent as knowledge *tools*** — the agent invokes them; it does **not** attach them as passive "knowledge bases." That is the deliberate choice the rest of this doc follows.
 
-- **As a knowledge source** *(the default, and what this pattern uses)* — the runtime auto-retrieves from `idx-rag-documents` to ground every relevant answer (hybrid + semantic via the integrated vectorizer you already configured). Phase D2 sets this up.
-- **As a model-selectable tool** — when the agent has **more than one** source (here, AI Search *and* the Fabric Data Agent), the model does **tool selection** each turn: search the documents, query the Fabric Data Agent, or both. That routing is the runtime's job; Phase D4 § Tool routing tunes it with instructions.
+**Agent Tool vs. knowledge base — the distinction:**
 
-> **Knowledge ≠ Action.** Both Azure AI Search and the Fabric Data Agent are **knowledge (retrieval) tools** — they *inform* the answer. **Action** tools (Code Interpreter, Functions, Logic Apps) *do* something and are **not needed** for a knowledge-base agent. Add an Action tool only if the agent must take an action beyond answering (e.g. file a ticket, call a line-of-business API). Throughout this doc, "AI Search **tool**" and "AI Search **knowledge source**" mean the same thing.
+| | **Agent Tool** *(what this pattern uses)* | **Knowledge base** *(the other model)* |
+|---|---|---|
+| Wiring | added to the agent's `tools` array | attached as an always-on grounding source |
+| Invocation | the **model decides** per turn whether/which to call; steer with **instructions** and **`tool_choice`** | the runtime **always retrieves** on every turn |
+| Multiple sources | the model **routes** between AI Search and Fabric per question | one always-on source |
+| Best for | multi-source agents that must pick documents vs. data vs. both | a single, always-relevant corpus |
+| Here | Azure AI Search **tool** + Microsoft Fabric **tool** (this doc) | the Copilot Studio "knowledge source" model ([03c](./03c-copilot-studio-setup.md)) |
+
+**Why tools, not a knowledge base, for this agent:** with two sources — unstructured documents *and* structured data — you want the model to **route**: search the documents for wording, query the Fabric Data Agent for numbers, or call both for a cross-source question. Tool selection delivers that; an always-retrieve knowledge base does not. You steer the routing with the **agent instructions** in Phase D4, and can force a specific tool with **`tool_choice`**.
+
+> **Constraints (Foundry Agent Service):** you can add only **one instance of each knowledge-tool type** — one Azure AI Search tool and one Microsoft Fabric tool per agent. The **Azure AI Search tool targets a single index**; to span multiple indexes, use **connected agents**. Action tools (Code Interpreter, Functions, Logic Apps) are **not needed** for this knowledge-base Q&A agent — add one only if the agent must take an action beyond answering.
 
 ---
 
@@ -81,7 +90,7 @@ Confirm these before building. The first three differ materially from the Copilo
 | **Agent runtime** | Copilot Studio **message capacity** (consumption packs) or per-user Copilot Studio license — **on top of** M365 Copilot | **Azure consumption** — chat-model tokens + tool calls + AI Search query unit + Fabric capacity. Billed to the Azure subscription. |
 | **AI Search + Fabric Data Agent connectors** | Surfaced as **premium / capacity-billed connectors** in Power Platform | Native Foundry **tools** — no Power Platform connector licensing |
 | **End-user access** | Microsoft 365 Copilot license | Microsoft 365 Copilot license (**unchanged**) |
-| **Maker / builder** | Copilot Studio Maker license | **Azure AI Developer** (or Project Manager) RBAC on the Foundry project |
+| **Maker / builder** | Copilot Studio Maker license | **Foundry User** (or Project Manager) RBAC on the Foundry project |
 
 The net: you trade a **Power Platform message-pack line item** for **Azure pay-as-you-go**. For an Azure-committed organization that is usually the cheaper and more predictable path, and it removes the premium-connector blocker entirely. Quantify both for your scenario with [07 § Licensing deep-dive](./07-copilot-studio-vs-foundry.md#licensing-deep-dive) before deciding.
 
@@ -107,7 +116,7 @@ Tenant settings: the Fabric admin must enable **Copilot and Azure OpenAI** and *
 | Requirement | Required state | Why |
 |---|---|---|
 | **Azure AI Foundry project** | A project exists in a Foundry resource (reuse the `aif-rag-<env>` account from the base deploy, or a project hub bound to it) | Hosts the agent, tools, and connections |
-| **Builder RBAC on the project** | **Azure AI Developer** (build agents/connections) — or **Azure AI Project Manager** for full project control | Create agent, add tools, create connections |
+| **Builder RBAC on the project** | **Foundry User** (build agents/connections; formerly *Azure AI User*) — or **Foundry Project Manager** for full project control | Create agent, add tools, create connections |
 | **Microsoft 365 Copilot license** (end users) | Assigned to the pilot audience | Required to consume the agent in Teams / M365 Copilot |
 | **Teams app upload / admin approval** | Same one-time approval as 03c | Custom engine agent is uploaded as a Teams app |
 | **Azure consumption budget** | Subscription with PAYG enabled + a cost alert | Replaces Copilot Studio message packs |
@@ -120,53 +129,102 @@ Tenant settings: the Fabric admin must enable **Copilot and Azure OpenAI** and *
 2. Under **Models + endpoints**, confirm the **embedding** deployment (`text-embedding-3-large`) exists and **deploy the chat model** (`gpt-4o`) from D0.2 if it is not already there.
 3. Note the **project endpoint** and **project name** — Phase D6 needs them.
 
-Reference: [What is Azure AI Foundry Agent Service](https://learn.microsoft.com/azure/ai-foundry/agents/overview).
+Reference: [Microsoft Foundry Agent Service overview](https://learn.microsoft.com/azure/foundry/agents/overview).
 
 ---
 
-## Phase D2 — Connect Azure AI Search as a knowledge tool
+## Phase D2 — Add the Azure AI Search tool
 
-This grounds the agent on the **same `idx-rag-documents` index** the Copilot Studio path used — no re-indexing.
+This grounds the agent on the **same `idx-rag-documents` index** the Copilot Studio path used — no re-indexing. The Azure AI Search tool targets **one index** and must be in the **same tenant** as the search service.
 
-1. In the project, open **Management center → Connected resources → New connection → Azure AI Search**.
-2. Select the `srch-rag-<env>` service. For **authentication, choose the project's managed identity** (not an API key) — admin/query keys are disabled on this service per the locked design ([01 § Trust boundaries](./01-architecture.md#trust-boundaries--security)).
-3. Grant the **project managed identity** the **Search Index Data Reader** role on the search service (RBAC table below). This is read-only query access — narrower than the deployer's build-time roles.
-4. In the agent (Phase D4), add the **Azure AI Search** tool, point it at this connection and the `idx-rag-documents` index, and select **semantic** query type with the **vector** profile so it uses the integrated vectorizer + semantic ranker you already configured.
+1. **Create the project connection.** In the Foundry portal, open your project → **Management center → Connected resources → New connection → Azure AI Search** → select `srch-rag-<env>`. Choose **Managed identity** for authentication (key-based auth isn't supported with private networking, and admin/query keys are disabled on this service per the locked design — [01 § Trust boundaries](./01-architecture.md#trust-boundaries--security)).
+2. **Grant the project's managed identity** the roles the tool needs on the search service (see RBAC summary). The current docs prescribe **Search Index Data Contributor** + **Search Service Contributor** (these also cover creating an index from the portal). For **read-only query of an existing index** — this pattern — **Search Index Data Reader** is the least-privilege alternative.
+3. **Index requirement.** The tool requires a vector-search index: at least one `Edm.String` field that is *searchable + retrievable* and one `Collection(Edm.Single)` *searchable* vector field. `idx-rag-documents` already satisfies this.
+4. **Add the tool to the agent** (Phase D4): add the **Azure AI Search** tool, point it at this connection + the `idx-rag-documents` index, and select the **vector semantic** query type so it uses the integrated vectorizer + semantic ranker you already configured.
 
-> The integrated vectorizer still embeds the user's query via the AI Search → Foundry **Cognitive Services OpenAI User** grant that already exists from the base deploy ([modules/rbac.bicep](../infra/modules/rbac.bicep)). Nothing changes there — query-time embedding is owned by AI Search, not the agent.
+> The integrated vectorizer still embeds the user's query via the AI Search → Foundry **Cognitive Services OpenAI User** grant from the base deploy ([modules/rbac.bicep](../infra/modules/rbac.bicep)) — query-time embedding is owned by AI Search, not the agent.
 
-Reference: [Azure AI Search tool for Foundry Agent Service](https://learn.microsoft.com/azure/ai-foundry/agents/how-to/tools/azure-ai-search).
-
----
-
-## Phase D3 — Connect the Fabric Data Agent as a knowledge tool (structured data)
-
-> Skip this phase if your deployment is unstructured-document-only (see D0.3 note).
-
-The Fabric Data Agent is the **second knowledge source** (per the Knowledge vs. Tools section above) — it grounds answers on **structured** data by translating the question to a query, rather than retrieving document chunks.
-
-1. In the project, add the **Microsoft Fabric** tool to the agent and create a connection to the **Fabric Data Agent** you published per [03e-fabric-data-agent.md](./03e-fabric-data-agent.md) (you supply the Fabric workspace + data-agent identifiers / endpoint).
-2. **Identity model — choose deliberately; this is the HR-data security decision:**
-
-   | Identity mode | Behavior | Use for |
-   |---|---|---|
-   | **On-behalf-of (delegated user identity)** — **recommended for HR** | The signed-in user's identity flows to Fabric; the Data Agent answers **only over data that user is permitted to see** — workspace permissions + **row-level / object-level security** are enforced per user. | Any data with per-employee / per-role sensitivity (comp, PII, manager-only views). |
-   | **Fixed service identity** | All callers query Fabric as one identity; everyone sees the same scope. Simpler, but **no per-user trimming**. | Non-sensitive, uniformly-shareable reference data only. |
-
-3. For on-behalf-of, the **end user** (not just the builder) needs at least **Viewer** on the Fabric workspace and read/build on the underlying semantic model or Lakehouse. The custom engine agent channel (Phase D6) is what carries the user's identity into the call.
-
-Reference: [Microsoft Fabric tool for Foundry Agent Service](https://learn.microsoft.com/azure/ai-foundry/agents/how-to/tools/fabric) · [Fabric Data Agent security](https://learn.microsoft.com/fabric/data-science/data-agent-consume).
+Reference: [Azure AI Search tool (Microsoft Foundry Agent Service)](https://learn.microsoft.com/azure/foundry/agents/how-to/tools/ai-search).
 
 ---
 
-## Phase D4 — Author the agent (instructions, grounding, security trimming)
+## Phase D3 — Add the Microsoft Fabric (Data Agent) tool (structured data)
 
-1. **Instructions / system prompt.** State the persona, the corpus scope, and **hard refusal rules** — the Foundry runtime has no equivalent of Copilot Studio's "Allow ungrounded responses: Off" toggle, so the guardrail lives in the prompt. Recommended spine:
-   - *"Answer only from the Azure AI Search knowledge tool and the Fabric Data Agent tool. If neither returns relevant content, say you don't have that information. Always cite the source document for document answers. Never use general world knowledge for HR-policy or HR-data questions."*
-2. **Tool routing.** Tell the agent **when to use which tool**: AI Search for policy/contract/letter wording; Fabric Data Agent for counts, aggregates, and structured lookups; both when a question spans prose + data.
-3. **Document-level security trimming (same nuance as 03c).** The AI Search index carries a `group_ids` security-trim field ([01 § Document-level access control](./01-architecture.md#document-level-chunk-level-access-control)). For per-user trimming the agent must inject the **caller's Entra group IDs** as an OData `$filter` on the AI Search tool:
-   `group_ids/any(g: search.in(g, '<caller group IDs>'))`
-   The custom engine agent channel supplies the caller identity; mapping that identity to group IDs and passing the filter is **deployment-specific wiring** — validate it end-to-end ([05 § G](./05-testing.md)) rather than assuming it is automatic. For structured data, trimming is enforced by Fabric RLS via the on-behalf-of identity (Phase D3) — a cleaner per-user story than the document side.
+> Skip this phase if your deployment is unstructured-document-only (see D0.3 note). The Microsoft Fabric tool is in **preview**.
+
+The Fabric Data Agent is the **second knowledge tool** — it grounds answers on **structured** data by translating the question to a query (NL2SQL / NL2DAX), rather than retrieving document chunks. It must be in the **same tenant** as the Foundry project, and it authenticates **only** with the **signed-in user's identity (On-Behalf-Of)** — **service principal auth is not supported.**
+
+1. **Get the data agent's IDs.** In Microsoft Fabric, open the data agent you published per [03e](./03e-fabric-data-agent.md). Copy the **`workspace_id`** and **`artifact_id`** from the URL — the path looks like `.../groups/<workspace_id>/aiskills/<artifact_id>...` (both are GUIDs).
+2. **Create the project connection.** In the Foundry portal → **Management center → Connected resources → New connection → Microsoft Fabric** → enter the `workspace_id` and `artifact_id` → save → copy the **connection ID**.
+3. **Add the tool to the agent** (Phase D4) using that connection.
+4. **Identity & access (On-Behalf-Of).** At runtime the tool queries Fabric as the **signed-in end user**, so each user only sees data they're permitted to — workspace permissions + **row-/object-level security** are enforced per user. Every end user (not just the builder) needs **Read** access to the data agent **and** the minimum permission on each underlying source:
+
+   | Data source | Minimum permission |
+   |---|---|
+   | Lakehouse | **Read** on the lakehouse item (+ table access if enforced) |
+   | Warehouse | **Read** (SELECT on relevant tables) |
+   | Power BI semantic model | **Build** (Read alone is insufficient for model queries) |
+   | KQL database | **Reader** |
+
+> The chat model you deploy for the agent is used only for **orchestration + response generation** — it does **not** change the model the Fabric Data Agent uses for NL2SQL. The custom engine agent channel (Phase D6) is what carries the user's identity into the call.
+
+Reference: [Microsoft Fabric tool (preview)](https://learn.microsoft.com/azure/foundry/agents/how-to/tools/fabric) · [Fabric Data Agent](https://learn.microsoft.com/fabric/data-science/concept-data-agent).
+
+---
+
+## Phase D4 — Author the agent: instructions + tool routing
+
+The Foundry runtime has no equivalent of Copilot Studio's "Allow ungrounded responses: Off" toggle — your **agent instructions** are both the grounding guardrail *and* the tool-routing logic. Microsoft's guidance is to describe, **per tool**, what it is, when to call it, and an example query, and to tell the model to prefer tool outputs over its own knowledge. Paste and adapt the block below.
+
+### D4.1 Agent instructions (copy-paste starting point)
+
+```text
+You are an HR knowledge assistant. Answer questions about an organization's HR
+documents and HR data using ONLY the two tools below. If neither tool returns
+relevant content, say you don't have that information — never answer from your
+own general knowledge, and never guess names, dates, amounts, or clause wording.
+
+TOOLS
+
+1) Azure AI Search tool — "<ai_search_tool_name>"
+   - What it is: full-text + vector search over the HR document corpus
+     (offer letters, NDAs, severance agreements, contractor agreements).
+   - Use it for: the wording or presence of clauses, policy language, and any
+     question about what a specific document says.
+   - Example queries: "What is the non-compete period in the VP of Product offer
+     letter?"  /  "Summarize the IP-assignment clause in the US contractor agreements."
+   - Always cite the source document for answers from this tool.
+
+2) Microsoft Fabric tool — "<fabric_tool_name>"
+   - What it is: a Fabric Data Agent over structured HR tables (employees,
+     agreements) that answers with counts, filters, and aggregates.
+   - Use it for: "how many", "average", "list", "which", totals — any question
+     answered by numbers or records rather than document wording.
+   - Example queries: "How many executive-level offers are there?"  /  "Average
+     annual base salary for US senior roles?"  /  "List every agreement in the DE region."
+   - Filter on amount_basis before averaging amounts; do not convert currencies.
+
+ROUTING
+- Document-wording question        -> Azure AI Search tool.
+- Counts / aggregates / lists       -> Microsoft Fabric tool.
+- Needs both (e.g. a person's salary AND a clause) -> call both, then combine:
+  the number from Fabric, the wording (with citation) from AI Search.
+
+Always prefer tool outputs over your own knowledge. Be concise, and cite the
+source document for every document-based answer.
+```
+
+Replace `<ai_search_tool_name>` / `<fabric_tool_name>` with the names you give the tools when you add them — **the model routes by these names**, so make them descriptive (e.g. `hr_documents_search`, `hr_data_agent`).
+
+### D4.2 Force a tool when you need determinism
+
+Instructions guide the model but don't guarantee a call. To **force** (or disable) a specific tool — e.g. a test that must exercise the Fabric tool — set the run's **`tool_choice`** parameter to the tool type (for example `tool_choice={"type": "fabric_dataagent"}` or `{"type": "azure_ai_search"}`); leave it `auto` (the default) for normal routing. See [Controlling tool invocation](https://learn.microsoft.com/azure/foundry/agents/concepts/tool-catalog).
+
+### D4.3 Document-level security trimming (same nuance as 03c)
+
+The AI Search index carries a `group_ids` security-trim field ([01 § Document-level access control](./01-architecture.md#document-level-chunk-level-access-control)). For per-user trimming the agent must inject the **caller's Entra group IDs** as an OData `$filter` on the AI Search tool:
+`group_ids/any(g: search.in(g, '<caller group IDs>'))`
+The custom engine agent channel supplies the caller identity; mapping that identity to group IDs and passing the filter is **deployment-specific wiring** — validate it end-to-end ([05 § G](./05-testing.md)) rather than assuming it is automatic. For structured data, trimming is enforced by Fabric RLS via the On-Behalf-Of identity (Phase D3) — a cleaner per-user story than the document side.
 
 ---
 
@@ -185,7 +243,7 @@ Reference: [Microsoft Fabric tool for Foundry Agent Service](https://learn.micro
 The Foundry agent is exposed to Teams / M365 Copilot as a **custom engine agent**: a thin Microsoft 365 Agents SDK app (a bot registration) that forwards user turns to your Foundry agent endpoint and streams responses back.
 
 1. **Wrap the agent** with the **Microsoft 365 Agents Toolkit** (VS Code) — scaffold a custom engine agent that targets your Foundry **project endpoint + agent ID** from Phase D1. The toolkit generates the Teams app manifest and the bot.
-2. **Entra bot identity.** The generated bot has its own Entra app registration; grant it access to call the Foundry agent (the project connection / `Azure AI User` on the project, or the API-key connection the toolkit configures). This bot identity is the trust bridge between Teams and Foundry.
+2. **Entra bot identity.** The generated bot has its own Entra app registration; grant it access to call the Foundry agent (the project connection / **Foundry User** on the project, or the API-key connection the toolkit configures). This bot identity is the trust bridge between Teams and Foundry.
 3. **Carry the user identity** so on-behalf-of (Phase D3) and security trimming (Phase D4) work — configure SSO on the bot so the caller's token, not just the bot's, reaches the agent.
 4. **Sideload for the pilot** (just you / your team) to validate in Teams and M365 Copilot.
 5. **Org-wide publish** goes through the **Teams admin center → Manage apps** approval — the same 1–2 business-day gate as 03c § C0.2. The agent appears in the Teams app store and the M365 Copilot agent list for licensed users.
@@ -205,20 +263,20 @@ This is the **complete identity map** for the Foundry-agent path. Three identiti
 | **AI Search service MI** | **Cognitive Services OpenAI User** | Foundry resource | Integrated vectorizer embeds queries — the silent-failure trap if wrong ([06 § 4.1](./06-troubleshooting.md)) | Unchanged (base) |
 | **AI Search service MI** | **Storage Blob Data Reader** | Storage account | Indexer pulls chunk JSON | Unchanged (base) |
 | **Foundry resource MI** | **Storage Blob Data Reader** | Storage account | Document Intelligence fetches `raw/` via `urlSource` | Unchanged (base) |
-| **Foundry *project* MI** | **Search Index Data Reader** | AI Search service | **Agent's AI Search tool runs read-only queries** | **New (D2)** |
+| **Foundry *project* MI** | **Search Index Data Contributor** + **Search Service Contributor** (or **Search Index Data Reader** for read-only) | AI Search service | **Agent's AI Search tool queries the index** | **New (D2)** |
 | **Foundry project MI / caller** | **Cognitive Services OpenAI User** | Foundry resource | Agent generates answers on the chat deployment | **New (D1)** |
-| **Caller user identity (OBO)** | **Viewer** (+ model read/build) | Fabric workspace / semantic model | Fabric Data Agent answers within the user's RLS/OLS scope | **New (D3)** |
+| **Caller user identity (OBO)** | **Read** on the data agent + sources (Lakehouse Read; semantic model Build) | Fabric workspace | Fabric Data Agent answers within the user's RLS scope — **user identity only, no service principal** | **New (D3)** |
 
 ### Builder + channel identities
 
 | Principal | Role | Scope | Why |
 |---|---|---|---|
-| Building user / deploy SP | **Azure AI Developer** (or **Project Manager**) | Foundry project | Create agent, tools, connections, deployments |
-| Custom-engine-agent **bot** (Entra app) | **Azure AI User** (or the project connection the toolkit configures) | Foundry project / agent | Teams bot forwards turns to the agent endpoint |
+| Building user / deploy SP | **Foundry User** (or **Foundry Project Manager**) | Foundry project | Create agent, tools, connections, deployments |
+| Custom-engine-agent **bot** (Entra app) | **Foundry User** (or the project connection the toolkit configures) | Foundry project / agent | Teams bot forwards turns to the agent endpoint |
 | End users | **Microsoft 365 Copilot** license | M365 tenant | Consume the agent in Teams / M365 Copilot |
 | Teams admin | App approval | Teams admin center | One-time org-wide publish gate |
 
-> **The two-line answer for "what's needed for RBAC":** (1) grant the **Foundry project managed identity `Search Index Data Reader`** on the search service so the agent can query the index, and (2) flow the **caller's user identity (on-behalf-of)** into the Fabric Data Agent so HR row-level security is enforced per user. Everything else is either already in place from the base deploy or a standard Azure AI Foundry builder/bot grant.
+> **The two-line answer for "what's needed for RBAC":** (1) grant the **Foundry project managed identity** the AI Search tool roles on the search service (`Search Index Data Contributor` + `Search Service Contributor`, or `Search Index Data Reader` for read-only) so the agent can query the index, and (2) flow the **caller's user identity (on-behalf-of)** into the Fabric Data Agent so HR row-level security is enforced per user. Everything else is either already in place from the base deploy or a standard Foundry builder/bot grant.
 
 ---
 
@@ -234,7 +292,7 @@ This is the **complete identity map** for the Foundry-agent path. Three identiti
 ## Validation checklist
 
 - [ ] Chat model deployed on the Foundry resource and in-region quota confirmed (D0.2)
-- [ ] Foundry project MI granted **Search Index Data Reader** on AI Search (D2)
+- [ ] Foundry project MI granted the AI Search tool roles (**Search Index Data Contributor** + **Search Service Contributor**, or **Reader** for read-only) on AI Search (D2)
 - [ ] AI Search tool returns grounded answers with citations to Blob `raw/` files in the playground (D5)
 - [ ] (If in scope) Fabric Data Agent published and connected with **on-behalf-of** identity (D3)
 - [ ] Out-of-corpus question is **refused** (prompt guardrail working) (D4/D5)
@@ -257,11 +315,11 @@ Choose 03c instead of this path when **any** of these hold — full matrix in [0
 
 ## References
 
-- [Azure AI Foundry Agent Service — overview](https://learn.microsoft.com/azure/ai-foundry/agents/overview)
-- [Azure AI Search tool](https://learn.microsoft.com/azure/ai-foundry/agents/how-to/tools/azure-ai-search)
-- [Microsoft Fabric tool](https://learn.microsoft.com/azure/ai-foundry/agents/how-to/tools/fabric)
-- [Role-based access control in Azure AI Foundry](https://learn.microsoft.com/azure/ai-foundry/concepts/rbac-azure-ai-foundry)
-- [Fabric Data Agent concept](https://learn.microsoft.com/fabric/data-science/concept-data-agent) · [consume / security](https://learn.microsoft.com/fabric/data-science/data-agent-consume)
+- [Microsoft Foundry Agent Service — overview](https://learn.microsoft.com/azure/foundry/agents/overview) · [tool catalog](https://learn.microsoft.com/azure/foundry/agents/concepts/tool-catalog)
+- [Azure AI Search tool](https://learn.microsoft.com/azure/foundry/agents/how-to/tools/ai-search)
+- [Microsoft Fabric tool (preview)](https://learn.microsoft.com/azure/foundry/agents/how-to/tools/fabric)
+- [Role-based access control in Microsoft Foundry](https://learn.microsoft.com/azure/foundry/concepts/rbac-foundry)
+- [Fabric Data Agent concept](https://learn.microsoft.com/fabric/data-science/concept-data-agent) · [create](https://learn.microsoft.com/fabric/data-science/how-to-create-data-agent)
 - [Custom engine agents for Microsoft 365 Copilot](https://learn.microsoft.com/microsoft-365-copilot/extensibility/overview-custom-engine-agent)
 - [Microsoft 365 Agents SDK](https://learn.microsoft.com/microsoft-365/agents-sdk/) · [Agents Toolkit](https://learn.microsoft.com/microsoftteams/platform/toolkit/agents-toolkit-fundamentals)
 - Companion decision guide: [07-copilot-studio-vs-foundry.md](./07-copilot-studio-vs-foundry.md)

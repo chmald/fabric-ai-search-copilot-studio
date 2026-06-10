@@ -4,9 +4,9 @@ This document builds the **structured-data knowledge source** for the agent: a *
 
 > **Optional — Foundry path only.** Only the [Azure AI Foundry agent path (03d)](./03d-foundry-agent-setup.md) wires a Fabric Data Agent (as its **Microsoft Fabric knowledge tool**, Phase D3). Skip this doc if your deployment is unstructured-document-only. *(Copilot Studio can also consume a Fabric Data Agent, but that connector is exactly the premium / message-capacity-billed path 03d exists to avoid — so the Fabric Data Agent is documented on the Foundry path.)*
 
-> **Run order.** Build this **after** the Fabric workspace exists ([03b](./03b-fabric-setup.md)) and **before** [03d Phase D3](./03d-foundry-agent-setup.md#phase-d3--connect-the-fabric-data-agent-as-a-knowledge-tool-structured-data). It reuses the same workspace and capacity — no new Azure resources.
+> **Run order.** Build this **after** the Fabric workspace exists ([03b](./03b-fabric-setup.md)) and **before** [03d Phase D3](./03d-foundry-agent-setup.md#phase-d3--add-the-microsoft-fabric-data-agent-tool-structured-data). It reuses the same workspace and capacity — no new Azure resources.
 
-> **Preview boundary.** Fabric Data Agent is a current Fabric capability gated by tenant settings; feature names and screens move. Re-verify against [Fabric Data Agent docs](https://learn.microsoft.com/fabric/data-science/concept-data-agent) at build time.
+> **Preview boundary.** The **Fabric Data Agent** (this Fabric feature) is **generally available**; the **Foundry Microsoft Fabric tool** that consumes it (03d Phase D3) is in **preview**. Tenant settings gate the feature and screens move — re-verify against [Fabric Data Agent docs](https://learn.microsoft.com/fabric/data-science/concept-data-agent) at build time.
 
 ---
 
@@ -39,7 +39,7 @@ The CSVs in [`samples/structured/`](../samples/structured/) correspond to a stan
 | **Tenant settings** (Fabric admin) | **Copilot and Azure OpenAI** enabled, and **Data Agent** creation enabled for your group ([admin portal](https://learn.microsoft.com/fabric/admin/service-admin-portal-copilot)). |
 | **Structured CSVs** | `samples/structured/employees.csv` (15 rows) + `agreements.csv` (30 rows) — ship in this repo. |
 | **Builder role** | **Member** or **Contributor** on the workspace (to create + publish the Data Agent). |
-| **End-user role** (for 03d on-behalf-of) | **Viewer** on the workspace + read on the Lakehouse/tables, so per-user RLS is enforced when the Foundry agent calls on the user's behalf. |
+| **End-user role** (for 03d on-behalf-of) | **Read** access to the data agent + **Read** on the Lakehouse item/tables. The Foundry Fabric tool uses **user identity (OBO) only — service principal is not supported**, so each end user needs these grants for per-user RLS. |
 
 ---
 
@@ -111,26 +111,28 @@ Iterate on the instructions/notes until the example questions pass cleanly — t
 ## Phase G5 — Publish
 
 1. **Publish** the Data Agent (publish action in the Data Agent toolbar). Publishing produces the consumable version the Foundry agent connects to.
-2. Note the **workspace name/ID** and the **Data Agent name/ID** (and published endpoint/URL if shown) — [03d Phase D3](./03d-foundry-agent-setup.md#phase-d3--connect-the-fabric-data-agent-as-a-knowledge-tool-structured-data) needs them to create the Microsoft Fabric tool connection.
+2. Note the **workspace name/ID** and the **Data Agent name/ID** (and published endpoint/URL if shown) — [03d Phase D3](./03d-foundry-agent-setup.md#phase-d3--add-the-microsoft-fabric-data-agent-tool-structured-data) needs them to create the Microsoft Fabric tool connection.
 
 ---
 
 ## Identity & RBAC (how this ties to 03d)
 
-A Fabric Data Agent **honors the permissions of the identity that calls it** — it never widens access to the underlying tables. Choose the calling identity deliberately in [03d Phase D3](./03d-foundry-agent-setup.md#phase-d3--connect-the-fabric-data-agent-as-a-knowledge-tool-structured-data):
+A Fabric Data Agent **honors the permissions of the identity that calls it** — it never widens access to the underlying tables. Choose the calling identity deliberately in [03d Phase D3](./03d-foundry-agent-setup.md#phase-d3--add-the-microsoft-fabric-data-agent-tool-structured-data):
 
 | Calling identity | What the Data Agent can see | Use for |
 |---|---|---|
 | **On-behalf-of (delegated user)** — recommended | Only data the **signed-in user** is permitted to see; workspace permissions + **row-/object-level security** apply per user | Sensitive HR data (comp, PII, manager-only views) |
 | **Fixed service identity** | One identity's scope for every caller | Non-sensitive, uniformly-shareable reference data |
 
+> **The Foundry Microsoft Fabric tool supports On-Behalf-Of (user identity) only — service principal authentication is not supported.** The fixed-identity option applies to other consumption paths, not the 03d Foundry integration.
+
 | Principal | Role / grant | Scope | Why |
 |---|---|---|---|
 | Builder | **Member** / **Contributor** | Workspace | Create + publish the Data Agent |
-| End user (OBO) | **Viewer** + table read | Workspace / Lakehouse | Data Agent answers within the user's RLS scope |
-| Foundry agent connection | per [03d D3](./03d-foundry-agent-setup.md#phase-d3--connect-the-fabric-data-agent-as-a-knowledge-tool-structured-data) | — | Carries the caller identity into Fabric |
+| End user (OBO) | **Read** on data agent + **Read** on Lakehouse tables | Workspace / Lakehouse | Data Agent answers within the user's RLS scope (user identity only) |
+| Foundry agent connection | per [03d D3](./03d-foundry-agent-setup.md#phase-d3--add-the-microsoft-fabric-data-agent-tool-structured-data) | — | Carries the caller identity into Fabric |
 
-Reference: [Consume a Fabric Data Agent + security](https://learn.microsoft.com/fabric/data-science/data-agent-consume) · [Microsoft Fabric tool for Foundry Agent Service](https://learn.microsoft.com/azure/ai-foundry/agents/how-to/tools/fabric).
+Reference: [Fabric Data Agent end-to-end (incl. security)](https://learn.microsoft.com/fabric/data-science/data-agent-end-to-end-tutorial) · [Microsoft Fabric tool (preview)](https://learn.microsoft.com/azure/foundry/agents/how-to/tools/fabric).
 
 ### (Optional) Demonstrate per-user trimming
 
@@ -151,8 +153,8 @@ To show on-behalf-of security end-to-end, add **row-level security** on the `emp
 
 ## References
 
-- [Fabric Data Agent — concept](https://learn.microsoft.com/fabric/data-science/concept-data-agent) · [create](https://learn.microsoft.com/fabric/data-science/how-to-create-data-agent) · [consume / security](https://learn.microsoft.com/fabric/data-science/data-agent-consume)
-- [Microsoft Fabric tool for Azure AI Foundry Agent Service](https://learn.microsoft.com/azure/ai-foundry/agents/how-to/tools/fabric)
+- [Fabric Data Agent — concept](https://learn.microsoft.com/fabric/data-science/concept-data-agent) · [create](https://learn.microsoft.com/fabric/data-science/how-to-create-data-agent) · [end-to-end (incl. security)](https://learn.microsoft.com/fabric/data-science/data-agent-end-to-end-tutorial)
+- [Microsoft Fabric tool (preview) — Microsoft Foundry Agent Service](https://learn.microsoft.com/azure/foundry/agents/how-to/tools/fabric)
 - Structured sample data: [samples/README.md](../samples/README.md)
 - Foundry agent that consumes this: [docs/03d-foundry-agent-setup.md](./03d-foundry-agent-setup.md)
 

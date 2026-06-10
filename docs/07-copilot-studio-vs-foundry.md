@@ -131,7 +131,7 @@ Build the path that unblocks you **now**; keep the other as a documented fallbac
 - Copilot Studio path: [03c-copilot-studio-setup.md](./03c-copilot-studio-setup.md)
 - Foundry path: [03d-foundry-agent-setup.md](./03d-foundry-agent-setup.md)
 - Architecture (Layer 3 alternatives): [01-architecture.md](./01-architecture.md#layer-3--conversational-layer-copilot-studio--purple)
-- [Copilot Studio licensing](https://learn.microsoft.com/microsoft-copilot-studio/requirements-licensing-subscriptions) · [Azure AI Foundry Agent Service pricing/billing](https://learn.microsoft.com/azure/ai-foundry/agents/overview)
+- [Copilot Studio licensing](https://learn.microsoft.com/microsoft-copilot-studio/requirements-licensing-subscriptions) · [Microsoft Foundry Agent Service overview](https://learn.microsoft.com/azure/foundry/agents/overview)
 
 ---
 
