@@ -76,6 +76,7 @@ See [docs/01-architecture.md](./docs/01-architecture.md) for the full design nar
 | [docs/05-testing.md](./docs/05-testing.md) | Functional tests, retrieval quality, semantic-ranker validation, end-to-end demo script |
 | [docs/06-troubleshooting.md](./docs/06-troubleshooting.md) | Common failure modes and fixes |
 | [docs/07-copilot-studio-vs-foundry.md](./docs/07-copilot-studio-vs-foundry.md) | **Decision guide** — Copilot Studio vs. Azure AI Foundry Agent Service for Layer 3: side-by-side, licensing deep-dive, pros/cons, decision matrix, migration note |
+| [docs/08-rbac-and-identity-passthrough.md](./docs/08-rbac-and-identity-passthrough.md) | **RBAC & identity reference** — consolidated identity map across all layers, plus how **identity passthrough (OBO)** enforces per-user restrictions: AI Search filter injection vs. Fabric **RLS/OLS/Purview/DLP** and semantic-model security. Config checklist + silent-failure traps. |
 | `infra/main.bicep` + `infra/modules/*.bicep` | Bicep IaC for all Azure resources (RG, KV, Storage, Foundry + model deployments + built-in Document Intelligence, AI Search, RBAC) |
 | `infra/main.parameters.json` | Bicep parameters template — copy to `main.parameters.local.json` for your values (gitignored) |
 | `infra/deploy.ps1` | PowerShell wrapper for `az deployment sub create` + output capture |

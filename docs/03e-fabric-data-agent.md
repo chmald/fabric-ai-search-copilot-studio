@@ -117,6 +117,8 @@ Iterate on the instructions/notes until the example questions pass cleanly — t
 
 ## Identity & RBAC (how this ties to 03d)
 
+> The consolidated cross-layer RBAC map and the full identity-passthrough model (how OBO enforces RLS/OLS/Purview restrictions per user) are in **[08-rbac-and-identity-passthrough.md](./08-rbac-and-identity-passthrough.md)**.
+
 A Fabric Data Agent **honors the permissions of the identity that calls it** — it never widens access to the underlying tables. Choose the calling identity deliberately in [03d Phase D3](./03d-foundry-agent-setup.md#phase-d3--add-the-microsoft-fabric-data-agent-tool-structured-data):
 
 | Calling identity | What the Data Agent can see | Use for |

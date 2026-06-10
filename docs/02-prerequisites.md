@@ -253,6 +253,8 @@ The end-user license is identical on both paths; the difference is **where the r
 
 These are the role assignments required by the pattern's Entra-only auth posture. List them out in advance so you can request them in batch if Owner approvals are required.
 
+> The full cross-layer identity map (ingest → platform → agent) plus the identity-passthrough / per-user-restriction model is consolidated in [08-rbac-and-identity-passthrough.md](./08-rbac-and-identity-passthrough.md).
+
 ### Machine-to-machine (assigned in Bicep `modules/rbac.bicep` or in [03-deployment-manual.md § 1.7](./03-deployment-manual.md#17-rbac-wiring))
 
 | Principal | Role | Scope | Why |

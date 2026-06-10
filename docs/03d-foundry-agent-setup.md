@@ -256,6 +256,8 @@ Reference: [Build agents with the Microsoft 365 Agents SDK](https://learn.micros
 
 This is the **complete identity map** for the Foundry-agent path. Three identities matter: the **AI Search service MI** (unchanged from base), the **Foundry project MI** (new — for the AI Search tool), and the **caller's user identity** (flowed through for Fabric + security trimming). Builder and bot identities round it out.
 
+> For the **full cross-layer picture** (ingest → platform → agent) and **how per-user restrictions propagate** — AI Search filter injection vs. Fabric On-Behalf-Of RLS/OLS/Purview — see **[08-rbac-and-identity-passthrough.md](./08-rbac-and-identity-passthrough.md)**.
+
 ### Machine-to-machine (runtime)
 
 | Principal | Role | Scope | Why | New? |

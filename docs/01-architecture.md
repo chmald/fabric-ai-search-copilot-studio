@@ -232,6 +232,8 @@ Layer 3 has **two interchangeable implementations**. The Copilot Studio version 
 
 ## Trust boundaries & security
 
+> **Consolidated reference:** [08-rbac-and-identity-passthrough.md](08-rbac-and-identity-passthrough.md) maps every identity across all layers and explains how per-user restrictions (RLS/OLS, Purview/DLP, semantic-model security) propagate via identity passthrough.
+
 ### Identity
 
 - **Managed identity everywhere it's supported:**
