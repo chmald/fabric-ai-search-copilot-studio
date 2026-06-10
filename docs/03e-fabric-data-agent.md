@@ -81,7 +81,7 @@ Reference: [Create a Fabric Data Agent](https://learn.microsoft.com/fabric/data-
 
 NL-to-query accuracy depends on the agent understanding what the columns mean. Add:
 
-1. **Agent instructions** (scope + the one gotcha in this dataset):
+1. **Agent instructions** (scope + the one caveat in this dataset):
 
    > You answer questions about an HR document portfolio using two tables. `employees` has one row per offer letter; `agreements` is the full portfolio (offer letters, NDAs, severance, contractor agreements). **Amounts are heterogeneous** — filter on `amount_basis` (`annual` / `hourly` / `lump_sum` / `fixed_fee` / `milestone`) before averaging or summing. Salaries are in the row's `currency`; do not convert across currencies. When asked for a specific person or document, return the `document_id` / `source_pdf` so the answer can be traced.
 

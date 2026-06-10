@@ -92,7 +92,7 @@ Confirm these before building. The first three differ materially from the Copilo
 | **End-user access** | Microsoft 365 Copilot license | Microsoft 365 Copilot license (**unchanged**) |
 | **Maker / builder** | Copilot Studio Maker license | **Foundry User** (or Project Manager) RBAC on the Foundry project |
 
-The net: you trade a **Power Platform message-pack line item** for **Azure pay-as-you-go**. For an Azure-committed organization that is usually the cheaper and more predictable path, and it removes the premium-connector blocker entirely. Quantify both for your scenario with [07 § Licensing deep-dive](./07-copilot-studio-vs-foundry.md#licensing-deep-dive) before deciding.
+In effect, this replaces a **Power Platform message-pack line item** with **Azure pay-as-you-go**. For an organization already committed to Azure, that is usually the cheaper and more predictable path, and it removes the premium-connector constraint entirely. Quantify both for your scenario with [07 § Licensing deep-dive](./07-copilot-studio-vs-foundry.md#licensing-deep-dive) before deciding.
 
 ### D0.2 Chat-model deployment is now REQUIRED
 
@@ -238,7 +238,7 @@ The custom engine agent channel supplies the caller identity; mapping that ident
 
 ## Phase D6 — Publish to Microsoft 365 Copilot + Teams (PREVIEW)
 
-> **Re-verify every step here against current Microsoft Learn** — this is the fastest-moving surface in the pattern.
+> **Re-verify every step here against current Microsoft Learn** — this is the most frequently updated area of the pattern.
 
 The Foundry agent is exposed to Teams / M365 Copilot as a **custom engine agent**: a thin Microsoft 365 Agents SDK app (a bot registration) that forwards user turns to your Foundry agent endpoint and streams responses back.
 

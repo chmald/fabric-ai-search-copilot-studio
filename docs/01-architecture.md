@@ -261,7 +261,7 @@ Because **each chunk is one index document**, "per-chunk security" *is* document
 3. At **query time**, trim with an OData filter on the caller's group memberships:
    `group_ids/any(g: search.in(g, '<comma-separated caller group IDs>'))`
 
-**Identity flow & honest nuance:** the **Entra ID Integrated** connection puts the **calling user's** token in front of AI Search. For the **preview** ACL/RBAC and Purview-label approaches, query-time enforcement against that token is **automatic**. For the **GA security-filter** approach the orchestration layer must supply the caller's group IDs as the `$filter` — this is demonstrable directly against the index/API ([05-testing.md § G](05-testing.md)); native Copilot Studio knowledge-source per-user filter injection is deployment-specific and not guaranteed out of the box.
+**Identity flow — important nuance:** the **Entra ID Integrated** connection puts the **calling user's** token in front of AI Search. For the **preview** ACL/RBAC and Purview-label approaches, query-time enforcement against that token is **automatic**. For the **GA security-filter** approach the orchestration layer must supply the caller's group IDs as the `$filter` — this is demonstrable directly against the index/API ([05-testing.md § G](05-testing.md)); native Copilot Studio knowledge-source per-user filter injection is deployment-specific and not guaranteed out of the box.
 
 
 ### Secrets
@@ -288,7 +288,7 @@ The README table summarized the locked design. The full rationale for each:
 
 ### 1. Copilot Studio orchestration (Foundry agent runtime is the alternative when needed)
 
-Copilot Studio's native AI Search knowledge source delivers retrieval + grounding + citation **without code**. Adding Foundry agent runtime buys orchestration flexibility (multi-agent routing, custom tool calling, query triage logic) but costs the no-code story. For knowledge-base Q&A — the single most common RAG use case and the focus of this pattern — Copilot Studio native is sufficient. **Foundry agent runtime becomes the right choice** when the agent needs to do more than answer questions (e.g. take actions, call tools, route to specialist sub-agents). That is a deployment-specific decision, not a default progression.
+Copilot Studio's native AI Search knowledge source delivers retrieval + grounding + citation **without code**. Adding Foundry agent runtime adds orchestration flexibility (multi-agent routing, custom tool calling, query triage) at the cost of the no-code approach. For knowledge-base Q&A — the single most common RAG use case and the focus of this pattern — Copilot Studio native is sufficient. **Foundry agent runtime becomes the right choice** when the agent needs to do more than answer questions (e.g. take actions, call tools, route to specialist sub-agents). That is a deployment-specific decision, not a default progression.
 
 ### 2. Integrated vectorizer (Foundry-hosted OpenAI)
 
@@ -296,7 +296,7 @@ Pre-integrated-vectorizer, RAG patterns required custom code to (a) embed chunks
 
 ### 3. Hybrid index (BM25 + vector)
 
-Pure vector search underperforms on exact-match queries: employee IDs, contract numbers, dollar amounts, dates, proper names. Pure BM25 underperforms on semantic similarity ("what's our policy on remote work" vs. literal keyword matches). Hybrid wins both. AI Search's hybrid mode is a single index, single query — no extra cost.
+Pure vector search underperforms on exact-match queries: employee IDs, contract numbers, dollar amounts, dates, proper names. Pure BM25 underperforms on semantic similarity ("what's our policy on remote work" vs. literal keyword matches). Hybrid handles both. AI Search's hybrid mode is a single index, single query — no extra cost.
 
 ### 4. Semantic ranker ON
 
@@ -332,7 +332,7 @@ Semantic ranker requires **Standard tier or higher**. S1 supports ~25 GB storage
 
 ## Replication / customization points
 
-To adapt this pattern to a new document domain, only these knobs change:
+To adapt this pattern to a new document domain, only these settings change:
 
 1. **Source attachment** — where OneLake gets its files (SharePoint shortcut, file share copy, mailbox integration, etc.)
 2. **Document type taxonomy** — the values in `doc_type` (e.g. for finance: `policy`, `procedure`, `regulation`; for HR: `offer-letter`, `nda`, `severance`)
@@ -365,7 +365,7 @@ Everything else — pipeline activity wiring, indexer configuration, vectorizer 
 | 1.0 | 2026-05-21 | Initial locked reference architecture |
 | 1.1 | 2026-05-22 | Artifact restructure: docs/ folder layout, Bicep IaC + dual deployment path, ADO pipeline scaffolding |
 | 1.2 | 2026-06-08 | Document/chunk-level access control: `group_ids` security-trim field added to index ([post_deploy_search.py](../scripts/post_deploy_search.py)) + Fabric chunk payload ([03b](03b-fabric-setup.md)) + access-control test category G ([05](05-testing.md)); corrected Copilot Studio → AI Search auth statements to **Entra ID** (admin/query keys are disabled) |
-| 1.3 | 2026-06-09 | Added the **Microsoft Foundry Agent Service** alternative for Layer 3 (licensing-driven — AI Search + Fabric Data Agent premium-connector blocker): new Layer-3 alternative subsection + variant diagram, new runbook [03d](03d-foundry-agent-setup.md), decision guide [07](07-copilot-studio-vs-foundry.md). Architecture decisions unchanged — Copilot Studio remains the default; Foundry agent is the documented alternative. |
+| 1.3 | 2026-06-09 | Added the **Microsoft Foundry Agent Service** alternative for Layer 3 (licensing-driven — AI Search + Fabric Data Agent premium-connector constraint): new Layer-3 alternative subsection + variant diagram, new runbook [03d](03d-foundry-agent-setup.md), decision guide [07](07-copilot-studio-vs-foundry.md). Architecture decisions unchanged — Copilot Studio remains the default; Foundry agent is the documented alternative. |
 | 1.4 | 2026-06-10 | Terminology refresh: **Azure AI Foundry → Microsoft Foundry** (current Microsoft Learn brand) across all docs, the README, and Bicep comments; standardized **Microsoft Foundry Agent Service** and dropped the legacy **Hub** framing. No architectural change — the resource is still `Microsoft.CognitiveServices/accounts` `kind=AIServices` with the same `*.openai.azure.com` / `*.cognitiveservices.azure.com` endpoints. |
 
 Future revisions track changes to the artifact (docs / IaC / scripts), not changes to the architectural decisions. Architectural changes get their own decision records.

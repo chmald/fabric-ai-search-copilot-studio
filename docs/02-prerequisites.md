@@ -206,7 +206,7 @@ If you are building the agent on **Microsoft Foundry Agent Service** instead of 
 | **End-user license** | Microsoft 365 Copilot | Microsoft 365 Copilot (**unchanged**) |
 | **Teams admin approval** | One-time per environment | One-time per app (same gate) |
 
-The end-user license is identical on both paths; the difference is **where the runtime is billed** (Power Platform message packs vs. Azure consumption) and **who builds it** (maker vs. Azure AI developer). This is the licensing lever for deployments blocked by premium-connector / message-capacity cost.
+The end-user license is identical on both paths; the difference is **where the runtime is billed** (Power Platform message packs vs. Azure consumption) and **who builds it** (maker vs. Foundry builder). This is the licensing difference for deployments constrained by premium-connector / message-capacity cost.
 
 ---
 
@@ -371,7 +371,7 @@ Other regions (UAE North, South Africa North, Brazil South, Central India, etc.)
 2. **OpenAI model rollouts cluster.** When a new OpenAI model lands in Azure, it typically reaches East US 2, Sweden Central, Australia East, and Japan East within the first wave. These four regions are the "follow Azure OpenAI's roadmap" choices.
 3. **Co-location preserves the no-egress story.** The integrated vectorizer (AI Search → Foundry) and the indexer (AI Search → Blob) both produce non-trivial inter-service traffic. In-region calls are sub-millisecond and free; cross-region calls add cost and meaningfully degrade indexing throughput.
 4. **Semantic ranker latency is region-sensitive.** The semantic ranker adds 300–500 ms at p95 in a single region. Cross-region between AI Search and Foundry can push that to 1+ second.
-5. **Data residency wins ties.** If your residency policy points at a Tier-2 or Tier-3 region, choose that region — the residency win is more valuable than the model-rollout-lag concern. Plan to refresh model deployments quarterly to stay current.
+5. **Data residency takes precedence.** If your residency policy points at a Tier-2 or Tier-3 region, choose that region — residency outweighs the model-rollout-lag concern. Plan to refresh model deployments quarterly to stay current.
 
 ### Verify at deployment time
 

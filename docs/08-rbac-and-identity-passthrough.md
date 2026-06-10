@@ -17,7 +17,7 @@ A Foundry agent reaches data in **two different ways**, and they enforce per-use
 | How per-user restriction is enforced | the agent must **inject a security filter** (the caller's Entra group IDs) — the index can't trim by a user it never sees | **Fabric enforces it natively** — RLS / OLS / Purview / DLP all apply to the user's identity automatically |
 | If you do nothing | every authenticated user can retrieve **every** chunk | the user sees **only** what their Fabric permissions allow |
 
-**Plain-language takeaway:** structured-data restrictions (Fabric, semantic models) are **enforced for you** because the user's identity passes through. Document restrictions (AI Search) are **your responsibility to wire** because the search index is queried by a service identity, not the user. Sections [§5a](#5a-document-data-ai-search--no-passthrough-you-inject-the-filter) and [§5b](#5b-structured-data-fabric-data-agent--full-obo-passthrough) cover each.
+**In short:** structured-data restrictions (Fabric, semantic models) are **enforced for you** because the user's identity passes through. Document restrictions (AI Search) are **your responsibility to wire** because the search index is queried by a service identity, not the user. Sections [§5a](#5a-document-data-ai-search--no-passthrough-you-inject-the-filter) and [§5b](#5b-structured-data-fabric-data-agent--full-obo-passthrough) cover each.
 
 Reference: [Agent identity (OBO vs agent identity)](https://learn.microsoft.com/azure/foundry/agents/concepts/agent-identity).
 
@@ -164,7 +164,7 @@ If the Fabric Data Agent points at a **Power BI semantic model** (instead of, or
 | Fabric tool | **Required / only supported mode** | **Not supported** |
 | Copilot Studio (03c) | Entra ID Integrated = per-user identity | Service principal = one identity for all |
 
-**Rule of thumb:** for any data with per-user sensitivity (comp, PII, manager-only views), use **OBO** so Fabric enforces restrictions, and wire the **AI Search `group_ids` filter** so the document side matches. A fixed/service identity is acceptable only for uniformly-shareable, non-sensitive data.
+**Guideline:** for any data with per-user sensitivity (comp, PII, manager-only views), use **OBO** so Fabric enforces restrictions, and wire the **AI Search `group_ids` filter** so the document side matches. A fixed/service identity is acceptable only for uniformly-shareable, non-sensitive data.
 
 ---
 

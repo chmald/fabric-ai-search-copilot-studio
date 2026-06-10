@@ -132,7 +132,7 @@ Layer 3 has **two interchangeable implementations** — build **one**. Neither i
 | Option | Runtime | Best for | Doc |
 |---|---|---|---|
 | **D-CS. Copilot Studio** | Power Platform | Lowest-code, fully GA, small audience or CS capacity already licensed | [03c-copilot-studio-setup.md](./03c-copilot-studio-setup.md) |
-| **D-FA. Microsoft Foundry agent** | Foundry Agent Service | **Licensing blocker** (AI Search + Fabric Data Agent premium connectors), structured-data RLS, richer orchestration — accepts **preview** M365/Teams publishing | [03d-foundry-agent-setup.md](./03d-foundry-agent-setup.md) |
+| **D-FA. Microsoft Foundry agent** | Foundry Agent Service | **Licensing constraint** (AI Search + Fabric Data Agent premium connectors), structured-data RLS, richer orchestration — accepts **preview** M365/Teams publishing | [03d-foundry-agent-setup.md](./03d-foundry-agent-setup.md) |
 
 ### Option D-CS — Copilot Studio
 

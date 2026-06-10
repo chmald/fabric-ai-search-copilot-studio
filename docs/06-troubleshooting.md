@@ -454,7 +454,7 @@ Fabric blocks `%pip install` in non-interactive runs because per-run dependency 
 
 **Fix.** Choose based on your maturity:
 
-**Option A — Quick unblock (good for demos / dev).** Pass `_inlineInstallationEnabled = true` as a **base parameter** on the notebook activity in the pipeline. This re-enables `%pip` for that specific activity.
+**Option A — Quick fix (suitable for demos / dev).** Pass `_inlineInstallationEnabled = true` as a **base parameter** on the notebook activity in the pipeline. This re-enables `%pip` for that specific activity.
 
 - Open `pl_ingest_docs` → select the `ocr_chunk_upload` Notebook activity → **Settings → Base parameters** → add: `_inlineInstallationEnabled` (type: Boolean) = `true`
 - Save and re-run the pipeline
@@ -891,7 +891,7 @@ Manually run once to confirm health, then check scheduling settings.
 
 **Symptom.** Some questions invoke the knowledge source; others get a stock LLM answer without grounding.
 
-**Cause.** Copilot Studio routes queries through topics. If a topic matches before generative answers fires, the topic wins.
+**Cause.** Copilot Studio routes queries through topics. If a topic matches before generative answers fires, the topic takes precedence.
 
 **Fix.** Review the topic list, remove or narrow the trigger phrases of topics that should not intercept knowledge questions. As a stopgap: configure **Generative AI** as the primary handler and topics as escalations.
 

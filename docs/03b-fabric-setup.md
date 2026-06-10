@@ -517,7 +517,7 @@ di_sp_secret_name = "di-sp-secret"
 
 > **`%pip install` is disabled in pipeline runs by default.** Per [Manage Apache Spark libraries in Microsoft Fabric](https://learn.microsoft.com/fabric/data-engineering/library-management#inline-installation), Fabric blocks inline `%pip` in pipeline-triggered notebook runs (it works fine in interactive runs from the notebook editor). You have two ways to make the cell above work from the pipeline:
 >
-> - **Quick unblock** — pass `_inlineInstallationEnabled = true` as a **base parameter** on the `ocr_chunk_upload` notebook activity in the pipeline (see [F8.7](#f87-activity-2c--ocr--chunk--upload-notebook)). This re-enables `%pip` for that specific activity. Best for demo / proof-of-concept.
+> - **Quick fix** — pass `_inlineInstallationEnabled = true` as a **base parameter** on the `ocr_chunk_upload` notebook activity in the pipeline (see [F8.7](#f87-activity-2c--ocr--chunk--upload-notebook)). This re-enables `%pip` for that specific activity. Best for demo / proof-of-concept.
 > - **Production pattern (recommended)** — create a Fabric **Environment** (e.g. `env-rag-<env>`) with these packages installed in **Full mode**, then attach the environment to `nb_ocr_chunk_upload`. Once the environment is attached, **delete the `%pip install` cell** (libraries are loaded by Fabric when the Spark session starts). See [Manage libraries in Fabric environments](https://learn.microsoft.com/fabric/data-engineering/environment-manage-library). Full mode adds 1–3 minutes to session startup but eliminates per-run resolution variance.
 
 ```python
@@ -1084,7 +1084,7 @@ The natural shape would be: notebook returns the new-file list inline → ForEac
 - The Lookup activity natively returns the row array as `@activity('...').output.value`, which the ForEach's `Items` expression consumes directly.
 - The notebook can still return a small JSON summary via `notebookutils.notebook.exit(...)` for logging / monitoring.
 
-The one operational gotcha is SQL-endpoint sync lag (Delta writes via Spark take seconds-to-minutes to surface in the SQL endpoint), which is why the pipeline has a **Refresh SQL Endpoint** activity between the notebook and the Lookup ([F8.2](#f82-activity-15--refresh-sql-endpoint)). See [06-troubleshooting.md § 3.6](./06-troubleshooting.md#36-lookup-activity-returns-zero-rows-after-a-spark-write).
+The one operational caveat is SQL-endpoint sync lag (Delta writes via Spark take seconds-to-minutes to surface in the SQL endpoint), which is why the pipeline has a **Refresh SQL Endpoint** activity between the notebook and the Lookup ([F8.2](#f82-activity-15--refresh-sql-endpoint)). See [06-troubleshooting.md § 3.6](./06-troubleshooting.md#36-lookup-activity-returns-zero-rows-after-a-spark-write).
 
 ### A.4 Retry model for failed files
 
