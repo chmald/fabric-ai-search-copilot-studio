@@ -1,0 +1,17 @@
+# Populated env (never commit real tenant/subscription/endpoint values)
+.env
+
+# Upstream app cloned via `azd init -t microsoft-foundry/foundry-agent-webapp`
+# (kept out of this repo — it is not vendored here)
+foundry-agent-webapp/
+azure.yaml
+.azure/
+infra/
+src/
+backend/
+frontend/
+deployment/
+
+# azd / build state
+.azure
+*.azd

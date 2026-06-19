@@ -164,7 +164,7 @@ What 03d covers end-to-end (Phases D0–D6):
 | D3 | Fabric Data Agent tool — **on-behalf-of** caller identity (per-user RLS) |
 | D4 | Agent instructions, grounding guardrail, security trimming |
 | D5 | Test in the Foundry playground |
-| D6 | Publish to M365 Copilot + Teams via the M365 Agents Toolkit (**preview**) |
+| D6 | Publish to M365 Copilot + Teams via the M365 Agents Toolkit (**preview**), **or** deploy a standalone web app front end ([09](./09-foundry-agent-webapp.md), OBO mode) |
 
 ### Part D validation
 

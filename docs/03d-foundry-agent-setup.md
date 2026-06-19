@@ -250,6 +250,10 @@ The Foundry agent is exposed to Teams / M365 Copilot as a **custom engine agent*
 
 Reference: [Build agents with the Microsoft 365 Agents SDK](https://learn.microsoft.com/microsoft-365/agents-sdk/) · [Custom engine agents for Microsoft 365 Copilot](https://learn.microsoft.com/microsoft-365-copilot/extensibility/overview-custom-engine-agent) · [Agents Toolkit](https://learn.microsoft.com/microsoftteams/platform/toolkit/agents-toolkit-fundamentals).
 
+### Alternative front end — standalone web app
+
+The M365/Teams custom engine agent is one way to reach the agent; it is not the only one. For a **self-hosted, brandable web chat UI** (e.g. an internal portal) outside Teams/M365, deploy the Microsoft [foundry-agent-webapp](https://github.com/microsoft-foundry/foundry-agent-webapp) sample against the same agent — in **On-Behalf-Of (OBO)** mode, which is **required** for the Fabric data agent tool to pass the user's identity through. Full runbook: **[09-foundry-agent-webapp.md](./09-foundry-agent-webapp.md)**. The agent runtime and tools are unchanged; only the client differs.
+
 ---
 
 ## RBAC summary — high-level

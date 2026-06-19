@@ -4,6 +4,19 @@ Change history for this pattern. Entries are listed newest-first.
 
 ---
 
+## 2026-06-19
+
+### v1.5 — Standalone web app front-end option (Foundry agent webapp, OBO)
+Added a **third front-end option** for the Foundry agent ([03d](./docs/03d-foundry-agent-setup.md)): a self-hosted web chat app on Azure Container Apps, alongside the M365/Teams custom engine agent. It uses the Microsoft sample [foundry-agent-webapp](https://github.com/microsoft-foundry/foundry-agent-webapp) deployed in **On-Behalf-Of (OBO)** mode — **required** so the signed-in user's identity reaches Agent Service and the **Microsoft Fabric data agent tool** can enforce per-user RLS/OLS/Purview (the app's default MI mode cannot pass user identity, and the Fabric tool does not support service-principal/managed-identity auth). The agent runtime and tools are unchanged — only the client differs.
+
+The upstream app is **not forked or vendored**. This repo ships a **thin configuration overlay** plus a runbook:
+
+- **`docs/09-foundry-agent-webapp.md`** (new) — front-end options comparison, the MI-vs-OBO rationale, prerequisites, deploy steps (`azd init` → enable OBO → `azd up`), a two-user RLS validation, RBAC/identity (cross-referenced to [08](./docs/08-rbac-and-identity-passthrough.md)), and caveats.
+- **`webapp/`** (new) — `README.md`, `.env.example` (agent identifiers + OBO flag, placeholders only), `deploy-webapp.ps1` (thin `azd` wrapper), `.gitignore` (excludes the populated `.env` and the cloned upstream app).
+- Cross-linked from the README file index, [03d Phase D6](./docs/03d-foundry-agent-setup.md), and [00-reproduce](./docs/00-reproduce-this-demo.md).
+
+Honesty notes carried in the docs: OBO is opt-in and adds an app registration + federated identity credential + admin consent; verify the exact `azd` OBO flag name against the upstream README at deploy time; Conditional Access can interfere with OBO token exchange; AI Search document-level trimming (`group_ids`) remains a separate step even in OBO mode.
+
 ## 2026-06-10
 
 ### v1.4 — Terminology refresh: Azure AI Foundry → Microsoft Foundry
