@@ -52,7 +52,7 @@ These are the design decisions locked for this pattern's primary use case — si
 | 6 | Pipeline orchestrator | **Fabric Data Pipelines** | Drag-and-drop, native to Fabric, no extra service to license |
 | 7 | Ingestion control | **Fabric Lakehouse Delta table** | Tracks file metadata, processing state, and run history for idempotency + incremental processing |
 | 8 | OCR | **Document Intelligence prebuilt-read** model, served by the **Microsoft Foundry resource** (`kind=AIServices`) | No model training; handles printed + handwritten text, multiple languages, mixed file types. A Foundry resource is a multi-service Cognitive Services account, so the same resource provisioned for OpenAI deployments also exposes the DI endpoint — no separate `FormRecognizer` resource is needed |
-| 9 | Front-end channels | **Teams + M365 Copilot** | Two native channels with zero additional hosting; demo-ready in minutes |
+| 9 | Front-end channels | **Teams + M365 Copilot** (+ optional self-hosted web app) | Two native channels with zero additional hosting (demo-ready in minutes); an optional in-repo web app ([09](./docs/09-foundry-agent-webapp.md)) adds a brandable, self-hosted chat UI on Container Apps |
 | 10 | AI Search tier | **Standard (S1) or higher** | Required for semantic ranker; provides headroom for production scale |
 
 See [docs/01-architecture.md](./docs/01-architecture.md) for the full design narrative and trust boundaries.
@@ -77,18 +77,19 @@ See [docs/01-architecture.md](./docs/01-architecture.md) for the full design nar
 | [docs/06-troubleshooting.md](./docs/06-troubleshooting.md) | Common failure modes and fixes |
 | [docs/07-copilot-studio-vs-foundry.md](./docs/07-copilot-studio-vs-foundry.md) | **Decision guide** — Copilot Studio vs. Microsoft Foundry Agent Service for Layer 3: side-by-side, licensing deep-dive, pros/cons, decision matrix, migration note |
 | [docs/08-rbac-and-identity-passthrough.md](./docs/08-rbac-and-identity-passthrough.md) | **RBAC & identity reference** — consolidated identity map across all layers, plus how **identity passthrough (OBO)** enforces per-user restrictions: AI Search filter injection vs. Fabric **RLS/OLS/Purview/DLP** and semantic-model security. Config checklist + silent-failure traps. |
-| [docs/09-foundry-agent-webapp.md](./docs/09-foundry-agent-webapp.md) | **Standalone web app front end (optional)** — deploy the Microsoft [foundry-agent-webapp](https://github.com/microsoft-foundry/foundry-agent-webapp) sample as a self-hosted chat UI for the 03d agent, in **OBO mode** (required for the Fabric data agent tool). A third front-end option alongside the M365/Teams custom-engine-agent. |
-| `infra/main.bicep` + `infra/modules/*.bicep` | Bicep IaC for all Azure resources (RG, KV, Storage, Foundry + model deployments + built-in Document Intelligence, AI Search, RBAC) |
+| [docs/09-foundry-agent-webapp.md](./docs/09-foundry-agent-webapp.md) | **Standalone web app front end (optional)** — a self-hosted chat app ([webapp/app/](./webapp/app/)) for the 03d agent on Azure Container Apps, deployed by this repo's own Bicep + script flow, in **MI mode** (default) or **OBO mode** (required for the Fabric data agent tool). A third front-end option alongside the M365/Teams custom-engine-agent. |
+| `infra/main.bicep` + `infra/modules/*.bicep` | Bicep IaC for all Azure resources (RG, KV, Storage, Foundry + model deployments + built-in Document Intelligence, AI Search, RBAC) — plus the **optional** web-app platform (`containerapp.bicep`: Container Apps environment, ACR, Log Analytics, managed identity) gated by the `deployWebApp` parameter |
 | `infra/main.parameters.json` | Bicep parameters template — copy to `main.parameters.local.json` for your values (gitignored) |
 | `infra/deploy.ps1` | PowerShell wrapper for `az deployment sub create` + output capture |
 | `scripts/post_deploy_search.py` | Creates AI Search index, data source, and indexer with integrated AOAI vectorizer (Bicep can't express these cleanly) |
+| `scripts/deploy-webapp.ps1` | Builds + deploys the optional chat front end (`webapp/app/`) to Container Apps via `az acr build` + `az containerapp`, in MI or OBO identity mode. Runbook: [docs/09](./docs/09-foundry-agent-webapp.md) |
 | `scripts/requirements.txt` | Python dependencies for `scripts/` and `tests/` |
 | `scripts/tests/` | Smoke tests for the post-deploy script |
 | `.azuredevops/pipelines/deploy-rag-kb.yml` | CI/CD pipeline: Validate → Deploy → Smoke |
 | `.gitignore` | Excludes secrets, venvs, populated demo-ids, IDE state from ADO commits |
 | `demo-ids.template.json` | Reference template for per-deployment IDs. The live file (`demo-ids.local.json`, gitignored) is **hybrid**: top-level Azure fields are auto-written by `infra/deploy.ps1` from the Bicep `deploymentSummary` and overwritten on every deploy; nested objects (`fabric`, `sp-rag-di-caller`, `copilotStudio`) are populated manually during the Fabric / Copilot Studio setup phases and preserved across deploys (`deploy.ps1` merges rather than overwrites). The template's `_meta` block documents the contract — copy it to `demo-ids.local.json` to scaffold a new environment. Never commit a populated copy. |
 | `samples/` | **Structured sample data for the Fabric Data Agent** — `structured/employees.csv` + `agreements.csv` (synthetic HR data) consumed by [03e](./docs/03e-fabric-data-agent.md). The unstructured document corpus is uploaded separately to trigger ingestion (standalone — not in this repo). See [samples/README.md](./samples/README.md). |
-| `webapp/` | **Web app deployment overlay (optional)** — thin config (env template + `deploy-webapp.ps1` + README) that points the upstream [foundry-agent-webapp](https://github.com/microsoft-foundry/foundry-agent-webapp) sample at the 03d agent in OBO mode. Not a fork. Runbook: [docs/09](./docs/09-foundry-agent-webapp.md). |
+| `webapp/` | **In-repo chat front end (optional)** — a minimal FastAPI app (`app/`) for the 03d agent, deployed by [scripts/deploy-webapp.ps1](./scripts/deploy-webapp.ps1) onto the Container Apps platform. Supports per-user identity passthrough (OBO) for the Fabric data agent tool. Not a fork. Runbook: [docs/09](./docs/09-foundry-agent-webapp.md). |
 
 Read in order on first build. After that, treat them as a reference set.
 

@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.43.8.12551",
-      "templateHash": "13207638709657362292"
+      "templateHash": "13080524280145660021"
     }
   },
   "parameters": {
@@ -119,6 +119,13 @@
         "description": "Principal type for deployerPrincipalId. Use User for an interactive az login identity (typical for first deploy), or ServicePrincipal for a CI/CD service principal or workload identity."
       }
     },
+    "deployWebApp": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Set to true to also provision the OPTIONAL web-app hosting platform (Container Apps environment, Log Analytics, an Azure Container Registry, and a user-assigned managed identity) for the standalone chat front end in webapp/app. The container image is built and deployed afterwards by scripts/deploy-webapp.ps1. Default false — the base pattern (Copilot Studio path) does not need it; enable it for the Foundry-agent web-app front end (docs/09)."
+      }
+    },
     "tags": {
       "type": "object",
       "defaultValue": {
@@ -138,6 +145,10 @@
     "kvName": "[take(format('kv-{0}', variables('nameSuffix')), 24)]",
     "aifName": "[format('aif-{0}', variables('nameSuffix'))]",
     "searchName": "[format('srch-{0}', variables('nameSuffix'))]",
+    "acrName": "[take(toLower(replace(format('acr{0}{1}{2}', parameters('workloadName'), parameters('env'), variables('locationShort')), '-', '')), 50)]",
+    "caeName": "[format('cae-{0}', variables('nameSuffix'))]",
+    "lawName": "[format('law-{0}', variables('nameSuffix'))]",
+    "webIdName": "[format('id-{0}-web', variables('nameSuffix'))]",
     "mergedTags": "[union(parameters('tags'), createObject('environment', parameters('env'), 'region', parameters('location')))]"
   },
   "resources": [
@@ -1006,6 +1017,239 @@
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('rgName')), 'Microsoft.Resources/deployments', 'search-deploy')]",
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('rgName')), 'Microsoft.Resources/deployments', 'storage-deploy')]"
       ]
+    },
+    {
+      "condition": "[parameters('deployWebApp')]",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "webapp-deploy",
+      "resourceGroup": "[variables('rgName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "acrName": {
+            "value": "[variables('acrName')]"
+          },
+          "environmentName": {
+            "value": "[variables('caeName')]"
+          },
+          "logAnalyticsName": {
+            "value": "[variables('lawName')]"
+          },
+          "identityName": {
+            "value": "[variables('webIdName')]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "tags": {
+            "value": "[variables('mergedTags')]"
+          },
+          "foundryAccountName": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('rgName')), 'Microsoft.Resources/deployments', 'foundry-deploy'), '2025-04-01').outputs.name.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.43.8.12551",
+              "templateHash": "12385481554503500627"
+            }
+          },
+          "parameters": {
+            "acrName": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure Container Registry name (globally unique, alphanumeric, 5-50 chars)."
+              }
+            },
+            "environmentName": {
+              "type": "string",
+              "metadata": {
+                "description": "Container Apps environment name."
+              }
+            },
+            "logAnalyticsName": {
+              "type": "string",
+              "metadata": {
+                "description": "Log Analytics workspace name backing the Container Apps environment."
+              }
+            },
+            "identityName": {
+              "type": "string",
+              "metadata": {
+                "description": "User-assigned managed identity name for the web app runtime."
+              }
+            },
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure region for all resources."
+              }
+            },
+            "tags": {
+              "type": "object",
+              "metadata": {
+                "description": "Tags applied to all resources."
+              }
+            },
+            "foundryAccountName": {
+              "type": "string",
+              "metadata": {
+                "description": "Foundry resource account name (same RG). The app MI is granted data-plane roles here so it can invoke the agent."
+              }
+            }
+          },
+          "variables": {
+            "roleIds": {
+              "acrPull": "7f951dda-4ed3-4680-a7ca-43fe172d538d",
+              "azureAIDeveloper": "64702f94-c441-49e6-a78b-ef80e0188fee",
+              "cognitiveServicesOpenAIContributor": "a001fd3d-188f-4b5d-821b-7da978bf7442"
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.OperationalInsights/workspaces",
+              "apiVersion": "2023-09-01",
+              "name": "[parameters('logAnalyticsName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "sku": {
+                  "name": "PerGB2018"
+                },
+                "retentionInDays": 30
+              }
+            },
+            {
+              "type": "Microsoft.App/managedEnvironments",
+              "apiVersion": "2024-03-01",
+              "name": "[parameters('environmentName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "appLogsConfiguration": {
+                  "destination": "log-analytics",
+                  "logAnalyticsConfiguration": {
+                    "customerId": "[reference(resourceId('Microsoft.OperationalInsights/workspaces', parameters('logAnalyticsName')), '2023-09-01').customerId]",
+                    "sharedKey": "[listKeys(resourceId('Microsoft.OperationalInsights/workspaces', parameters('logAnalyticsName')), '2023-09-01').primarySharedKey]"
+                  }
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('logAnalyticsName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.ContainerRegistry/registries",
+              "apiVersion": "2023-11-01-preview",
+              "name": "[parameters('acrName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "sku": {
+                "name": "Basic"
+              },
+              "properties": {
+                "adminUserEnabled": false
+              }
+            },
+            {
+              "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+              "apiVersion": "2023-01-31",
+              "name": "[parameters('identityName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]"
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName'))]",
+              "name": "[guid(resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('identityName')), variables('roleIds').acrPull)]",
+              "properties": {
+                "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('identityName')), '2023-01-31').principalId]",
+                "principalType": "ServicePrincipal",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('roleIds').acrPull)]"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName'))]",
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('identityName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('foundryAccountName'))]",
+              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('foundryAccountName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('identityName')), variables('roleIds').azureAIDeveloper)]",
+              "properties": {
+                "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('identityName')), '2023-01-31').principalId]",
+                "principalType": "ServicePrincipal",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('roleIds').azureAIDeveloper)]"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('identityName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('foundryAccountName'))]",
+              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('foundryAccountName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('identityName')), variables('roleIds').cognitiveServicesOpenAIContributor)]",
+              "properties": {
+                "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('identityName')), '2023-01-31').principalId]",
+                "principalType": "ServicePrincipal",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('roleIds').cognitiveServicesOpenAIContributor)]"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('identityName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "acrName": {
+              "type": "string",
+              "value": "[parameters('acrName')]"
+            },
+            "acrLoginServer": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName')), '2023-11-01-preview').loginServer]"
+            },
+            "environmentName": {
+              "type": "string",
+              "value": "[parameters('environmentName')]"
+            },
+            "environmentId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.App/managedEnvironments', parameters('environmentName'))]"
+            },
+            "identityName": {
+              "type": "string",
+              "value": "[parameters('identityName')]"
+            },
+            "identityClientId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('identityName')), '2023-01-31').clientId]"
+            },
+            "identityPrincipalId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('identityName')), '2023-01-31').principalId]"
+            },
+            "identityResourceId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('identityName'))]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('rgName')), 'Microsoft.Resources/deployments', 'foundry-deploy')]",
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('rgName'))]"
+      ]
     }
   ],
   "outputs": {
@@ -1040,7 +1284,14 @@
         "searchIndexerName": "ixr-chunks",
         "authMode": "entra-only",
         "localAuthDisabled": true,
-        "deployerHasSearchRoles": "[not(empty(parameters('deployerPrincipalId')))]"
+        "deployerHasSearchRoles": "[not(empty(parameters('deployerPrincipalId')))]",
+        "webAppDeployed": "[parameters('deployWebApp')]",
+        "webAppAcr": "[coalesce(tryGet(if(parameters('deployWebApp'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('rgName')), 'Microsoft.Resources/deployments', 'webapp-deploy'), '2025-04-01'), null()), 'outputs', 'acrName', 'value'), '')]",
+        "webAppAcrLoginServer": "[coalesce(tryGet(if(parameters('deployWebApp'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('rgName')), 'Microsoft.Resources/deployments', 'webapp-deploy'), '2025-04-01'), null()), 'outputs', 'acrLoginServer', 'value'), '')]",
+        "webAppEnvironment": "[coalesce(tryGet(if(parameters('deployWebApp'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('rgName')), 'Microsoft.Resources/deployments', 'webapp-deploy'), '2025-04-01'), null()), 'outputs', 'environmentName', 'value'), '')]",
+        "webAppIdentityName": "[coalesce(tryGet(if(parameters('deployWebApp'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('rgName')), 'Microsoft.Resources/deployments', 'webapp-deploy'), '2025-04-01'), null()), 'outputs', 'identityName', 'value'), '')]",
+        "webAppIdentityClientId": "[coalesce(tryGet(if(parameters('deployWebApp'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('rgName')), 'Microsoft.Resources/deployments', 'webapp-deploy'), '2025-04-01'), null()), 'outputs', 'identityClientId', 'value'), '')]",
+        "webAppIdentityResourceId": "[coalesce(tryGet(if(parameters('deployWebApp'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('rgName')), 'Microsoft.Resources/deployments', 'webapp-deploy'), '2025-04-01'), null()), 'outputs', 'identityResourceId', 'value'), '')]"
       }
     }
   }

@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Knowledge agent</title>
+  <style>
+    :root { --fg:#1b1a19; --muted:#605e5c; --bg:#faf9f8; --user:#0f6cbd; --bot:#edebe9; --line:#e1dfdd; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: "Segoe UI", system-ui, sans-serif; color:var(--fg); background:var(--bg); }
+    header { padding:16px 20px; border-bottom:1px solid var(--line); background:#fff; }
+    header h1 { margin:0; font-size:16px; font-weight:600; }
+    header p { margin:4px 0 0; font-size:12px; color:var(--muted); }
+    main { max-width:760px; margin:0 auto; padding:20px; }
+    #log { display:flex; flex-direction:column; gap:12px; min-height:50vh; }
+    .msg { padding:10px 14px; border-radius:10px; max-width:80%; white-space:pre-wrap; line-height:1.45; font-size:14px; }
+    .user { align-self:flex-end; background:var(--user); color:#fff; border-bottom-right-radius:2px; }
+    .bot  { align-self:flex-start; background:var(--bot); color:var(--fg); border-bottom-left-radius:2px; }
+    .meta { font-size:11px; color:var(--muted); margin-top:2px; }
+    form { display:flex; gap:8px; margin-top:16px; position:sticky; bottom:16px; }
+    input { flex:1; padding:12px 14px; border:1px solid var(--line); border-radius:8px; font-size:14px; }
+    button { padding:12px 18px; border:0; border-radius:8px; background:var(--user); color:#fff; font-size:14px; cursor:pointer; }
+    button:disabled { opacity:.5; cursor:default; }
+    .hint { font-size:12px; color:var(--muted); margin-top:8px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Knowledge agent</h1>
+    <p>Ask a question about the indexed documents or the structured data set.</p>
+  </header>
+  <main>
+    <div id="log"></div>
+    <form id="form" autocomplete="off">
+      <input id="input" placeholder="Type a question and press Enter…" required />
+      <button id="send" type="submit">Send</button>
+    </form>
+    <p class="hint" id="hint"></p>
+  </main>
+
+  <script>
+    const log = document.getElementById("log");
+    const form = document.getElementById("form");
+    const input = document.getElementById("input");
+    const send = document.getElementById("send");
+    const hint = document.getElementById("hint");
+    let threadId = null;
+
+    function add(text, who, meta) {
+      const div = document.createElement("div");
+      div.className = "msg " + who;
+      div.textContent = text;
+      log.appendChild(div);
+      if (meta) {
+        const m = document.createElement("div");
+        m.className = "meta";
+        m.textContent = meta;
+        div.appendChild(m);
+      }
+      window.scrollTo(0, document.body.scrollHeight);
+      return div;
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const message = input.value.trim();
+      if (!message) return;
+      add(message, "user");
+      input.value = "";
+      send.disabled = true;
+      const pending = add("…", "bot");
+      try {
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message, thread_id: threadId }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || ("HTTP " + res.status));
+        threadId = data.thread_id || threadId;
+        pending.textContent = data.reply || "(no answer returned)";
+      } catch (err) {
+        pending.textContent = "Error: " + err.message;
+      } finally {
+        send.disabled = false;
+        input.focus();
+      }
+    });
+
+    // Show the signed-in user when Container Apps authentication is enabled.
+    fetch("/.auth/me").then(r => r.ok ? r.json() : null).then(d => {
+      const name = d && d[0] && d[0].user_id;
+      if (name) hint.textContent = "Signed in as " + name;
+    }).catch(() => {});
+  </script>
+</body>
+</html>

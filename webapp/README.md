@@ -1,40 +1,55 @@
-# `webapp/` — Foundry agent web app overlay (OBO)
+# `webapp/` — Foundry agent chat front end (in-repo)
 
-A **thin configuration overlay** for deploying the Microsoft sample **[microsoft-foundry/foundry-agent-webapp](https://github.com/microsoft-foundry/foundry-agent-webapp)** as a standalone web front end for the Foundry agent built in [docs/03d](../docs/03d-foundry-agent-setup.md), in **On-Behalf-Of (OBO)** mode.
+A small, self-hosted chat web app for the Foundry agent built in
+[docs/03d](../docs/03d-foundry-agent-setup.md). It deploys with this repo's own flow —
+Bicep for the platform, PowerShell for the build/deploy — and supports per-user identity
+passthrough (OBO) so the **Microsoft Fabric data agent tool** enforces row-/object-level
+security per user.
 
-> **This is not a fork.** No application source is vendored here. This folder holds only the configuration deltas needed to point the upstream starter at this pattern's agent: an environment template, a deploy helper, and a `.gitignore`. The full step-by-step is in **[docs/09-foundry-agent-webapp.md](../docs/09-foundry-agent-webapp.md)**; the upstream README is the source of truth for the app itself.
+This is **not** a fork of any sample. It is a minimal app maintained here so the whole
+pattern deploys from a single source.
 
-## Why OBO
+## Layout
 
-This pattern's agent connects a **Microsoft Fabric data agent** tool, which requires the **signed-in user's identity** to pass through (service-principal / managed-identity auth is not supported). The web app's default **MI mode** cannot satisfy that; its opt-in **OBO mode** can. See [docs/08](../docs/08-rbac-and-identity-passthrough.md) for the identity model.
-
-## Files
-
-| File | Purpose |
+| Path | Purpose |
 |---|---|
-| [`.env.example`](./.env.example) | Template for the agent identifiers + the OBO flag. Copy to `.env` and fill in. |
-| [`deploy-webapp.ps1`](./deploy-webapp.ps1) | Helper that reads `.env`, applies the values via `azd env set` (including OBO), and runs `azd up`. |
-| [`.gitignore`](./.gitignore) | Excludes the populated `.env` and `azd` state. The upstream app is scaffolded **outside** this repo (not vendored), so it never needs ignoring here. |
+| [`app/main.py`](./app/main.py) | FastAPI app: relays a message to the agent (MI or OBO identity) and returns the reply. |
+| [`app/static/index.html`](./app/static/index.html) | Minimal chat UI (no build step). |
+| [`app/Dockerfile`](./app/Dockerfile) · [`app/requirements.txt`](./app/requirements.txt) | Image built from source in Azure Container Registry. |
+| [`.env.example`](./.env.example) | Runtime environment reference (placeholders only). |
 
-## Quick start
+## Deploy
+
+The hosting platform (Container Apps environment, ACR, Log Analytics, managed identity) is
+provisioned by the main Bicep deployment when `deployWebApp = true`; the app is built and
+deployed by [`scripts/deploy-webapp.ps1`](../scripts/deploy-webapp.ps1):
 
 ```pwsh
-# 1. Fill in your agent identifiers (this file stays in the repo, gitignored)
-Copy-Item webapp/.env.example webapp/.env
-#   edit webapp/.env
+# 1. Provision the platform with the base deploy (set deployWebApp = true in your params)
+pwsh ./infra/deploy.ps1 -ParameterFile infra/main.parameters.local.json
 
-# 2. Initialize the upstream starter OUTSIDE this repo (per docs/09 § W2) so it is
-#    never committed here. Run from the PARENT folder of this repo:
-mkdir foundry-agent-webapp; cd foundry-agent-webapp
-azd init -t microsoft-foundry/foundry-agent-webapp
-
-# 3. From that app directory, deploy in OBO mode using the helper
-#    (it reads this repo's webapp/.env and runs `azd up`).
-pwsh <path-to-this-repo>/webapp/deploy-webapp.ps1
+# 2. Build + deploy the app against your 03d agent
+pwsh ./scripts/deploy-webapp.ps1 -FoundryProjectEndpoint $endpoint -AgentId $agentId            # MI mode
+pwsh ./scripts/deploy-webapp.ps1 -FoundryProjectEndpoint $endpoint -AgentId $agentId -EnableObo # Fabric tool
 ```
 
-Full prerequisites, RBAC, validation, and caveats: **[docs/09-foundry-agent-webapp.md](../docs/09-foundry-agent-webapp.md)**.
+Full runbook, RBAC, and validation: **[docs/09-foundry-agent-webapp.md](../docs/09-foundry-agent-webapp.md)**.
 
-## 100% synthetic / no real data
+## Run locally (optional)
 
-Keep real tenant identifiers, subscription IDs, and endpoints in your **local** `webapp/.env` only — never commit them. `.env.example` ships with placeholders only.
+```pwsh
+cd webapp/app
+pip install -r requirements.txt
+# Set FOUNDRY_PROJECT_ENDPOINT, AGENT_ID, AZURE_CLIENT_ID (see ../.env.example) in your shell.
+# MI mode uses DefaultAzureCredential, which falls back to your `az login` identity locally.
+uvicorn main:app --reload
+```
+
+OBO mode is an Azure-only scenario (it depends on Container Apps authentication and a
+federated managed identity), so run locally in MI mode.
+
+## No real data / no secrets
+
+The image carries no tenant identifiers, subscription IDs, endpoints, or secrets — all are
+supplied at runtime. `.env.example` ships with placeholders only; keep any populated `.env`
+local.

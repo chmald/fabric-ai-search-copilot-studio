@@ -6,6 +6,17 @@ Change history for this pattern. Entries are listed newest-first.
 
 ## 2026-06-19
 
+### v1.6 — Web app front end moved in-repo (single-source deploy)
+Replaced the external-sample overlay (v1.5) with a **self-contained, in-repo chat front end** so the whole pattern deploys from one source with one toolchain (Bicep + PowerShell + Azure CLI). No `azd`, no .NET/React, nothing scaffolded outside the repo.
+
+- **`webapp/app/`** (new) — a minimal **FastAPI** app (`main.py` + `static/index.html` + `Dockerfile`) that relays messages to the 03d agent. Supports **MI mode** (default; `DefaultAzureCredential`) and secretless **OBO mode** (`OnBehalfOfCredential` via a federated managed identity) for the Fabric data agent tool's per-user passthrough.
+- **`infra/modules/containerapp.bicep`** (new) — optional hosting platform (Container Apps environment, ACR, Log Analytics, user-assigned managed identity + role assignments), gated by the new **`deployWebApp`** parameter on `infra/main.bicep` (default false). The image builds from source in ACR — no local Docker.
+- **`scripts/deploy-webapp.ps1`** (new) — single web-app deploy: `az acr build` + `az containerapp create/update`, with `-EnableObo` for the app registration + federated credential + Container Apps authentication. `-WhatIf` supported.
+- **`docs/09`** rewritten for the in-repo flow; **`webapp/README.md`** / **`.env.example`** / **`.gitignore`** repurposed for the app; the old `webapp/deploy-webapp.ps1` overlay and the external-sample references were removed.
+- Cross-links updated in the README file index, [03d Phase D6](./docs/03d-foundry-agent-setup.md), and [00-reproduce](./docs/00-reproduce-this-demo.md).
+
+Honesty notes carried in the docs: OBO needs admin consent + per-user Foundry/Fabric grants (the script prints the manual steps rather than guessing preview specifics); verify the `azure-ai-projects` surface, token scope, API version, and Foundry role names at deploy time; Conditional Access can interfere with OBO; AI Search document-level trimming (`group_ids`) remains separate even in OBO mode.
+
 ### v1.5 — Standalone web app front-end option (Foundry agent webapp, OBO)
 Added a **third front-end option** for the Foundry agent ([03d](./docs/03d-foundry-agent-setup.md)): a self-hosted web chat app on Azure Container Apps, alongside the M365/Teams custom engine agent. It uses the Microsoft sample [foundry-agent-webapp](https://github.com/microsoft-foundry/foundry-agent-webapp) deployed in **On-Behalf-Of (OBO)** mode — **required** so the signed-in user's identity reaches Agent Service and the **Microsoft Fabric data agent tool** can enforce per-user RLS/OLS/Purview (the app's default MI mode cannot pass user identity, and the Fabric tool does not support service-principal/managed-identity auth). The agent runtime and tools are unchanged — only the client differs.
 

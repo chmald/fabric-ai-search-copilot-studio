@@ -51,6 +51,10 @@
       "value": "User",
       "_comment": "User (interactive az login) or ServicePrincipal (CI/CD federated workload identity)."
     },
+    "deployWebApp": {
+      "value": false,
+      "_comment": "OPT-IN. Set true to also provision the optional web-app hosting platform (Container Apps environment, ACR, Log Analytics, user-assigned managed identity) for the standalone chat front end (docs/09). The container image is built + deployed afterwards by scripts/deploy-webapp.ps1. Leave false for the Copilot Studio path."
+    },
     "tags": {
       "value": {
         "workload": "rag",

@@ -252,7 +252,7 @@ Reference: [Build agents with the Microsoft 365 Agents SDK](https://learn.micros
 
 ### Alternative front end — standalone web app
 
-The M365/Teams custom engine agent is one way to reach the agent; it is not the only one. For a **self-hosted, brandable web chat UI** (e.g. an internal portal) outside Teams/M365, deploy the Microsoft [foundry-agent-webapp](https://github.com/microsoft-foundry/foundry-agent-webapp) sample against the same agent — in **On-Behalf-Of (OBO)** mode, which is **required** for the Fabric data agent tool to pass the user's identity through. Full runbook: **[09-foundry-agent-webapp.md](./09-foundry-agent-webapp.md)**. The agent runtime and tools are unchanged; only the client differs.
+The M365/Teams custom engine agent is one way to reach the agent; it is not the only one. For a **self-hosted, brandable web chat UI** (e.g. an internal portal) outside Teams/M365, this repo ships a minimal in-repo app ([`webapp/app/`](../webapp/app/)) that you deploy onto Azure Container Apps with the project's own flow — no external sample, no separate toolchain. Use **MI mode** (default) for an AI-Search-only agent, or **On-Behalf-Of (OBO)** mode, which is **required** for the Fabric data agent tool to pass the user's identity through. Full runbook: **[09-foundry-agent-webapp.md](./09-foundry-agent-webapp.md)**. The agent runtime and tools are unchanged; only the client differs.
 
 ---
 

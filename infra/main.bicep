@@ -114,6 +114,9 @@ param deployerPrincipalId string = ''
 ])
 param deployerPrincipalType string = 'User'
 
+@description('Set to true to also provision the OPTIONAL web-app hosting platform (Container Apps environment, Log Analytics, an Azure Container Registry, and a user-assigned managed identity) for the standalone chat front end in webapp/app. The container image is built and deployed afterwards by scripts/deploy-webapp.ps1. Default false — the base pattern (Copilot Studio path) does not need it; enable it for the Foundry-agent web-app front end (docs/09).')
+param deployWebApp bool = false
+
 @description('Tags applied to all resources for cost allocation + governance.')
 param tags object = {
   workload: 'rag'
@@ -130,6 +133,12 @@ var rgName         = 'rg-${nameSuffix}'
 var kvName         = take('kv-${nameSuffix}', 24)
 var aifName        = 'aif-${nameSuffix}'
 var searchName     = 'srch-${nameSuffix}'
+
+// Optional web-app platform naming (only used when deployWebApp = true).
+var acrName        = take(toLower(replace('acr${workloadName}${env}${locationShort}', '-', '')), 50)
+var caeName        = 'cae-${nameSuffix}'
+var lawName        = 'law-${nameSuffix}'
+var webIdName      = 'id-${nameSuffix}-web'
 
 var mergedTags = union(tags, {
   environment: env
@@ -213,6 +222,22 @@ module rbac 'modules/rbac.bicep' = {
   }
 }
 
+// Optional: web-app hosting platform for the Foundry-agent chat front end (docs/09).
+// The container image is built + deployed by scripts/deploy-webapp.ps1 after this run.
+module webapp 'modules/containerapp.bicep' = if (deployWebApp) {
+  scope: rg
+  name: 'webapp-deploy'
+  params: {
+    acrName: acrName
+    environmentName: caeName
+    logAnalyticsName: lawName
+    identityName: webIdName
+    location: location
+    tags: mergedTags
+    foundryAccountName: foundry.outputs.name
+  }
+}
+
 // -------------------------- Outputs -------------------------------------------
 
 output deploymentSummary object = {
@@ -258,4 +283,14 @@ output deploymentSummary object = {
   authMode: 'entra-only'
   localAuthDisabled: true
   deployerHasSearchRoles: !empty(deployerPrincipalId)
+
+  // Web app (optional — populated only when deployWebApp = true). Consumed by
+  // scripts/deploy-webapp.ps1 to build + deploy webapp/app into this platform.
+  webAppDeployed: deployWebApp
+  webAppAcr: webapp.?outputs.acrName ?? ''
+  webAppAcrLoginServer: webapp.?outputs.acrLoginServer ?? ''
+  webAppEnvironment: webapp.?outputs.environmentName ?? ''
+  webAppIdentityName: webapp.?outputs.identityName ?? ''
+  webAppIdentityClientId: webapp.?outputs.identityClientId ?? ''
+  webAppIdentityResourceId: webapp.?outputs.identityResourceId ?? ''
 }

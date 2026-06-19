@@ -1,7 +1,9 @@
-# Populated env — never commit real tenant/subscription/endpoint values
+# Populated local env — never commit real tenant/subscription/endpoint values
 .env
+app/.env
 
-# The upstream app is scaffolded OUTSIDE this repo (see docs/09 § W2) and is not
-# vendored here. These are backstops in case azd state ever lands under webapp/.
-.azure/
-*.azd
+# Python build artifacts
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
