@@ -121,7 +121,7 @@ In the Azure portal:
      --properties '{"disableLocalAuth": true}'
    ```
 
-No keys are stored anywhere. The AI Search service uses its system-assigned managed identity to call the embedding deployment — both at **query time** (the `azureOpenAI` vectorizer on the index, configured in § 4.1) **and at index time** (the `AzureOpenAIEmbeddingSkill` in the skillset, configured in § 4.3). Both call paths require the MI to have **Cognitive Services OpenAI User** on this resource (granted in step 1.7 — *not* the similarly-named **Cognitive Services User** role, which doesn't include OpenAI data-plane access). The Fabric OCR notebook calls Document Intelligence on the same resource using its own dedicated service principal (see [03b-fabric-setup.md § F2.2](./03b-fabric-setup.md#f22-create-a-di-caller-service-principal-for-mssal-from-the-notebook)) with **Cognitive Services User** on the same resource.
+No keys are stored anywhere. The AI Search service uses its system-assigned managed identity to call the embedding deployment — both at **query time** (the `azureOpenAI` vectorizer on the index, configured in § 4.1) **and at index time** (the `AzureOpenAIEmbeddingSkill` in the skillset, configured in § 4.3). Both call paths require the MI to have **Cognitive Services OpenAI User** on this resource (granted in step 1.7 — *not* the similarly-named **Cognitive Services User** role, which doesn't include OpenAI data-plane access). The Fabric OCR notebook calls Document Intelligence on the same resource using its own dedicated service principal (see [03b-fabric-setup.md § F2.2](./03b-fabric-setup.md#f22-create-a-di-caller-service-principal-for-msal-from-the-notebook)) with **Cognitive Services User** on the same resource.
 
 ### 1.6 Create AI Search
 
@@ -520,7 +520,7 @@ Once Phases 1 + 4 validate green and Fabric ([03b](./03b-fabric-setup.md)) + Cop
 
 - [ ] All Phase 1 + Phase 4 validation boxes checked
 - [ ] Fabric pipeline scheduled (not just on-demand) — see [03b § F10](./03b-fabric-setup.md#phase-f10--schedule-the-pipeline)
-- [ ] AI Search indexer scheduled (set in [§ 4.3](#43-create-the-indexer) above with `"interval": "PT5M"`)
+- [ ] AI Search indexer scheduled (set in [§ 4.4](#44-create-the-indexer) above with `"interval": "PT5M"`)
 - [ ] Copilot Studio agent published to Teams + M365 Copilot — see [03c § C5](./03c-copilot-studio-setup.md#phase-c5--publish-to-channels)
 - [ ] Cost alerts configured on the resource group
 - [ ] Backup / disaster-recovery plan written (at minimum: re-runnable pipeline from `raw/` blob)

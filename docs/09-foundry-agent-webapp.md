@@ -166,14 +166,12 @@ per-restriction enforcement model are in
 
 | Identity | Role / grant | Why |
 |---|---|---|
-| App **user-assigned managed identity** | **AcrPull** on the registry; **Azure AI Developer**¹ + **Cognitive Services OpenAI Contributor**¹ on the Foundry resource | Pull the image; invoke the agent / project |
+| App **user-assigned managed identity** | **AcrPull** on the registry; **Foundry User**¹ + **Cognitive Services OpenAI Contributor**¹ on the Foundry resource | Pull the image; invoke the agent / project |
 | **Backend app registration** (OBO only) | delegated permission + **admin consent**; **federated identity credential** trusting the app MI | Exchange the user token for an Agent Service token, secretlessly |
-| **End user** (OBO) | a Foundry data-plane role to **call the agent** (e.g. **Azure AI User**¹) **and** **Read** on the Fabric data agent + sources | The user must be allowed to invoke the agent; Fabric then enforces RLS/OLS/Purview for that user |
+| **End user** (OBO) | a Foundry data-plane role to **call the agent** (e.g. **Foundry User**¹) **and** **Read** on the Fabric data agent + sources | The user must be allowed to invoke the agent; Fabric then enforces RLS/OLS/Purview for that user |
 | Deployer | Subscription **Contributor** + **User Access Administrator** (role assignments), **plus** an Entra role that can create the app registration and grant **admin consent** (e.g. **Application Administrator**) for OBO | Run the Bicep + the deploy script |
 
-> ¹ **Verify exact role names at deploy time.** Foundry's data-plane roles were renamed
-> (e.g. *Azure AI Developer* / *Azure AI User* now appear under **Foundry** naming).
-> Confirm the current names against Microsoft Learn and [08 § Layer 3b](./08-rbac-and-identity-passthrough.md#layer-3b--foundry-agent-03d).
+> ¹ **Foundry RBAC** (per [Microsoft Learn](https://learn.microsoft.com/azure/foundry/concepts/rbac-foundry)). Use **Foundry User** for agent/project data-plane access — do **not** use *Azure AI Developer*, which is scoped to Azure ML workspaces and Foundry hubs, not Foundry projects/agents. *Foundry User / Owner / Project Manager* were formerly *Azure AI User / Owner / Project Manager* (role IDs unchanged). Re-verify at deploy time. See also [08 § Layer 3b](./08-rbac-and-identity-passthrough.md#layer-3b--foundry-agent-03d).
 
 ---
 
@@ -182,10 +180,13 @@ per-restriction enforcement model are in
 - **OBO is opt-in and adds dependencies** the Teams/M365 channel does not: a backend app
   registration, a federated identity credential, Container Apps authentication, and Entra
   **admin consent**.
-- **Verify the SDK surface and API details at deploy time.** The app uses the
-  `azure-ai-projects` agents client and a configurable token scope
-  (`AGENT_TOKEN_SCOPE`, default `https://ai.azure.com/.default`); the Foundry Agents
-  service is evolving. Confirm the client surface and scope against current Microsoft Learn.
+- **SDK version + migration (act before 2026-08-26).** The app pins `azure-ai-projects`
+  **v1.x** and uses the threads/messages/runs (Assistants-era) agents surface with a
+  configurable token scope (`AGENT_TOKEN_SCOPE`, default `https://ai.azure.com/.default`).
+  That surface is documented to **sunset 2026-08-26** with the classic Assistants API —
+  migrate to the **`azure-ai-projects` v2.x Responses API** (`openai.responses.create` /
+  conversations) before then. See [navigate from classic](https://learn.microsoft.com/azure/foundry/how-to/navigate-from-classic)
+  and the [agent migration guide](https://learn.microsoft.com/azure/foundry/agents/how-to/migrate); re-verify the client surface + token scope at deploy time.
 - **Preview surfaces.** The Foundry Fabric data agent tool is in preview; re-verify against
   current Microsoft Learn (see [03d](./03d-foundry-agent-setup.md) and [03e](./03e-fabric-data-agent.md)).
 - **Conditional Access / device-compliance** policies can interfere with the OBO token

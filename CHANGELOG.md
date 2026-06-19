@@ -6,6 +6,15 @@ Change history for this pattern. Entries are listed newest-first.
 
 ## 2026-06-19
 
+### v1.6.1 — Microsoft Learn currency + accuracy pass
+A verification pass against current Microsoft Learn plus an internal-alignment audit of the v1.6 web app.
+
+- **RBAC fix (functional):** the web-app managed identity now uses **Foundry User** (`53ca6127-db72-4b80-b1b0-d745d6d5456d`) for agent/project access instead of **Azure AI Developer**. Per the [Foundry RBAC docs](https://learn.microsoft.com/azure/foundry/concepts/rbac-foundry), *Azure AI Developer* is scoped to Azure ML workspaces / Foundry hubs — **not** Foundry projects or hosted agents (`infra/modules/containerapp.bicep`, `docs/09`).
+- **Date fix:** corrected the classic Foundry/Assistants runtime retirement to **sunsets 2026-08-26** (was 2027-03-31) in `docs/03d` and the v1.4 note, per [navigate from classic](https://learn.microsoft.com/azure/foundry/how-to/navigate-from-classic).
+- **SDK migration note:** flagged that the web app pins `azure-ai-projects` **v1.x** (threads/runs Assistants-era surface), which sunsets 2026-08-26 — added migration guidance to the v2.x Responses API in `docs/09`, `webapp/app/requirements.txt`, and `webapp/app/main.py`.
+- **Doc alignment:** added the web-app front end + its identities to `docs/01` (Layer-3 table) and `docs/08` (identity inventory); added the optional `containerapp.bicep` row to `docs/04`; removed a stale `azd` block from the root `.gitignore`; corrected a `containerapp.bicep` header comment (`az acr build` + `az containerapp create/update`, not `az containerapp up`).
+- **Link hygiene:** fixed pre-existing broken doc anchors — `mssal`→`msal` (11 links), an indexer link (`§4.3`→`§4.4`), a `06`→`03c` knowledge-source link, an `03e`→`samples` anchor, and a `03b` self-link.
+
 ### v1.6 — Web app front end moved in-repo (single-source deploy)
 Replaced the external-sample overlay (v1.5) with a **self-contained, in-repo chat front end** so the whole pattern deploys from one source with one toolchain (Bicep + PowerShell + Azure CLI). No `azd`, no .NET/React, nothing scaffolded outside the repo.
 
@@ -33,7 +42,7 @@ Honesty notes carried in the docs: OBO is opt-in and adds an app registration + 
 ### v1.4 — Terminology refresh: Azure AI Foundry → Microsoft Foundry
 Aligned the pattern's product naming with current Microsoft Learn terminology. **Azure AI Foundry is now branded *Microsoft Foundry*** (per the official [Evolution of Foundry](https://learn.microsoft.com/azure/foundry/what-is-foundry) mapping; the former `what-is-azure-ai-foundry` page now redirects under `/azure/foundry/`). The newer `03d` / `03e` / `08` docs already used the current name — this brings the README and the rest of the docs into line. **No architectural or technical change:** the resource is still `Microsoft.CognitiveServices/accounts` `kind=AIServices`, and the OpenAI-compatible (`*.openai.azure.com`) and Cognitive Services (`*.cognitiveservices.azure.com`) endpoints are unchanged.
 
-Verified current against Microsoft Learn (no change needed): Microsoft Foundry Agent Service is **GA** (the classic runtime retires **2027-03-31**); in the agent, the **Azure AI Search tool is GA** and the **Microsoft Fabric (Data Agent) tool is preview**; M365/Teams **custom engine agent** publishing remains **preview**; the **Fabric data agent** itself is **GA**; AI Search **semantic ranker** + **integrated vectorization**, Copilot Studio **knowledge source** + **generative answers**, and Document Intelligence **prebuilt-read** are all current terms.
+Verified current against Microsoft Learn (no change needed): Microsoft Foundry Agent Service is **GA** (the classic Assistants-API runtime sunsets **2026-08-26**); in the agent, the **Azure AI Search tool is GA** and the **Microsoft Fabric (Data Agent) tool is preview**; M365/Teams **custom engine agent** publishing remains **preview**; the **Fabric data agent** itself is **GA**; AI Search **semantic ranker** + **integrated vectorization**, Copilot Studio **knowledge source** + **generative answers**, and Document Intelligence **prebuilt-read** are all current terms.
 
 Changes:
 - **Global rename** `Azure AI Foundry` → `Microsoft Foundry` (64 occurrences) across `README.md`, `CHANGELOG.md`, `docs/00`–`07`, `samples/README.md`, `infra/main.bicep`, and `infra/modules/aifoundry.bicep`. A one-time "(formerly Azure AI Foundry)" note was added on first mention in `README.md` and `docs/01-architecture.md`.

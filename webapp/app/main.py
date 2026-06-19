@@ -167,6 +167,10 @@ def _last_assistant_text(messages) -> str:
     return ""
 
 
+# NOTE: uses the azure-ai-projects v1.x agents surface (threads/messages/runs), which is
+# documented to sunset 2026-08-26 with the classic Assistants API. Migrate to the v2.x
+# Responses API (openai.responses.create / conversations) before then — see
+# https://learn.microsoft.com/azure/foundry/agents/how-to/migrate
 def _ask_agent(credential, message: str, thread_id: Optional[str]) -> tuple[str, str]:
     """Send one message to the agent and return (reply_text, thread_id)."""
     from azure.ai.projects import AIProjectClient

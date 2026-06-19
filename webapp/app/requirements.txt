@@ -8,4 +8,8 @@
 fastapi>=0.115,<1.0
 uvicorn[standard]>=0.30,<1.0
 azure-identity>=1.19,<2.0
+
+# Pinned to v1.x (threads/messages/runs agents surface). That Assistants-era API is
+# documented to sunset 2026-08-26 — migrate to azure-ai-projects v2.x (Responses API)
+# before then: https://learn.microsoft.com/azure/foundry/agents/how-to/migrate
 azure-ai-projects>=1.0.0,<2.0.0

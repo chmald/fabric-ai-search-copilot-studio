@@ -167,7 +167,7 @@ property. If you don't want to restore existing resource, please purge it first.
 - **restore in place** (preserves the system-assigned MI principal ID and all data-plane state), or
 - **purge** (drops the soft-deleted account entirely so a brand-new resource can be created with a new MI).
 
-**Preserving the MI matters specifically because the DI-caller SP's `Cognitive Services User` role assignment on the Foundry resource is granted manually ([03b-fabric-setup.md § F2.2 step 2](./03b-fabric-setup.md#f22-create-a-di-caller-service-principal-for-mssal-from-the-notebook)) and would be orphaned by any purge-and-recreate cycle.**
+**Preserving the MI matters specifically because the DI-caller SP's `Cognitive Services User` role assignment on the Foundry resource is granted manually ([03b-fabric-setup.md § F2.2 step 2](./03b-fabric-setup.md#f22-create-a-di-caller-service-principal-for-msal-from-the-notebook)) and would be orphaned by any purge-and-recreate cycle.**
 
 #### Fix — restore in place (recommended)
 
@@ -209,7 +209,7 @@ az cognitiveservices account purge `
 Then `pwsh ./infra/deploy.ps1` (no switch). After the deploy:
 
 1. Bicep's deterministic role assignments (AI Search MI → Cognitive Services OpenAI User on Foundry, Foundry MI → Storage Blob Data Reader on Storage) recreate themselves with the new MI principal ID.
-2. **You must manually re-grant the DI-caller SP role** — the SP's `Cognitive Services User` on the *old* Foundry resource is orphaned. Re-run [03b-fabric-setup.md § F2.2 step 2](./03b-fabric-setup.md#f22-create-a-di-caller-service-principal-for-mssal-from-the-notebook) against the new Foundry resource.
+2. **You must manually re-grant the DI-caller SP role** — the SP's `Cognitive Services User` on the *old* Foundry resource is orphaned. Re-run [03b-fabric-setup.md § F2.2 step 2](./03b-fabric-setup.md#f22-create-a-di-caller-service-principal-for-msal-from-the-notebook) against the new Foundry resource.
 3. Wait up to **15 minutes** for role propagation before the Fabric pipeline can call DI again.
 
 #### Verify after fix
@@ -283,7 +283,7 @@ Reference: [Recover or purge deleted Azure AI Services resources](https://learn.
 | Status | Common cause | Fix |
 |---|---|---|
 | 401 (with `WWW-Authenticate: Bearer`) | Local auth is disabled on the Foundry resource (which serves DI); the caller used an `Ocp-Apim-Subscription-Key` header instead of a bearer token. | `nb_ocr_chunk_upload` uses MSAL + the DI-caller service principal (secret fetched from Key Vault by the workspace identity) to get a bearer token for `https://cognitiveservices.azure.com/.default`. See [03b-fabric-setup.md § F7.2](./03b-fabric-setup.md#f72-nb_ocr_chunk_upload) and [§ 3.7](#37-nb_ocr_chunk_upload-cant-authenticate-to-document-intelligence). Fabric notebooks don't support `DefaultAzureCredential` and `notebookutils.credentials.getToken` has no `cognitiveservices` audience key — hence the MSAL+SP detour. |
-| 403 (from DI) | The DI-caller service principal (`sp-rag-di-caller`) lacks **Cognitive Services User** on the Foundry resource. The Fabric workspace identity is *not* used for DI calls in this pattern. | Grant the role per [03b-fabric-setup.md § F2.2 step 2](./03b-fabric-setup.md#f22-create-a-di-caller-service-principal-for-mssal-from-the-notebook); wait up to 15 min for propagation |
+| 403 (from DI) | The DI-caller service principal (`sp-rag-di-caller`) lacks **Cognitive Services User** on the Foundry resource. The Fabric workspace identity is *not* used for DI calls in this pattern. | Grant the role per [03b-fabric-setup.md § F2.2 step 2](./03b-fabric-setup.md#f22-create-a-di-caller-service-principal-for-msal-from-the-notebook); wait up to 15 min for propagation |
 | 403 (from DI fetching `urlSource`) | The Foundry MI lacks **Storage Blob Data Reader** on the storage account; required because shared-key access on Storage is disabled | Grant the role per [03-deployment-manual.md § 1.7 step 3](./03-deployment-manual.md#17-rbac-wiring) (Bicep deployments wire this automatically via `rbac.bicep`) |
 | 404 | Wrong URL or model name | Confirm endpoint is the Foundry resource's `https://<foundry>.cognitiveservices.azure.com/documentintelligence/...` host (not `<foundry>.openai.azure.com`) and uses `prebuilt-read` |
 | 500 | DI service-side error | Retry; if persistent, check Azure status page; verify file is not corrupt and is < DI per-call size limit |
@@ -423,7 +423,7 @@ The activity returns `Success` after a sync, or `NotRun` if there's nothing to s
 
 And `notebookutils.credentials.getToken` exposes only **four** audience keys: `storage`, `pbi`, `keyvault`, `kusto`. There is no key for Cognitive Services (the audience needed to call Document Intelligence). The Fabric workspace identity also doesn't expose its client secret, so MSAL with the workspace identity isn't possible either.
 
-**Fix.** Use the MSAL + DI-caller service principal pattern documented in [03b-fabric-setup.md § F7.2](./03b-fabric-setup.md#f72-nb_ocr_chunk_upload) and [F2.2](./03b-fabric-setup.md#f22-create-a-di-caller-service-principal-for-mssal-from-the-notebook):
+**Fix.** Use the MSAL + DI-caller service principal pattern documented in [03b-fabric-setup.md § F7.2](./03b-fabric-setup.md#f72-nb_ocr_chunk_upload) and [F2.2](./03b-fabric-setup.md#f22-create-a-di-caller-service-principal-for-msal-from-the-notebook):
 
 1. Create a dedicated service principal (`sp-rag-di-caller`) and grant it **Cognitive Services User** on the **Foundry resource** (which serves the Document Intelligence endpoint in this pattern — no separate FormRecognizer account is provisioned).
 2. Store the SP's client secret in Key Vault under `di-sp-secret`.
@@ -918,7 +918,7 @@ Manually run once to confirm health, then check scheduling settings.
 - For a small / demo audience: the connecting user's identity is used; grant each user **Search Index Data Reader** on the search service.
 - For broad rollout: configure a Copilot Studio connection that uses a service principal with **Search Index Data Reader** — the agent then resolves the SP identity for every user.
 
-See [03-deployment-manual.md § 5.2](./03-deployment-manual.md#52-add-ai-search-as-a-knowledge-source) for the full configuration.
+See [03c-copilot-studio-setup.md § C2.1](./03c-copilot-studio-setup.md#c21-add-the-knowledge-source) for the full configuration.
 
 ### 5.8 Agent works for me but fails for other users (or: "I had to add Search Index Data Reader to my own account")
 

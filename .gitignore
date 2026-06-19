@@ -29,10 +29,3 @@ demo-ids.local.json
 # OS junk
 .DS_Store
 Thumbs.db
-
-# azd state — only appears if the optional Foundry web app (docs/09) is ever
-# initialized at the repo root. It should be scaffolded OUTSIDE this repo; these
-# root-anchored backstops avoid accidentally committing azd state if it is not.
-/.azure/
-/azure.yaml
-*.azd

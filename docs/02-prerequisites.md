@@ -263,7 +263,7 @@ These are the role assignments required by the pattern's Entra-only auth posture
 | AI Search service managed identity | **Storage Blob Data Reader** | Storage account (or `chunks/` container) | Indexer pulls chunk JSON — **critical** |
 | Foundry resource managed identity | **Storage Blob Data Reader** | Storage account (or `raw/` container) | Document Intelligence (served from the Foundry account) fetches `urlSource` files via its own MI — required because shared-key access on Storage is disabled |
 | Fabric workspace identity | **Storage Blob Data Contributor** | Storage account | Copy / chunk-upload activities write to `raw/` + `chunks/`. Assigned manually in [03b-fabric-setup.md § F2.1](./03b-fabric-setup.md#f21-grant-the-workspace-identity-the-required-roles) once the workspace identity exists |
-| DI-caller service principal (`sp-rag-di-caller`) | **Cognitive Services User** | Foundry resource | Fabric notebook calls Document Intelligence via MSAL with this SP's secret — see [03b-fabric-setup.md § F2.2](./03b-fabric-setup.md#f22-create-a-di-caller-service-principal-for-mssal-from-the-notebook) |
+| DI-caller service principal (`sp-rag-di-caller`) | **Cognitive Services User** | Foundry resource | Fabric notebook calls Document Intelligence via MSAL with this SP's secret — see [03b-fabric-setup.md § F2.2](./03b-fabric-setup.md#f22-create-a-di-caller-service-principal-for-msal-from-the-notebook) |
 
 ### Builder / deployer (assigned to the user or service principal running deploys)
 

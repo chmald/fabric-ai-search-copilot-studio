@@ -35,6 +35,8 @@ Reference: [Agent identity (OBO vs agent identity)](https://learn.microsoft.com/
 | **Copilot Studio data connection** | Entra ID Integrated **or** service principal | 03c agent → AI Search |
 | **End user (OBO)** | Human Entra identity, passed through | Foundry agent's **Fabric tool** → Fabric data |
 | **Custom-engine-agent bot** | Entra app registration | Teams/M365 → Foundry agent endpoint ([03d D6](./03d-foundry-agent-setup.md)) |
+| **Web app managed identity** | User-assigned MI | Standalone web app ([09](./09-foundry-agent-webapp.md)) → Foundry agent (MI mode); also the secretless OBO client-assertion source |
+| **Web app OBO app registration** | Entra app registration + federated credential | Standalone web app → exchanges the user token for an Agent Service token (OBO) |
 | **Builder / operator** | Human or deploy SP | Provisioning + agent authoring |
 
 ---

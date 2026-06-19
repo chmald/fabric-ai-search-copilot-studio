@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.43.8.12551",
-      "templateHash": "13080524280145660021"
+      "templateHash": "12474974872624480992"
     }
   },
   "parameters": {
@@ -1059,7 +1059,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.43.8.12551",
-              "templateHash": "12385481554503500627"
+              "templateHash": "15112810839722674154"
             }
           },
           "parameters": {
@@ -1109,7 +1109,7 @@
           "variables": {
             "roleIds": {
               "acrPull": "7f951dda-4ed3-4680-a7ca-43fe172d538d",
-              "azureAIDeveloper": "64702f94-c441-49e6-a78b-ef80e0188fee",
+              "foundryUser": "53ca6127-db72-4b80-b1b0-d745d6d5456d",
               "cognitiveServicesOpenAIContributor": "a001fd3d-188f-4b5d-821b-7da978bf7442"
             }
           },
@@ -1185,11 +1185,11 @@
               "type": "Microsoft.Authorization/roleAssignments",
               "apiVersion": "2022-04-01",
               "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('foundryAccountName'))]",
-              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('foundryAccountName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('identityName')), variables('roleIds').azureAIDeveloper)]",
+              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('foundryAccountName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('identityName')), variables('roleIds').foundryUser)]",
               "properties": {
                 "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('identityName')), '2023-01-31').principalId]",
                 "principalType": "ServicePrincipal",
-                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('roleIds').azureAIDeveloper)]"
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('roleIds').foundryUser)]"
               },
               "dependsOn": [
                 "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('identityName'))]"

@@ -85,7 +85,7 @@ NL-to-query accuracy depends on the agent understanding what the columns mean. A
 
    > You answer questions about an HR document portfolio using two tables. `employees` has one row per offer letter; `agreements` is the full portfolio (offer letters, NDAs, severance, contractor agreements). **Amounts are heterogeneous** — filter on `amount_basis` (`annual` / `hourly` / `lump_sum` / `fixed_fee` / `milestone`) before averaging or summing. Salaries are in the row's `currency`; do not convert across currencies. When asked for a specific person or document, return the `document_id` / `source_pdf` so the answer can be traced.
 
-2. **Example questions** (these double as the smoke test — see [samples/README.md](../samples/README.md#sample-questions-to-validate-the-agent)):
+2. **Example questions** (these double as the smoke test — see [samples/README.md](../samples/README.md#sample-questions-validate-the-data-agent)):
    - *How many offer letters are for executive-level roles?* → 2
    - *Average annual base salary for US senior roles?* → 191,500 USD
    - *How many documents of each type?* → 15 / 5 / 5 / 5

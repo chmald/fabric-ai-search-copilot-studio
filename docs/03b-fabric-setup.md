@@ -124,7 +124,7 @@ Behind the scenes, Fabric creates a service principal + app registration in Micr
 
 ### F2.1 Grant the workspace identity the required roles
 
-The pipeline writes raw files to `raw/` and chunk JSON to `chunks/`, and it reads a small secret from Key Vault that the DI-caller service principal (see [F2.2](#f22-create-a-di-caller-service-principal-for-mssal-from-the-notebook)) uses to authenticate to Document Intelligence. With all API keys disabled, the workspace identity needs two role assignments — grant them now before pipeline-build steps that depend on them.
+The pipeline writes raw files to `raw/` and chunk JSON to `chunks/`, and it reads a small secret from Key Vault that the DI-caller service principal (see [F2.2](#f22-create-a-di-caller-service-principal-for-msal-from-the-notebook)) uses to authenticate to Document Intelligence. With all API keys disabled, the workspace identity needs two role assignments — grant them now before pipeline-build steps that depend on them.
 
 From the **Azure portal** (or `az cli` — both shown):
 
@@ -315,7 +315,7 @@ SELECT * FROM control_table_files;
 
 ## Phase F6 — Create the Blob connection
 
-Fabric pipelines authenticate to external services through **connections**. For this pattern you only need to pre-create **one connection** — Azure Blob Storage — for the Copy activity. Document Intelligence is called from a Fabric notebook (`nb_ocr_chunk_upload`) using the `azure-ai-documentintelligence` Python SDK with **MSAL + a dedicated service principal** (see [F2.2](#f22-create-a-di-caller-service-principal-for-mssal-from-the-notebook) and [F7.2](#f72-nb_ocr_chunk_upload)) — so no DI connection and no Web activity are required. The SP's secret lives in Key Vault and is fetched at notebook runtime via the workspace identity's Key Vault Secrets User role.
+Fabric pipelines authenticate to external services through **connections**. For this pattern you only need to pre-create **one connection** — Azure Blob Storage — for the Copy activity. Document Intelligence is called from a Fabric notebook (`nb_ocr_chunk_upload`) using the `azure-ai-documentintelligence` Python SDK with **MSAL + a dedicated service principal** (see [F2.2](#f22-create-a-di-caller-service-principal-for-msal-from-the-notebook) and [F7.2](#f72-nb_ocr_chunk_upload)) — so no DI connection and no Web activity are required. The SP's secret lives in Key Vault and is fetched at notebook runtime via the workspace identity's Key Vault Secrets User role.
 
 Reference: [Connector overview](https://learn.microsoft.com/fabric/data-factory/connector-overview) and [Set up your Azure Blob Storage connection](https://learn.microsoft.com/fabric/data-factory/connector-azure-blob-storage).
 
@@ -477,7 +477,7 @@ notebookutils.notebook.exit(exit_payload)
 
 This notebook calls Document Intelligence, chunks the resulting text, and uploads chunk JSON to Blob — all in one Spark session per file. It uses the official [`azure-ai-documentintelligence`](https://learn.microsoft.com/python/api/overview/azure/ai-documentintelligence-readme) Python SDK. The SDK's long-running-operation poller waits for DI's async `analyze` operation to finish, so the pipeline doesn't need an `Until` loop.
 
-**Auth model.** Fabric notebooks do **not** support `DefaultAzureCredential` and `notebookutils.credentials.getToken` only accepts four documented audience keys (`storage`, `pbi`, `keyvault`, `kusto`) — see the [auth callout in F2.2](#f22-create-a-di-caller-service-principal-for-mssal-from-the-notebook). The notebook therefore uses:
+**Auth model.** Fabric notebooks do **not** support `DefaultAzureCredential` and `notebookutils.credentials.getToken` only accepts four documented audience keys (`storage`, `pbi`, `keyvault`, `kusto`) — see the [auth callout in F2.2](#f22-create-a-di-caller-service-principal-for-msal-from-the-notebook). The notebook therefore uses:
 
 - **Blob** → a custom `TokenCredential` wrapping `notebookutils.credentials.getToken('storage')` (workspace identity)
 - **Document Intelligence** → [MSAL](https://learn.microsoft.com/entra/msal/python/) client-credentials flow with the DI-caller service principal from F2.2, whose secret is read at runtime from Key Vault via `notebookutils.credentials.getSecret`
@@ -814,7 +814,7 @@ Reference: [Transform data by running a notebook (Fabric)](https://learn.microso
 
 ### F8.2 Activity [1.5] — Refresh SQL Endpoint
 
-> **Required** because the Lookup activity in [F8.3](#f83-activity-1-lookup-read-_tmp_new_files-for-the-foreach) reads `_tmp_new_files` via the Lakehouse SQL analytics endpoint, but `nb_lookup_new_files` wrote that table through Spark. The SQL endpoint syncs Delta metadata via a **background process** — syncs can lag seconds to minutes behind Spark writes ([SQL analytics endpoint metadata sync](https://learn.microsoft.com/fabric/data-engineering/sql-analytics-endpoint-metadata-sync)). Without this refresh, the first run will Lookup zero rows and the ForEach will iterate zero times, even though `nb_lookup_new_files` just wrote N rows. Microsoft's first documented [common scenario for this activity](https://learn.microsoft.com/fabric/data-factory/refresh-sql-endpoint-activity#common-scenarios) is exactly this case: *"Refreshing the SQL endpoint after a Notebook writes transformed data to a Lakehouse."*
+> **Required** because the Lookup activity in [F8.3](#f83-activity-1--lookup-read-_tmp_new_files-for-the-foreach) reads `_tmp_new_files` via the Lakehouse SQL analytics endpoint, but `nb_lookup_new_files` wrote that table through Spark. The SQL endpoint syncs Delta metadata via a **background process** — syncs can lag seconds to minutes behind Spark writes ([SQL analytics endpoint metadata sync](https://learn.microsoft.com/fabric/data-engineering/sql-analytics-endpoint-metadata-sync)). Without this refresh, the first run will Lookup zero rows and the ForEach will iterate zero times, even though `nb_lookup_new_files` just wrote N rows. Microsoft's first documented [common scenario for this activity](https://learn.microsoft.com/fabric/data-factory/refresh-sql-endpoint-activity#common-scenarios) is exactly this case: *"Refreshing the SQL endpoint after a Notebook writes transformed data to a Lakehouse."*
 
 Drag a **Refresh SQL Endpoint** activity after `lookup_new_files`. Connect with the green (success) arrow.
 
@@ -1067,7 +1067,7 @@ Fabric notebooks have two hard auth constraints that shape the DI auth pattern:
 
 The workspace identity also cannot be used with MSAL — its client secret isn't exposed to notebook code.
 
-**The fix.** Register a dedicated service principal `sp-rag-di-caller` ([F2.2](#f22-create-a-di-caller-service-principal-for-mssal-from-the-notebook)) and grant it **Cognitive Services User** on the Foundry resource (which serves the DI endpoint — see [01-architecture.md § 8](./01-architecture.md#8-document-intelligence-prebuilt-read-served-by-the-foundry-resource)). Store the SP's client secret in Key Vault; the notebook reads it at runtime via `notebookutils.credentials.getSecret` (the workspace identity has **Key Vault Secrets User** on the vault from [F2.1](#f21-grant-the-workspace-identity-the-required-roles)), then uses [MSAL's `ConfidentialClientApplication`](https://learn.microsoft.com/entra/msal/python/) to acquire a token for `https://cognitiveservices.azure.com/.default`.
+**The fix.** Register a dedicated service principal `sp-rag-di-caller` ([F2.2](#f22-create-a-di-caller-service-principal-for-msal-from-the-notebook)) and grant it **Cognitive Services User** on the Foundry resource (which serves the DI endpoint — see [01-architecture.md § 8](./01-architecture.md#8-document-intelligence-prebuilt-read-served-by-the-foundry-resource)). Store the SP's client secret in Key Vault; the notebook reads it at runtime via `notebookutils.credentials.getSecret` (the workspace identity has **Key Vault Secrets User** on the vault from [F2.1](#f21-grant-the-workspace-identity-the-required-roles)), then uses [MSAL's `ConfidentialClientApplication`](https://learn.microsoft.com/entra/msal/python/) to acquire a token for `https://cognitiveservices.azure.com/.default`.
 
 > The role assignment must be on the **SP**, not the workspace identity — the workspace identity is never the principal that calls DI.
 
@@ -1078,7 +1078,7 @@ The natural shape would be: notebook returns the new-file list inline → ForEac
 - The notebook activity's `exitValue` is a **single string**. Complex shapes have to round-trip through `json.dumps`.
 - Spark `Row` objects with timestamps and nested types don't serialize cleanly with `json.dumps` and lose typing on the consumer side.
 
-**The fix.** `nb_lookup_new_files` writes the file list to a Delta table `_tmp_new_files`, then a pipeline **Lookup** activity ([F8.3](#f83-activity-1-lookup-read-_tmp_new_files-for-the-foreach)) reads the table and feeds the typed row array to the ForEach. Side benefits:
+**The fix.** `nb_lookup_new_files` writes the file list to a Delta table `_tmp_new_files`, then a pipeline **Lookup** activity ([F8.3](#f83-activity-1--lookup-read-_tmp_new_files-for-the-foreach)) reads the table and feeds the typed row array to the ForEach. Side benefits:
 
 - The table is queryable from the SQL analytics endpoint — easy to inspect what the last run picked up.
 - The Lookup activity natively returns the row array as `@activity('...').output.value`, which the ForEach's `Items` expression consumes directly.
