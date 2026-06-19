@@ -12,10 +12,10 @@ Added a **third front-end option** for the Foundry agent ([03d](./docs/03d-found
 The upstream app is **not forked or vendored**. This repo ships a **thin configuration overlay** plus a runbook:
 
 - **`docs/09-foundry-agent-webapp.md`** (new) — front-end options comparison, the MI-vs-OBO rationale, prerequisites, deploy steps (`azd init` → enable OBO → `azd up`), a two-user RLS validation, RBAC/identity (cross-referenced to [08](./docs/08-rbac-and-identity-passthrough.md)), and caveats.
-- **`webapp/`** (new) — `README.md`, `.env.example` (agent identifiers + OBO flag, placeholders only), `deploy-webapp.ps1` (thin `azd` wrapper), `.gitignore` (excludes the populated `.env` and the cloned upstream app).
+- **`webapp/`** (new) — `README.md`, `.env.example` (agent identifiers + the `ENABLE_OBO` flag, placeholders only), `deploy-webapp.ps1` (thin `azd` wrapper), `.gitignore` (excludes the populated `.env` and `azd` state; the upstream app is scaffolded outside this repo, not vendored).
 - Cross-linked from the README file index, [03d Phase D6](./docs/03d-foundry-agent-setup.md), and [00-reproduce](./docs/00-reproduce-this-demo.md).
 
-Honesty notes carried in the docs: OBO is opt-in and adds an app registration + federated identity credential + admin consent; verify the exact `azd` OBO flag name against the upstream README at deploy time; Conditional Access can interfere with OBO token exchange; AI Search document-level trimming (`group_ids`) remains a separate step even in OBO mode.
+Honesty notes carried in the docs: OBO is opt-in and adds an app registration + federated identity credential + admin consent; the `azd` OBO flag is **`ENABLE_OBO`** (maps to the Bicep `enableObo` parameter) — verify against the upstream README at deploy time; OBO carries the user identity to Agent Service while the **Fabric tool/connection must also be configured for identity passthrough** (most other agent tools run as the agent's own connection identity); role-name assignments are auto-granted by `azd` and Foundry data-plane role names have changed — verify at deploy time; Conditional Access can interfere with OBO token exchange; AI Search document-level trimming (`group_ids`) remains a separate step even in OBO mode.
 
 ## 2026-06-10
 

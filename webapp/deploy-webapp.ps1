@@ -63,6 +63,12 @@ if ($missing) {
     throw "Missing required values in ${EnvFile}: $($missing -join ', ')"
 }
 
+# Reject unedited placeholder values (anything still containing a <...> token)
+$placeholder = $envVars.Keys | Where-Object { $envVars[$_] -match '<[^>]+>' }
+if ($placeholder) {
+    throw "Unedited placeholder values in ${EnvFile}: $($placeholder -join ', '). Replace the <...> tokens with real values before deploying."
+}
+
 # --- OBO guard --------------------------------------------------------------
 $oboKeys = @('ENABLE_OBO', 'enableObo')
 $oboOn = $false

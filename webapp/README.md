@@ -14,20 +14,23 @@ This pattern's agent connects a **Microsoft Fabric data agent** tool, which requ
 |---|---|
 | [`.env.example`](./.env.example) | Template for the agent identifiers + the OBO flag. Copy to `.env` and fill in. |
 | [`deploy-webapp.ps1`](./deploy-webapp.ps1) | Helper that reads `.env`, applies the values via `azd env set` (including OBO), and runs `azd up`. |
-| [`.gitignore`](./.gitignore) | Excludes the populated `.env`, the cloned upstream app, and `azd` state from commits. |
+| [`.gitignore`](./.gitignore) | Excludes the populated `.env` and `azd` state. The upstream app is scaffolded **outside** this repo (not vendored), so it never needs ignoring here. |
 
 ## Quick start
 
 ```pwsh
-# 1. Fill in your agent identifiers
+# 1. Fill in your agent identifiers (this file stays in the repo, gitignored)
 Copy-Item webapp/.env.example webapp/.env
 #   edit webapp/.env
 
-# 2. Initialize the upstream starter (per docs/09 § W2)
+# 2. Initialize the upstream starter OUTSIDE this repo (per docs/09 § W2) so it is
+#    never committed here. Run from the PARENT folder of this repo:
+mkdir foundry-agent-webapp; cd foundry-agent-webapp
 azd init -t microsoft-foundry/foundry-agent-webapp
 
-# 3. Deploy in OBO mode using the helper (applies env + azd up)
-pwsh ./webapp/deploy-webapp.ps1
+# 3. From that app directory, deploy in OBO mode using the helper
+#    (it reads this repo's webapp/.env and runs `azd up`).
+pwsh <path-to-this-repo>/webapp/deploy-webapp.ps1
 ```
 
 Full prerequisites, RBAC, validation, and caveats: **[docs/09-foundry-agent-webapp.md](../docs/09-foundry-agent-webapp.md)**.
