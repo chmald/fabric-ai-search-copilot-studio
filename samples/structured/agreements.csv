@@ -1,0 +1,31 @@
+document_id,document_type,employer,counterparty,region,effective_date,amount,currency,amount_basis,term_months,pages,source_pdf
+CA-001-us-us-1099,contractor_agreement,Aurora Holdings Inc.,Kenneth Ward (a sole proprietor),US,2026-01-31,200,USD,hourly,12,2,synthetic-contractor-agreements/CA-001-us-us-1099.pdf
+CA-002-uk-uk-psc,contractor_agreement,Fjord Industries Ltd.,Aurora Holdings Ltd.,UK,2026-02-09,150,GBP,hourly,6,1,synthetic-contractor-agreements/CA-002-uk-uk-psc.pdf
+CA-003-au-au-sole-trader,contractor_agreement,Cascade Robotics Pty Ltd,Sara Hernandez (ABN 12 345 678 901),AU,2026-02-18,180,AUD,hourly,12,2,synthetic-contractor-agreements/CA-003-au-au-sole-trader.pdf
+CA-004-us-us-1099,contractor_agreement,Glacial Logistics Inc.,Charles Sellers (a sole proprietor),US,2026-02-27,25000,USD,milestone,9,2,synthetic-contractor-agreements/CA-004-us-us-1099.pdf
+CA-005-us-us-1099,contractor_agreement,Orion Logistics Inc.,Steven Allen (a sole proprietor),US,2026-03-08,120000,USD,fixed_fee,6,2,synthetic-contractor-agreements/CA-005-us-us-1099.pdf
+NDA-001-us-employee-oneway,nda,Boreal Networks Inc.,Gregory Cook,US,2026-01-19,,,,,2,synthetic-ndas/NDA-001-us-employee-oneway.pdf
+NDA-002-us-contractor-oneway,nda,Orion Holdings Inc.,Helios Industries Inc.,US,2026-01-30,,,,24,2,synthetic-ndas/NDA-002-us-contractor-oneway.pdf
+NDA-003-uk-mutual,nda,Glacial Labs Ltd.,Delphi Labs Ltd.,UK,2026-02-10,,,,36,1,synthetic-ndas/NDA-003-uk-mutual.pdf
+NDA-004-de-employee-oneway,nda,Indigo Analytics GmbH,Renata Misicher-Röhrdanz,DE,2026-02-21,,,,,1,synthetic-ndas/NDA-004-de-employee-oneway.pdf
+NDA-005-us-mutual,nda,Fjord Partners Inc.,Delphi Materials Inc.,US,2026-03-04,,,,,2,synthetic-ndas/NDA-005-us-mutual.pdf
+OL-001-us-mid,offer_letter,Ember Industries Inc.,Autumn Carr,US,2026-02-12,80000,USD,annual,,1,synthetic-offer-letters/OL-001-us-mid.pdf
+OL-002-us-senior,offer_letter,Glacial Partners Inc.,Christina Malone,US,2026-02-19,185000,USD,annual,12,2,synthetic-offer-letters/OL-002-us-senior.pdf
+OL-003-us-exec,offer_letter,Boreal Partners Inc.,Christina Walsh,US,2026-02-26,276000,USD,annual,24,3,synthetic-offer-letters/OL-003-us-exec.pdf
+OL-004-us-low,offer_letter,Fjord Systems Inc.,Robert Fuller,US,2026-03-05,18,USD,hourly,,1,synthetic-offer-letters/OL-004-us-low.pdf
+OL-005-us-mid,offer_letter,Ember Partners Inc.,William Parks,US,2026-03-12,123000,USD,annual,6,2,synthetic-offer-letters/OL-005-us-mid.pdf
+OL-006-us-senior,offer_letter,Lyra Networks Inc.,Willie Byrd,US,2026-03-19,198000,USD,annual,9,2,synthetic-offer-letters/OL-006-us-senior.pdf
+OL-007-us-mid,offer_letter,Glacial Partners Inc.,Adriana Paul,US,2026-03-26,122000,USD,annual,,2,synthetic-offer-letters/OL-007-us-mid.pdf
+OL-008-us-mid,offer_letter,Ember Holdings Inc.,Lori Hernandez,US,2026-04-02,127000,USD,annual,12,2,synthetic-offer-letters/OL-008-us-mid.pdf
+OL-009-uk-mid,offer_letter,Ember Partners Ltd.,Kayleigh Johnson-Wright,UK,2026-04-09,74000,GBP,annual,3,1,synthetic-offer-letters/OL-009-uk-mid.pdf
+OL-010-uk-senior,offer_letter,Helios Systems Ltd.,Wendy Jones-Matthews,UK,2026-04-16,125000,GBP,annual,6,2,synthetic-offer-letters/OL-010-uk-senior.pdf
+OL-011-uk-low,offer_letter,Nimbus Partners Ltd.,Shirley Davies,UK,2026-04-23,21,GBP,hourly,,1,synthetic-offer-letters/OL-011-uk-low.pdf
+OL-012-de-mid,offer_letter,Lyra Analytics GmbH,Anastasios Austermühle B.Eng.,DE,2026-04-30,118000,EUR,annual,6,1,synthetic-offer-letters/OL-012-de-mid.pdf
+OL-013-de-senior,offer_letter,Orion Labs GmbH,Horst-Günter Hornich,DE,2026-05-07,138000,EUR,annual,12,2,synthetic-offer-letters/OL-013-de-senior.pdf
+OL-014-ca-mid,offer_letter,Helios Holdings Inc.,Lisa Smith,CA,2026-05-14,141000,CAD,annual,,2,synthetic-offer-letters/OL-014-ca-mid.pdf
+OL-015-au-exec,offer_letter,Aurora Systems Pty Ltd,Tammy Rodriguez,AU,2026-05-21,423000,AUD,annual,18,2,synthetic-offer-letters/OL-015-au-exec.pdf
+SEV-001-us-standard-std,severance_agreement,Fjord Partners Inc.,Jesse Zuniga,US,2026-02-18,16250,USD,lump_sum,3.0,2,synthetic-severance/SEV-001-us-standard-std.pdf
+SEV-002-us-executive-nc,severance_agreement,Orion Analytics Inc.,Crystal Rios,US,2026-03-03,203000,USD,installments,12.0,2,synthetic-severance/SEV-002-us-executive-nc.pdf
+SEV-003-uk-standard-std,severance_agreement,Helios Systems Ltd.,Danielle Howe,UK,2026-03-16,48000,GBP,lump_sum,6.0,1,synthetic-severance/SEV-003-uk-standard-std.pdf
+SEV-004-de-standard-std,severance_agreement,Marigold Analytics GmbH,Oliver Hein,DE,2026-03-29,37333,EUR,continuation_of_salary,4.0,1,synthetic-severance/SEV-004-de-standard-std.pdf
+SEV-005-au-executive-nc,severance_agreement,Boreal Partners Pty Ltd,Tammy Cherry,AU,2026-04-11,367500,AUD,installments,18.0,1,synthetic-severance/SEV-005-au-executive-nc.pdf

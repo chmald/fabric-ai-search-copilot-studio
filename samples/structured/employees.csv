@@ -1,0 +1,16 @@
+employee_id,name,employer,region,position_title,level,base_salary,currency,pay_frequency,signing_bonus,equity_grant,start_date,non_compete_months,source_document
+OL-001-us-mid,Autumn Carr,Ember Industries Inc.,US,Product Designer,mid,80000,USD,annual,,,2026-02-12,,synthetic-offer-letters/OL-001-us-mid.pdf
+OL-002-us-senior,Christina Malone,Glacial Partners Inc.,US,Engineering Manager,senior,185000,USD,annual,15000,5000,2026-02-19,12,synthetic-offer-letters/OL-002-us-senior.pdf
+OL-003-us-exec,Christina Walsh,Boreal Partners Inc.,US,Vice President of Product,exec,276000,USD,annual,50000,25000,2026-02-26,24,synthetic-offer-letters/OL-003-us-exec.pdf
+OL-004-us-low,Robert Fuller,Fjord Systems Inc.,US,Customer Support Specialist,low,18,USD,hourly,,,2026-03-05,,synthetic-offer-letters/OL-004-us-low.pdf
+OL-005-us-mid,William Parks,Ember Partners Inc.,US,Marketing Manager,mid,123000,USD,annual,,,2026-03-12,6,synthetic-offer-letters/OL-005-us-mid.pdf
+OL-006-us-senior,Willie Byrd,Lyra Networks Inc.,US,Director of Operations,senior,198000,USD,annual,12000,3000,2026-03-19,9,synthetic-offer-letters/OL-006-us-senior.pdf
+OL-007-us-mid,Adriana Paul,Glacial Partners Inc.,US,HR Business Partner,mid,122000,USD,annual,8000,1500,2026-03-26,,synthetic-offer-letters/OL-007-us-mid.pdf
+OL-008-us-mid,Lori Hernandez,Ember Holdings Inc.,US,HR Business Partner,mid,127000,USD,annual,,,2026-04-02,12,synthetic-offer-letters/OL-008-us-mid.pdf
+OL-009-uk-mid,Kayleigh Johnson-Wright,Ember Partners Ltd.,UK,HR Business Partner,mid,74000,GBP,annual,6000,,2026-04-09,3,synthetic-offer-letters/OL-009-uk-mid.pdf
+OL-010-uk-senior,Wendy Jones-Matthews,Helios Systems Ltd.,UK,Senior Product Manager,senior,125000,GBP,annual,20000,2000,2026-04-16,6,synthetic-offer-letters/OL-010-uk-senior.pdf
+OL-011-uk-low,Shirley Davies,Nimbus Partners Ltd.,UK,Logistics Coordinator,low,21,GBP,hourly,,,2026-04-23,,synthetic-offer-letters/OL-011-uk-low.pdf
+OL-012-de-mid,Anastasios Austermühle B.Eng.,Lyra Analytics GmbH,DE,HR Business Partner,mid,118000,EUR,annual,,,2026-04-30,6,synthetic-offer-letters/OL-012-de-mid.pdf
+OL-013-de-senior,Horst-Günter Hornich,Orion Labs GmbH,DE,Senior Product Manager,senior,138000,EUR,annual,15000,4000,2026-05-07,12,synthetic-offer-letters/OL-013-de-senior.pdf
+OL-014-ca-mid,Lisa Smith,Helios Holdings Inc.,CA,Software Engineer,mid,141000,CAD,annual,10000,,2026-05-14,,synthetic-offer-letters/OL-014-ca-mid.pdf
+OL-015-au-exec,Tammy Rodriguez,Aurora Systems Pty Ltd,AU,Chief Marketing Officer,exec,423000,AUD,annual,25000,8000,2026-05-21,18,synthetic-offer-letters/OL-015-au-exec.pdf

@@ -1,0 +1,71 @@
+{
+  "_meta": {
+    "description": "Template for demo-ids.local.json — the per-deployment ID file this pattern produces. The live file is HYBRID: Azure resource fields (flat top-level keys) are auto-written by infra/deploy.ps1 from the Bicep deploymentSummary and overwritten on every successful deploy; nested objects (fabric, sp-rag-di-caller, copilotStudio) are populated manually during the Fabric and Copilot Studio setup phases and preserved across deploys (deploy.ps1 merges rather than overwrites). The live file is gitignored — never commit a populated copy.",
+    "azureFieldsSource": "infra/main.bicep deploymentSummary output (written by infra/deploy.ps1)",
+    "manualSections": ["fabric", "sp-rag-di-caller", "copilotStudio"],
+    "consumedBy": [
+      "scripts/post_deploy_search.py (reads top-level Azure fields: foundryOpenAIEndpoint, embeddingDeployment, embeddingModel, searchService, searchEndpoint, searchIndexName, searchDataSourceName, searchIndexerName, storageAccount, chunksContainer, resourceGroup, subscriptionId)",
+      "Fabric pipeline pl_ingest_docs (operator copies fabric.* and sp-rag-di-caller.* into pipeline parameters at build time — see docs/03b-fabric-setup.md § F8.0)"
+    ]
+  },
+
+  "_azure_fields_BELOW_ARE_AUTO_WRITTEN_BY_DEPLOY_PS1": "----- Bicep-managed (auto, alphabetical) -----",
+
+  "blobEndpoint": "https://stragdemo<env><region>.blob.core.windows.net/",
+  "chatDeployment": "chat",
+  "chatModel": "gpt-4o",
+  "chunksContainer": "chunks",
+  "documentIntelligenceEndpoint": "https://aif-rag-demo-<env>-<region>.cognitiveservices.azure.com/",
+  "embeddingDeployment": "embedding",
+  "embeddingModel": "text-embedding-3-large",
+  "environment": "<env — dev | test | prod>",
+  "foundryOpenAIEndpoint": "https://aif-rag-demo-<env>-<region>.openai.azure.com",
+  "foundryResource": "aif-rag-demo-<env>-<region>",
+  "keyVault": "kv-rag-demo-<env>-<region>",
+  "keyVaultUri": "https://kv-rag-demo-<env>-<region>.vault.azure.net/",
+  "rawContainer": "raw",
+  "region": "<primary-region — e.g. eastus2>",
+  "resourceGroup": "rg-rag-demo-<env>-<region>",
+  "searchDataSourceName": "ds-chunks",
+  "searchEndpoint": "https://srch-rag-demo-<env>-<region>.search.windows.net",
+  "searchIndexName": "idx-rag-documents",
+  "searchIndexerName": "ixr-chunks",
+  "searchPrincipalId": "<auto-populated — AI Search system-assigned MI object ID>",
+  "searchService": "srch-rag-demo-<env>-<region>",
+  "storageAccount": "stragdemo<env><region>",
+  "subscriptionId": "<azure-subscription-guid>",
+  "tenantId": "<entra-tenant-guid>",
+  "workload": "rag",
+
+  "_manual_sections_BELOW_ARE_PRESERVED_BY_DEPLOY_PS1": "----- Manually maintained (preserved across deploys) -----",
+
+  "fabric": {
+    "_note": "Populated manually during docs/03b-fabric-setup.md. The Fabric REST API has no Bicep/ARM surface for workspaces, lakehouses, or pipelines, so these IDs are recorded here as a reference for human re-use and for binding into pipeline parameters.",
+    "tenantSetting_serviceTagsForFabricAdmin": "Enabled",
+    "capacityId": "<fabric-capacity-guid>",
+    "capacityName": "fabric<workload>",
+    "capacitySku": "<F-SKU — F2 minimum for demo, F16+ recommended for prod>",
+    "workspaceId": "<fabric-workspace-guid>",
+    "workspaceName": "ws-rag-<env>",
+    "lakehouseId": "<lakehouse-guid>",
+    "lakehouseName": "lh_rag_<env>",
+    "lakehouseSqlEndpoint": "<sql-endpoint-hostname>",
+    "pipelineId": "<pl_ingest_docs-guid>"
+  },
+
+  "sp-rag-di-caller": {
+    "_note": "Populated manually after running `az ad sp create-for-rbac --name sp-rag-di-caller` (see docs/03b-fabric-setup.md § F2.2). The SP is used by the Fabric OCR notebook to acquire a bearer token for Document Intelligence (served by the Foundry resource). NOTE: The `password` field below is the SP's client secret — it is ALSO stored in Key Vault as `di-sp-secret` (which is the canonical home; the Fabric notebook reads it from there at runtime). The copy here is kept temporarily for diagnostic convenience and SHOULD BE REMOVED once Key Vault retrieval is validated end-to-end.",
+    "appId": "<sp-client-id-guid>",
+    "displayName": "sp-rag-di-caller",
+    "password": "<sp-client-secret — also stored in Key Vault as `di-sp-secret`>",
+    "tenant": "<entra-tenant-guid>"
+  },
+
+  "copilotStudio": {
+    "_note": "Populated manually during docs/03c-copilot-studio-setup.md. Copilot Studio is Power Platform (not Azure) and has no Bicep / Terraform surface.",
+    "environmentRegion": "<region — independent from Azure region>",
+    "agentName": "agent-rag-kb",
+    "knowledgeSource": "idx-rag-documents (Azure AI Search)",
+    "publishedChannels": ["Microsoft Teams", "M365 Copilot"]
+  }
+}

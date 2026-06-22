@@ -1,0 +1,67 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "_comment": "TEMPLATE — copy this file to main.parameters.local.json and fill in your values. The .local.json file is gitignored. Never commit a populated parameters file with real values.",
+  "parameters": {
+    "location": {
+      "value": "eastus2",
+      "_comment": "Choose from Tier-1 list in docs/02-prerequisites.md § 11: eastus2 / swedencentral / australiaeast / japaneast"
+    },
+    "workloadName": {
+      "value": "rag",
+      "_comment": "Short workload name (2-8 chars). Used in resource naming."
+    },
+    "env": {
+      "value": "dev",
+      "_comment": "Environment label: dev | test | prod"
+    },
+    "embeddingModelName": {
+      "value": "text-embedding-3-large",
+      "_comment": "Cost-down option: text-embedding-3-small (1536 dim instead of 3072)"
+    },
+    "embeddingModelVersion": {
+      "value": "",
+      "_comment": "Leave empty to let Azure pick latest GA. Pin a version (e.g. '1') for reproducibility."
+    },
+    "embeddingModelTpm": {
+      "value": 10,
+      "_comment": "TPM in units of 1000. 10 = 10K TPM (demo). Bump to 50+ for production indexing throughput."
+    },
+    "chatModelName": {
+      "value": "",
+      "_comment": "OPT-IN. Leave EMPTY (default) to skip the chat deployment — the locked design (Copilot Studio + AI Search + integrated vectorizer) does NOT consume a chat completion model; Copilot Studio uses its own host model. Set to `gpt-4o` (or `gpt-4o-mini` for cost-down) only when an engagement explicitly needs a chat endpoint (custom app code, Foundry agent runtime, BYOM Copilot Studio)."
+    },
+    "chatModelVersion": {
+      "value": "",
+      "_comment": "Ignored when chatModelName is empty."
+    },
+    "chatModelTpm": {
+      "value": 10,
+      "_comment": "TPM in units of 1000. Ignored when chatModelName is empty. Only relevant when opting in."
+    },
+    "searchSku": {
+      "value": "standard",
+      "_comment": "Standard (S1) MINIMUM — semantic ranker not available on Free or Basic. Use standard2 / standard3 for high query volume or large indexes."
+    },
+    "deployerPrincipalId": {
+      "value": "",
+      "_comment": "Object ID of the identity running the post-deploy script. When set, the deployment grants Search Service Contributor + Search Index Data Contributor on the AI Search service (admin keys are disabled). Find your own value with: az ad signed-in-user show --query id -o tsv. For CI: the pipeline's service principal / workload identity object ID. Leave blank to assign the roles manually."
+    },
+    "deployerPrincipalType": {
+      "value": "User",
+      "_comment": "User (interactive az login) or ServicePrincipal (CI/CD federated workload identity)."
+    },
+    "deployWebApp": {
+      "value": false,
+      "_comment": "OPT-IN. Set true to also provision the optional web-app hosting platform (Container Apps environment, ACR, Log Analytics, user-assigned managed identity) for the standalone chat front end (docs/09). The container image is built + deployed afterwards by scripts/deploy-webapp.ps1. Leave false for the Copilot Studio path."
+    },
+    "tags": {
+      "value": {
+        "workload": "rag",
+        "pattern": "rag-knowledge-base-pattern",
+        "owner": "<your-name-or-team>",
+        "costCenter": "<cost-center-id>"
+      }
+    }
+  }
+}

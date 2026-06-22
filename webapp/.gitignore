@@ -1,0 +1,9 @@
+# Populated local env — never commit real tenant/subscription/endpoint values
+.env
+app/.env
+
+# Python build artifacts
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/

@@ -1,0 +1,31 @@
+# Python / virtualenv
+__pycache__/
+*.pyc
+.venv/
+.env
+.pytest_cache/
+scripts/.deps-installed
+
+# IDE / editor
+.vscode/
+
+# Local-only secrets and credentials (NEVER commit)
+.sp-secret.json
+*.pem
+*.key
+secrets.json
+*.env.local
+
+# Local deployment state / Terraform / Bicep what-if outputs
+.terraform/
+*.tfstate
+*.tfstate.backup
+.bicep_what_if.json
+
+# Deployment ID snapshots populated post-deploy — keep the template, gitignore the populated copy
+demo-ids.local.json
+*.local.json
+
+# OS junk
+.DS_Store
+Thumbs.db
