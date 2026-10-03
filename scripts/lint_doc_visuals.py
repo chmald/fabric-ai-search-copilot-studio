@@ -162,6 +162,8 @@ def lint(md: Path, is_readme: bool, no_diagram: set[str]) -> tuple[list[str], li
 
 
 def main() -> None:
+    if hasattr(sys.stdout, "reconfigure"):  # Windows consoles default to cp1252
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--root", type=Path, default=Path.cwd(), help="demo root (default: cwd)")
     ap.add_argument("--strict", action="store_true", help="treat warnings as errors")
