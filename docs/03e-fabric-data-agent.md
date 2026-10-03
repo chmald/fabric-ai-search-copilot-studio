@@ -1,16 +1,46 @@
+[README](../README.md) › [docs index](./00-reproduce-this-demo.md) › 03e Fabric Data Agent
+
 # 03e — Fabric Data Agent over the structured sample data
+
+<p align="center">
+  <img src="./assets/icons/storage.svg" width="40" alt="Lakehouse tables">&nbsp;&nbsp;
+  <img src="./assets/icons/sql-database.svg" width="40" alt="Fabric Data Agent">&nbsp;&nbsp;
+  <img src="./assets/icons/foundry-agent-service.svg" width="40" alt="Foundry Agent Service">&nbsp;&nbsp;
+  <img src="./assets/icons/entra-id.svg" width="40" alt="Microsoft Entra ID">&nbsp;&nbsp;
+  <img src="./assets/icons/users.svg" width="40" alt="End users">
+</p>
+
+![Version](./assets/badges/version.svg) ![GA](./assets/badges/ga.svg) ![Preview](./assets/badges/preview.svg) ![Optional](./assets/badges/optional.svg) ![Static only](./assets/badges/static-only.svg)
 
 This document builds the **structured-data knowledge source** for the agent: a **Microsoft Fabric Data Agent** that answers questions over tabular HR data (counts, filters, aggregates) and complements the unstructured **Azure AI Search** index (clauses, wording, citations).
 
+## At a glance
+
+| | Item | Detail |
+|---|---|---|
+| <img src="./assets/icons/storage.svg" width="24" alt=""/> | **Data** | `employees.csv` (15 rows) + `agreements.csv` (30 rows) loaded as Lakehouse Delta tables |
+| <img src="./assets/icons/sql-database.svg" width="24" alt=""/> | **Fabric Data Agent** `data-agent-hr` | ![GA](./assets/badges/ga.svg) NL-to-query over the two tables |
+| <img src="./assets/icons/foundry-agent-service.svg" width="24" alt=""/> | **Consumer** | Foundry Microsoft Fabric tool (03d Phase D3) ![Preview](./assets/badges/preview.svg) |
+| <img src="./assets/icons/entra-id.svg" width="24" alt=""/> | **Identity** | On-behalf-of caller identity; RLS honored per user |
+
+> [!IMPORTANT]
 > **Optional — Foundry path only.** Only the [Microsoft Foundry agent path (03d)](./03d-foundry-agent-setup.md) wires a Fabric Data Agent (as its **Microsoft Fabric knowledge tool**, Phase D3). Skip this doc if your deployment is unstructured-document-only. *(Copilot Studio can also consume a Fabric Data Agent, but that connector is exactly the premium / message-capacity-billed path 03d exists to avoid — so the Fabric Data Agent is documented on the Foundry path.)*
 
+> [!NOTE]
 > **Run order.** Build this **after** the Fabric workspace exists ([03b](./03b-fabric-setup.md)) and **before** [03d Phase D3](./03d-foundry-agent-setup.md#phase-d3--add-the-microsoft-fabric-data-agent-tool-structured-data). It reuses the same workspace and capacity — no new Azure resources.
 
+> [!WARNING]
 > **Preview boundary.** The **Fabric Data Agent** (this Fabric feature) is **generally available**; the **Foundry Microsoft Fabric tool** that consumes it (03d Phase D3) is in **preview**. Tenant settings gate the feature and screens move — re-verify against [Fabric Data Agent docs](https://learn.microsoft.com/fabric/data-science/concept-data-agent) at build time.
 
 ---
 
 ## What you'll build
+
+[![Fabric Data Agent flow: structured CSVs to Lakehouse Delta tables, Data Agent grounded and published, consumed by the Foundry agent](./assets/fabric-data-agent-flow.png)](./assets/fabric-data-agent-flow.png)
+
+<sub>Editable source: [`assets/fabric-data-agent-flow.drawio`](./assets/fabric-data-agent-flow.drawio) - regenerate with `python scripts/export_diagrams.py docs/assets`.</sub>
+
+<details><summary><b>Text view of the flow</b></summary>
 
 ```
 samples/structured/                         (in this repo)
@@ -26,6 +56,8 @@ samples/structured/                         (in this repo)
                                           ▼  consumed as a knowledge tool by
                               Foundry agent  (03d Phase D3 — on-behalf-of identity)
 ```
+
+</details>
 
 The CSVs in [`samples/structured/`](../samples/structured/) correspond to a standard synthetic HR document set via the `source_pdf` key (see [samples/README.md](../samples/README.md)) — so once that document set is uploaded to the ingestion flow, a document answer and a data answer about the same person agree. The document corpus itself is uploaded separately ([03b § F4](./03b-fabric-setup.md)); only the structured data ships in this repo.
 
@@ -44,6 +76,15 @@ The CSVs in [`samples/structured/`](../samples/structured/) correspond to a stan
 ---
 
 ## Phase G1 — Load the structured CSVs into Lakehouse tables
+
+| Step | | Action | Gate |
+|---|---|---|---|
+| **1** | <img src="./assets/icons/storage.svg" width="28" alt=""> | Open Lakehouse `lh_rag_<env>` | ☐ Lakehouse opens |
+| **2** | <img src="./assets/icons/folder.svg" width="28" alt=""> | Upload both CSVs to `Files/structured/` | ☐ Two files present |
+| **3** | <img src="./assets/icons/sql-database.svg" width="28" alt=""> | Convert to Delta tables | ☐ `employees` and `agreements` listed under Tables |
+| **4** | <img src="./assets/icons/code.svg" width="28" alt=""> | Validate the row counts | ☐ 15 and 30 rows |
+
+Details for each step:
 
 1. Open the Lakehouse `lh_rag_<env>` from [03b § F3](./03b-fabric-setup.md) (or create a Warehouse if you prefer T-SQL).
 2. Upload `employees.csv` and `agreements.csv` into the Lakehouse **Files** area (drag-drop, or `Get data → Upload files`) — e.g. into a `Files/structured/` folder.
@@ -69,6 +110,14 @@ The CSVs in [`samples/structured/`](../samples/structured/) correspond to a stan
 
 ## Phase G2 — Create the Fabric Data Agent
 
+| Step | | Action | Gate |
+|---|---|---|---|
+| **1** | <img src="./assets/icons/sql-database.svg" width="28" alt=""> | **+ New item → Data agent**, name `data-agent-hr` | ☐ Agent created |
+| **2** | <img src="./assets/icons/storage.svg" width="28" alt=""> | Add the Lakehouse as data source; select both tables | ☐ Two tables selected |
+| **3** | <img src="./assets/icons/file.svg" width="28" alt=""> | Check the schema pane | ☐ Tables and columns visible |
+
+Details for each step:
+
 1. In the workspace, **+ New item → Data agent** (also reachable from **New → Data agent**). Name it `data-agent-hr`.
 2. **Add a data source → the Lakehouse** `lh_rag_<env>`, and **select the `employees` and `agreements` tables**. (You can add a Warehouse or a Power BI semantic model later; for this sample the two Lakehouse tables are enough.)
 3. Confirm the agent can see both tables and their columns in the schema pane.
@@ -79,7 +128,15 @@ Reference: [Create a Fabric Data Agent](https://learn.microsoft.com/fabric/data-
 
 ## Phase G3 — Ground it with instructions + example questions
 
-NL-to-query accuracy depends on the agent understanding what the columns mean. Add:
+NL-to-query accuracy depends on the agent understanding what the columns mean.
+
+| Step | | Action | Gate |
+|---|---|---|---|
+| **1** | <img src="./assets/icons/gear.svg" width="28" alt=""> | Add agent instructions (scope + `amount_basis` caveat) | ☐ Instructions saved |
+| **2** | <img src="./assets/icons/file.svg" width="28" alt=""> | Add the five example questions | ☐ Examples saved |
+| **3** | <img src="./assets/icons/folder.svg" width="28" alt=""> | (Optional) Add per-column notes | ☐ Notes added or skipped |
+
+Add:
 
 1. **Agent instructions** (scope + the one caveat in this dataset):
 
@@ -98,6 +155,12 @@ NL-to-query accuracy depends on the agent understanding what the columns mean. A
 
 ## Phase G4 — Test in Fabric
 
+| Step | | Action | Gate |
+|---|---|---|---|
+| **1** | <img src="./assets/icons/dev-console.svg" width="28" alt=""> | Open the chat pane and run the G3 example questions | ☐ All five answered |
+| **2** | <img src="./assets/icons/sql-database.svg" width="28" alt=""> | Cross-check counts and aggregates against the CSVs | ☐ Numbers match |
+| **3** | <img src="./assets/icons/gear.svg" width="28" alt=""> | Iterate on instructions/notes until clean | ☐ Passes cleanly |
+
 Open the Data Agent's chat pane and run the example questions from G3. Confirm:
 
 - counts and aggregates are correct (cross-check against the CSVs);
@@ -110,6 +173,13 @@ Iterate on the instructions/notes until the example questions pass cleanly — t
 
 ## Phase G5 — Publish
 
+| Step | | Action | Gate |
+|---|---|---|---|
+| **1** | <img src="./assets/icons/sql-database.svg" width="28" alt=""> | **Publish** the Data Agent | ☐ Published version exists |
+| **2** | <img src="./assets/icons/file.svg" width="28" alt=""> | Record workspace name/ID and Data Agent name/ID | ☐ Values saved for 03d D3 |
+
+Details for each step:
+
 1. **Publish** the Data Agent (publish action in the Data Agent toolbar). Publishing produces the consumable version the Foundry agent connects to.
 2. Note the **workspace name/ID** and the **Data Agent name/ID** (and published endpoint/URL if shown) — [03d Phase D3](./03d-foundry-agent-setup.md#phase-d3--add-the-microsoft-fabric-data-agent-tool-structured-data) needs them to create the Microsoft Fabric tool connection.
 
@@ -117,6 +187,7 @@ Iterate on the instructions/notes until the example questions pass cleanly — t
 
 ## Identity & RBAC (how this ties to 03d)
 
+> [!NOTE]
 > The consolidated cross-layer RBAC map and the full identity-passthrough model (how OBO enforces RLS/OLS/Purview restrictions per user) are in **[08-rbac-and-identity-passthrough.md](./08-rbac-and-identity-passthrough.md)**.
 
 A Fabric Data Agent **honors the permissions of the identity that calls it** — it never widens access to the underlying tables. Choose the calling identity deliberately in [03d Phase D3](./03d-foundry-agent-setup.md#phase-d3--add-the-microsoft-fabric-data-agent-tool-structured-data):
@@ -126,6 +197,7 @@ A Fabric Data Agent **honors the permissions of the identity that calls it** —
 | **On-behalf-of (delegated user)** — recommended | Only data the **signed-in user** is permitted to see; workspace permissions + **row-/object-level security** apply per user | Sensitive HR data (comp, PII, manager-only views) |
 | **Fixed service identity** | One identity's scope for every caller | Non-sensitive, uniformly-shareable reference data |
 
+> [!CAUTION]
 > **The Foundry Microsoft Fabric tool supports On-Behalf-Of (user identity) only — service principal authentication is not supported.** The fixed-identity option applies to other consumption paths, not the 03d Foundry integration.
 
 | Principal | Role / grant | Scope | Why |
@@ -134,7 +206,7 @@ A Fabric Data Agent **honors the permissions of the identity that calls it** —
 | End user (OBO) | **Read** on data agent + **Read** on Lakehouse tables | Workspace / Lakehouse | Data Agent answers within the user's RLS scope (user identity only) |
 | Foundry agent connection | per [03d D3](./03d-foundry-agent-setup.md#phase-d3--add-the-microsoft-fabric-data-agent-tool-structured-data) | — | Carries the caller identity into Fabric |
 
-Reference: [Fabric Data Agent end-to-end (incl. security)](https://learn.microsoft.com/fabric/data-science/data-agent-end-to-end-tutorial) · [Microsoft Fabric tool (preview)](https://learn.microsoft.com/azure/foundry/agents/how-to/tools/fabric).
+Reference: [Fabric Data Agent end-to-end (incl. security)](https://learn.microsoft.com/fabric/data-science/data-agent-end-to-end-tutorial) · [Microsoft Fabric tool](https://learn.microsoft.com/azure/foundry/agents/how-to/tools/fabric) ![Preview](./assets/badges/preview.svg).
 
 ### (Optional) Demonstrate per-user trimming
 
@@ -143,6 +215,15 @@ To show on-behalf-of security end-to-end, add **row-level security** on the `emp
 ---
 
 ## Validation checklist
+
+| Phase | | Gate |
+|---|---|---|
+| **G1** | <img src="./assets/icons/storage.svg" width="24" alt=""/> | ☐ `employees` (15) and `agreements` (30) Delta tables loaded and counts verified |
+| **G2** | <img src="./assets/icons/sql-database.svg" width="24" alt=""/> | ☐ Data Agent `data-agent-hr` created over both tables |
+| **G3** | <img src="./assets/icons/gear.svg" width="24" alt=""/> | ☐ Instructions include the `amount_basis` / currency caveat |
+| **G4** | <img src="./assets/icons/dev-console.svg" width="24" alt=""/> | ☐ All five example questions return correct answers in the Fabric chat |
+| **G5** | <img src="./assets/icons/file.svg" width="24" alt=""/> | ☐ Data Agent **published**; workspace + agent identifiers recorded for 03d D3 |
+| **RBAC** | <img src="./assets/icons/entra-id.svg" width="24" alt=""/> | ☐ (If sensitive) on-behalf-of identity chosen and a per-user RLS check passes |
 
 - [ ] `employees` (15) and `agreements` (30) Delta tables loaded and counts verified (G1)
 - [ ] Data Agent `data-agent-hr` created over both tables (G2)
@@ -155,11 +236,14 @@ To show on-behalf-of security end-to-end, add **row-level security** on the `emp
 
 ## References
 
-- [Fabric Data Agent — concept](https://learn.microsoft.com/fabric/data-science/concept-data-agent) · [create](https://learn.microsoft.com/fabric/data-science/how-to-create-data-agent) · [end-to-end (incl. security)](https://learn.microsoft.com/fabric/data-science/data-agent-end-to-end-tutorial)
-- [Microsoft Fabric tool (preview) — Microsoft Foundry Agent Service](https://learn.microsoft.com/azure/foundry/agents/how-to/tools/fabric)
-- Structured sample data: [samples/README.md](../samples/README.md)
-- Foundry agent that consumes this: [docs/03d-foundry-agent-setup.md](./03d-foundry-agent-setup.md)
+| | Topic | Links |
+|---|---|---|
+| <img src="./assets/icons/sql-database.svg" width="24" alt=""/> | Fabric Data Agent | [concept](https://learn.microsoft.com/fabric/data-science/concept-data-agent) · [create](https://learn.microsoft.com/fabric/data-science/how-to-create-data-agent) · [end-to-end (incl. security)](https://learn.microsoft.com/fabric/data-science/data-agent-end-to-end-tutorial) |
+| <img src="./assets/icons/foundry-agent-service.svg" width="24" alt=""/> | Foundry consumer | [Microsoft Fabric tool — Microsoft Foundry Agent Service](https://learn.microsoft.com/azure/foundry/agents/how-to/tools/fabric) ![Preview](./assets/badges/preview.svg) · [docs/03d-foundry-agent-setup.md](./03d-foundry-agent-setup.md) |
+| <img src="./assets/icons/file.svg" width="24" alt=""/> | Structured sample data | [samples/README.md](../samples/README.md) |
 
 ---
 
-*Last updated: 2026-06-09*
+Next: [04 - Automated deployment](./04-deployment-automated.md) →
+
+*Last updated: 2026-10-02*

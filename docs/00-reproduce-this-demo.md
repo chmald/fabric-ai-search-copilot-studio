@@ -1,12 +1,43 @@
+[README](../README.md) › docs index
+
 # 00 — Reproduce this demo
 
+<p>
+<img src="./assets/icons/resource-group.svg" width="40" alt="Resource group"/>&nbsp;
+<img src="./assets/icons/key-vault.svg" width="40" alt="Key Vault"/>&nbsp;
+<img src="./assets/icons/blob-block.svg" width="40" alt="Blob Storage"/>&nbsp;
+<img src="./assets/icons/foundry.svg" width="40" alt="Microsoft Foundry"/>&nbsp;
+<img src="./assets/icons/ai-search.svg" width="40" alt="Azure AI Search"/>&nbsp;
+<img src="./assets/icons/azure-devops.svg" width="40" alt="Azure DevOps"/>
+</p>
+
+![Version](./assets/badges/version.svg) ![Default](./assets/badges/default.svg) ![Optional](./assets/badges/optional.svg) ![Static-only](./assets/badges/static-only.svg)
+
+> [!NOTE]
 > **Audience.** Someone who wants to clone this repo and stand up the full RAG knowledge-base demo against a fresh Azure subscription + Fabric tenant + Copilot Studio environment. Each Part below is a discrete checkpoint — finish A before starting B, etc. The deep-dive runbooks ([03-deployment-manual.md](03-deployment-manual.md), [03b-fabric-setup.md](03b-fabric-setup.md), [03c-copilot-studio-setup.md](03c-copilot-studio-setup.md), [04-deployment-automated.md](04-deployment-automated.md), [05-testing.md](05-testing.md), [06-troubleshooting.md](06-troubleshooting.md)) are linked from the specific steps that consume them rather than duplicated here.
 
-> **Time budget.** First-time stand-up: roughly **4–6 hours** end-to-end for the manual path, **2–3 hours** for the Bicep-automated path (which still requires manual Fabric + Copilot Studio steps). Time is dominated by waits on quota / model deployment propagation and Copilot Studio publishing approvals. Subsequent reproductions in the same tenant: **under 1 hour** for the automated path.
+> [!TIP]
+> **Time budget.** Time is dominated by waits on quota / model deployment propagation and Copilot Studio publishing approvals. See the table below.
+
+## At a glance
+
+| | Scenario | Time budget |
+|---|---|---|
+| <img src="./assets/icons/powershell.svg" width="24" alt=""/> | First-time stand-up — **manual path** | roughly **4–6 hours** end-to-end |
+| <img src="./assets/icons/azure-devops.svg" width="24" alt=""/> | First-time stand-up — **Bicep-automated path** (still requires manual Fabric + Copilot Studio steps) | roughly **2–3 hours** |
+| <img src="./assets/icons/resource-group.svg" width="24" alt=""/> | Subsequent reproductions in the same tenant (automated path) | **under 1 hour** |
+
+[![RAG knowledge-base architecture: Fabric ingestion, Azure AI Search index, Copilot Studio agent](./assets/rag-knowledge-base-architecture.png)](./assets/rag-knowledge-base-architecture.png)
+
+<sub>Editable source: [`assets/rag-knowledge-base-architecture.drawio`](./assets/rag-knowledge-base-architecture.drawio) - regenerate with `python scripts/export_diagrams.py docs/assets`.</sub>
 
 ---
 
 ## What you'll end up with
+
+The layout below lists the concrete resource names this demo creates (defaults for `dev` in `eastus2`).
+
+<details><summary><b>Resource layout (Azure DevOps → Azure → Fabric → Copilot Studio)</b></summary>
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -50,17 +81,24 @@
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
+</details>
+
 ---
 
 ## Prerequisites checklist (verify before starting Part A)
 
-- [ ] **Azure subscription** with Contributor + User Access Administrator on the target RG (or subscription scope for greenfield)
-- [ ] **Region chosen** from [02-prerequisites.md § 11](./02-prerequisites.md) Tier-1 list — default: **East US 2** for US, **Sweden Central** for EU, **Australia East** / **Japan East** for APAC
-- [ ] **Azure OpenAI access approved** in the subscription with TPM quota for `text-embedding-3-large` (10K TPM minimum for demo). `gpt-4o` quota is only required if you opt in to a chat deployment for deployment-specific extensions (the locked design doesn't consume one).
-- [ ] **Fabric capacity** allocated (F4+ for demo, F16+ for production) and a workspace where you have Admin or Member role
-- [ ] **Copilot Studio license** for the building user — and channel-publishing pre-approvals **initiated** (Teams + M365 Copilot admin approvals take ~1-2 business days)
-- [ ] **Local tools** (full table in [02-prerequisites.md § 0](./02-prerequisites.md#0--local-developer-tooling)): **PowerShell 7+ (`pwsh`)**, **Azure CLI 2.60+** with the `bicep` extension installed (`az bicep install`), **Python 3.11+**, `git`. All shell snippets in the docs are PowerShell — see [README § Shell convention](../README.md#shell-convention).
-- [ ] **(For automated path only)** Ability to authenticate to Azure with an identity that has the role assignments above (e.g. `az login` with your user, or a service principal for ADO)
+> [!IMPORTANT]
+> Start the Teams + M365 Copilot channel-publishing approvals **before** anything else — they take ~1-2 business days and are the longest wait.
+
+| ☐ | Prerequisite | Detail |
+|---|---|---|
+| ☐ | <img src="./assets/icons/subscription.svg" width="24" alt=""/> **Azure subscription** | Contributor + User Access Administrator on the target RG (or subscription scope for greenfield) |
+| ☐ | <img src="./assets/icons/resource-group.svg" width="24" alt=""/> **Region chosen** | From [02-prerequisites.md § 11](./02-prerequisites.md) Tier-1 list — default: **East US 2** for US, **Sweden Central** for EU, **Australia East** / **Japan East** for APAC |
+| ☐ | <img src="./assets/icons/azure-openai.svg" width="24" alt=""/> **Azure OpenAI access approved** | In the subscription with TPM quota for `text-embedding-3-large` (10K TPM minimum for demo). `gpt-4o` quota is only required if you opt in to a chat deployment for deployment-specific extensions (the locked design doesn't consume one). |
+| ☐ | <img src="./assets/icons/folder.svg" width="24" alt=""/> **Fabric capacity** | Allocated (F4+ for demo, F16+ for production) and a workspace where you have Admin or Member role |
+| ☐ | <img src="./assets/icons/users.svg" width="24" alt=""/> **Copilot Studio license** | For the building user — and channel-publishing pre-approvals **initiated** (Teams + M365 Copilot admin approvals take ~1-2 business days) |
+| ☐ | <img src="./assets/icons/powershell.svg" width="24" alt=""/> **Local tools** | Full table in [02-prerequisites.md § 0](./02-prerequisites.md#0--local-developer-tooling): **PowerShell 7+ (`pwsh`)**, **Azure CLI 2.60+** with the `bicep` extension installed (`az bicep install`), **Python 3.11+**, `git`. All shell snippets in the docs are PowerShell — see [README § Shell convention](../README.md#shell-convention). |
+| ☐ | <img src="./assets/icons/entra-id.svg" width="24" alt=""/> **(Automated path only)** Azure authentication | Ability to authenticate to Azure with an identity that has the role assignments above (e.g. `az login` with your user, or a service principal for ADO) |
 
 If any of these are missing, see [02-prerequisites.md](./02-prerequisites.md) for the full breakdown.
 
@@ -80,6 +118,9 @@ Both paths skip Fabric workspace creation and Layer-3 agent configuration in the
 ---
 
 ## Part B — Deploy the Azure platform layer
+
+> [!TIP]
+> Both sub-paths below end at the same state: the AI Search indexer has run successfully over the chunk JSON files.
 
 ### B1. (Path A1) Manual portal walkthrough
 
@@ -131,8 +172,8 @@ Layer 3 has **two interchangeable implementations** — build **one**. Neither i
 
 | Option | Runtime | Best for | Doc |
 |---|---|---|---|
-| **D-CS. Copilot Studio** | Power Platform | Lowest-code, fully GA, small audience or CS capacity already licensed | [03c-copilot-studio-setup.md](./03c-copilot-studio-setup.md) |
-| **D-FA. Microsoft Foundry agent** | Foundry Agent Service | **Licensing constraint** (AI Search + Fabric Data Agent premium connectors), structured-data RLS, richer orchestration — accepts **preview** M365/Teams publishing | [03d-foundry-agent-setup.md](./03d-foundry-agent-setup.md) |
+| <img src="./assets/icons/users.svg" width="24" alt=""/> **D-CS. Copilot Studio** ![Default](./assets/badges/default.svg) | Power Platform | Lowest-code, fully ![GA](./assets/badges/ga.svg), small audience or CS capacity already licensed | [03c-copilot-studio-setup.md](./03c-copilot-studio-setup.md) |
+| <img src="./assets/icons/foundry-agent-service.svg" width="24" alt=""/> **D-FA. Microsoft Foundry agent** ![Optional](./assets/badges/optional.svg) | Foundry Agent Service | **Licensing constraint** (AI Search + Fabric Data Agent premium connectors), structured-data RLS, richer orchestration — accepts ![Preview](./assets/badges/preview.svg) M365/Teams publishing | [03d-foundry-agent-setup.md](./03d-foundry-agent-setup.md) |
 
 ### Option D-CS — Copilot Studio
 
@@ -164,7 +205,7 @@ What 03d covers end-to-end (Phases D0–D6):
 | D3 | Fabric Data Agent tool — **on-behalf-of** caller identity (per-user RLS) |
 | D4 | Agent instructions, grounding guardrail, security trimming |
 | D5 | Test in the Foundry playground |
-| D6 | Publish to M365 Copilot + Teams via the M365 Agents Toolkit (**preview**), **or** deploy the in-repo standalone web app front end ([09](./09-foundry-agent-webapp.md); MI or OBO mode) |
+| D6 | Publish to M365 Copilot + Teams via the M365 Agents Toolkit (![Preview](./assets/badges/preview.svg)), **or** deploy the in-repo standalone web app front end ([09](./09-foundry-agent-webapp.md); MI or OBO mode) |
 
 ### Part D validation
 
@@ -181,6 +222,9 @@ What 03d covers end-to-end (Phases D0–D6):
 
 ## Part E — Run the test suite
 
+> [!NOTE]
+> Run Part E only after Parts A–D validate green — retrieval metrics are meaningless against a partially populated index.
+
 Once Parts A–D validate green, follow [05-testing.md](./05-testing.md):
 
 ### E1. Run the index quality smoke tests (§ B)
@@ -196,6 +240,9 @@ Once Parts A–D validate green, follow [05-testing.md](./05-testing.md):
 ---
 
 ## Part F — Wire ADO (if using automated path with CI/CD)
+
+> [!TIP]
+> Skip this Part for the manual path or a one-off demo. Prefer workload identity federation over a client-secret service connection.
 
 1. Push this repo to your ADO project (`https://dev.azure.com/<org>/<project>/_git/rag-knowledge-base-pattern`)
 2. Create variable group `rag-kb-env-dev` with the per-environment Bicep parameters
@@ -218,6 +265,8 @@ Once Parts A–D validate green, follow [05-testing.md](./05-testing.md):
 | E | Golden-set retrieval evaluation passing thresholds | [ ] |
 | F | (Optional) ADO pipeline wired for CI/CD | [ ] |
 
+**Next:** [01 — Architecture](./01-architecture.md)
+
 ---
 
-*Last updated: 2026-06-09*
+*Last updated: 2026-10-02*

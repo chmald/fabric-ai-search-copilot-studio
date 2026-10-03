@@ -1,77 +1,78 @@
+[README](../README.md) › [docs index](./00-reproduce-this-demo.md) › 01 Architecture
+
 # 01 — Architecture
 
+<p>
+<img src="./assets/icons/folder.svg" width="40" alt="Fabric OneLake Lakehouse"/>&nbsp;
+<img src="./assets/icons/blob-block.svg" width="40" alt="Azure Blob Storage"/>&nbsp;
+<img src="./assets/icons/document-intelligence.svg" width="40" alt="Document Intelligence"/>&nbsp;
+<img src="./assets/icons/azure-openai.svg" width="40" alt="Azure OpenAI"/>&nbsp;
+<img src="./assets/icons/ai-search.svg" width="40" alt="Azure AI Search"/>&nbsp;
+<img src="./assets/icons/key-vault.svg" width="40" alt="Key Vault"/>&nbsp;
+<img src="./assets/icons/foundry.svg" width="40" alt="Microsoft Foundry"/>
+</p>
+
+![Version](./assets/badges/version.svg) ![Default](./assets/badges/default.svg) ![Optional](./assets/badges/optional.svg) ![Static-only](./assets/badges/static-only.svg)
+
 Reference architecture for the low-code RAG knowledge-base pattern. Read this first, then move to [02-prerequisites.md](./02-prerequisites.md).
+
+> [!NOTE]
+> Layer 3 has two interchangeable implementations: **Copilot Studio** (![Default](./assets/badges/default.svg), low-code) and **Microsoft Foundry Agent Service** (![Optional](./assets/badges/optional.svg)). Layers 1–2 are identical for both — see [Layer 3 — alternative](#layer-3--alternative-microsoft-foundry-agent-service-licensing-driven). This page is documentation only and has not been run live ![Static-only](./assets/badges/static-only.svg).
+
+## At a glance
+
+| | Layer | What it owns |
+|---|---|---|
+| <img src="./assets/icons/folder.svg" width="24" alt=""/> | **1 — Ingestion & Processing** (Fabric) | Document acquisition, metadata, OCR orchestration, chunking, write-out to the permanent store |
+| <img src="./assets/icons/ai-search.svg" width="24" alt=""/> | **2 — AI & Storage Platform** (Azure) | Permanent storage, OCR and embedding services, the search index, and the secrets/identity boundary |
+| <img src="./assets/icons/users.svg" width="24" alt=""/> | **3 — Conversational Layer** (Copilot Studio ![Default](./assets/badges/default.svg) or Foundry Agent Service ![Optional](./assets/badges/optional.svg)) | The user-facing chat experience and the retrieval-grounding call |
+
+[![RAG knowledge-base architecture: Fabric ingestion, Azure AI Search index, Copilot Studio agent](./assets/rag-knowledge-base-architecture.png)](./assets/rag-knowledge-base-architecture.png)
+
+<sub>Editable source: [`assets/rag-knowledge-base-architecture.drawio`](./assets/rag-knowledge-base-architecture.drawio) - regenerate with `python scripts/export_diagrams.py docs/assets`.</sub>
 
 ---
 
 ## Goals
 
-- **Ground a Copilot Studio agent** on a document corpus with citation-quality answers
-- **Eliminate orchestration code** — every layer is portal-configured or drag-and-drop
-- **Reuse your existing Fabric investment** for ingestion + staging
-- **Make the indexing path production-ready** by reading from Blob (not OneLake DFS Function-wrapper, which is Early Access Preview)
-- **Be replicable** across multiple document domains (HR, finance, legal, support, sales enablement) with only configuration changes
+| | Goal |
+|---|---|
+| <img src="./assets/icons/gear.svg" width="24" alt=""/> | **Ground a Copilot Studio agent** on a document corpus with citation-quality answers |
+| <img src="./assets/icons/code.svg" width="24" alt=""/> | **Eliminate orchestration code** — every layer is portal-configured or drag-and-drop |
+| <img src="./assets/icons/folder.svg" width="24" alt=""/> | **Reuse your existing Fabric investment** for ingestion + staging |
+| <img src="./assets/icons/blob-block.svg" width="24" alt=""/> | **Make the indexing path production-ready** by reading from Blob (not OneLake DFS Function-wrapper, which is Early Access ![Preview](./assets/badges/preview.svg)) |
+| <img src="./assets/icons/resource-group.svg" width="24" alt=""/> | **Be replicable** across multiple document domains (HR, finance, legal, support, sales enablement) with only configuration changes |
 
 ## Non-goals
 
-- Structured field extraction into a database (use Document Intelligence custom-extraction + a separate pipeline)
-- Multi-agent orchestration, custom tool-calling, query triage logic (these require **Foundry agent runtime** as an additional layer above this pattern — out of scope for the knowledge-base Q&A focus here)
-- Bring-your-own model (non-OpenAI: Cohere, Llama, Phi, Mistral, etc.) — Foundry resource supports the model catalog but the AI Search `azureOpenAI` vectorizer is OpenAI-only; alternate vectorizer kinds (AML-hosted) are out of scope for this pattern
-- Streaming ingestion below ~1-minute latency (Fabric Data Pipelines is batch-oriented; for event-driven, swap in Power Automate)
+| | Not in scope |
+|---|---|
+| ❌ | Structured field extraction into a database (use Document Intelligence custom-extraction + a separate pipeline) |
+| ❌ | Multi-agent orchestration, custom tool-calling, query triage logic (these require **Foundry agent runtime** as an additional layer above this pattern — out of scope for the knowledge-base Q&A focus here) |
+| ❌ | Bring-your-own model (non-OpenAI: Cohere, Llama, Phi, Mistral, etc.) — Foundry resource supports the model catalog but the AI Search `azureOpenAI` vectorizer is OpenAI-only; alternate vectorizer kinds (AML-hosted) are out of scope for this pattern |
+| ❌ | Streaming ingestion below ~1-minute latency (Fabric Data Pipelines is batch-oriented; for event-driven, swap in Power Automate) |
 
 ---
 
 ## Architecture diagram
 
-```mermaid
-flowchart TB
-    subgraph Sources["📥 Sources"]
-        SP[SharePoint / Source System]
-        DOCS[Loose Files / FTP / Mailbox]
-    end
+The end-to-end flow below shows every component and the numbered ingest and query paths. It replaces the previous hand-authored Mermaid diagram; the edges are unchanged.
 
-    subgraph Fabric["🟢 Fabric — Ingestion & Processing"]
-        OL[(OneLake<br/>Lakehouse<br/>source-of-truth)]
-        CTRL[(Control Table<br/>Delta<br/>file state + metadata)]
-        PIPE[Fabric Data Pipeline<br/>orchestrator]
-    end
+[![End-to-end flow: Fabric ingestion to Azure Blob, Document Intelligence, AI Search and the Copilot Studio agent](./assets/01-architecture-end-to-end-flow.png)](./assets/01-architecture-end-to-end-flow.png)
 
-    subgraph Azure["🔵 Azure — AI & Storage Platform"]
-        KV[Azure Key Vault<br/>secrets + managed identities]
-        BLOB[(Azure Blob<br/>raw/ + chunks/<br/>permanent canonical store)]
-        AIFNDRY[Microsoft Foundry<br/>kind=AIServices — multi-service<br/>OpenAI chat + embedding deployments<br/>+ Document Intelligence prebuilt-read OCR]
-        SEARCH[Azure AI Search<br/>hybrid index + integrated vectorizer<br/>+ semantic ranker]
-    end
+<sub>Editable source: [`assets/01-architecture-end-to-end-flow.drawio`](./assets/01-architecture-end-to-end-flow.drawio) - regenerate with `python scripts/export_diagrams.py docs/assets`.</sub>
 
-    subgraph Agent["🟣 Conversational Layer"]
-        CS[Copilot Studio Agent<br/>knowledge source = AI Search]
-        TEAMS[Microsoft Teams]
-        M365[M365 Copilot]
-    end
+<details><summary><b>Previous Mermaid source (reference — not rendered)</b></summary>
 
-    USER([👤 User])
+The diagram was previously authored as Mermaid. Its content is preserved in text form:
 
-    SP -->|Fabric shortcut / mirror| OL
-    DOCS -->|Fabric shortcut / copy| OL
-    OL --> PIPE
-    PIPE -->|register + state| CTRL
-    PIPE -->|copy raw files| BLOB
-    PIPE -->|OCR call| AIFNDRY
-    AIFNDRY -->|extracted text| PIPE
-    PIPE -->|chunked JSON| BLOB
-    BLOB -->|indexer pull| SEARCH
-    SEARCH -.->|integrated vectorizer<br/>auto-embed| AIFNDRY
-    KV -.->|secrets / RBAC| PIPE
-    KV -.->|secrets / RBAC| SEARCH
+- **Sources** → Fabric shortcut / mirror / copy → **OneLake Lakehouse** (source-of-truth)
+- **Fabric Data Pipeline** (orchestrator): registers state in the **control table** (Delta), copies raw files to **Blob** `raw/`, calls **Document Intelligence** (OCR) via the Foundry resource and gets extracted text back, writes chunked JSON to Blob `chunks/`
+- **Blob** → indexer pull → **AI Search** (hybrid index + integrated vectorizer + semantic ranker); AI Search → integrated vectorizer auto-embed → Foundry OpenAI deployment
+- **Key Vault** → secrets / RBAC → Pipeline and AI Search
+- **User** → Teams / M365 Copilot → Copilot Studio agent → knowledge query → AI Search → hybrid + ranked results → agent → grounded answer + citations linked back to the raw files in Blob
 
-    USER --> TEAMS
-    USER --> M365
-    TEAMS --> CS
-    M365 --> CS
-    CS -->|knowledge query| SEARCH
-    SEARCH -->|hybrid + ranked results| CS
-    CS -->|grounded answer + citations<br/>linked back to raw files| BLOB
-```
+</details>
 
 ---
 
@@ -85,9 +86,9 @@ The architecture is intentionally three layers. Each layer has a single responsi
 
 | Component | Role |
 |---|---|
-| **OneLake (Lakehouse)** | Source-of-truth landing zone. Receives documents from upstream sources via Fabric shortcuts, mirroring, or direct copy. Authoritative data tier. |
-| **Control table** (Delta in the Lakehouse) | Tracks every file's processing state. One row per file. Enables idempotent runs, incremental processing, audit trail, and pipeline observability. Schema below. |
-| **Fabric Data Pipeline** | Orchestrator. Drag-and-drop activities: lookup new files, register in control table, copy raw to Blob, call Document Intelligence, chunk, write JSON to Blob, mark complete. |
+| <img src="./assets/icons/folder.svg" width="24" alt=""/> **OneLake (Lakehouse)** | Source-of-truth landing zone. Receives documents from upstream sources via Fabric shortcuts, mirroring, or direct copy. Authoritative data tier. |
+| <img src="./assets/icons/file.svg" width="24" alt=""/> **Control table** (Delta in the Lakehouse) | Tracks every file's processing state. One row per file. Enables idempotent runs, incremental processing, audit trail, and pipeline observability. Schema below. |
+| <img src="./assets/icons/gear.svg" width="24" alt=""/> **Fabric Data Pipeline** | Orchestrator. Drag-and-drop activities: lookup new files, register in control table, copy raw to Blob, call Document Intelligence, chunk, write JSON to Blob, mark complete. |
 
 #### Control table schema (reference)
 
@@ -121,11 +122,11 @@ Use Delta merge (`MERGE INTO`) on `file_id` for upserts. Build dashboards on top
 
 | Component | Role |
 |---|---|
-| **Azure Key Vault** | Single source of truth for connection strings, API keys, and secrets. Pipelines and indexers authenticate via **managed identity** wherever possible; Key Vault is the fallback for any secret that cannot be replaced by RBAC. |
-| **Azure Blob Storage** | Permanent canonical store. Two containers: `raw/` (the original files, used for citation linkback from Copilot Studio answers) and `chunks/` (one JSON file per chunk, consumed by the AI Search indexer). |
-| **Azure Document Intelligence** | OCR. Use the **prebuilt-read** model (no training). Returns extracted text, page-aware structure, and confidence scores. **Served by the same Foundry/AIServices account** — there is no separate `Microsoft.CognitiveServices/accounts` of `kind=FormRecognizer` in this pattern; the DI REST/SDK endpoint is the Foundry resource's `*.cognitiveservices.azure.com` URL. |
-| **Microsoft Foundry resource** (model gateway; formerly **Azure AI Foundry**) | Provisioned for the AI Search integrated vectorizer: one **embedding** deployment (recommended: `text-embedding-3-large`) is required. A **chat completion** deployment (e.g. `gpt-4o`) is **opt-in** — the locked design does not consume one because Copilot Studio uses its own host model for generative answers; only deploy a chat model when a deployment explicitly needs a chat endpoint (custom app code, Foundry agent runtime, BYOM Copilot Studio). Foundry resource (kind `AIServices`) supersedes the legacy standalone Azure OpenAI resource for new deployments and exposes an OpenAI-compatible endpoint at `https://<resource>.openai.azure.com/` for backwards-compatible tooling. **This pattern uses Foundry's model-gateway capability only — not its agent runtime (Agent Service and projects), which is filled by Copilot Studio. Foundry agent runtime is a deployment-specific addition for cases that need multi-agent routing, custom tool calling, or query triage beyond knowledge-base Q&A.** |
-| **Azure AI Search** | The retrieval engine. A single index with text, vector, and metadata fields. **Integrated vectorizer** (`azureOpenAI` kind, pointed at the Foundry resource's OpenAI-compatible endpoint) embeds chunks at index time and embeds user queries at search time — **zero custom embedding code anywhere**. **Hybrid query mode** (BM25 + vector) plus **semantic ranker** on top. **Standard (S1) tier or higher** required. |
+| <img src="./assets/icons/key-vault.svg" width="24" alt=""/> **Azure Key Vault** | Single source of truth for connection strings, API keys, and secrets. Pipelines and indexers authenticate via **managed identity** wherever possible; Key Vault is the fallback for any secret that cannot be replaced by RBAC. |
+| <img src="./assets/icons/blob-block.svg" width="24" alt=""/> **Azure Blob Storage** | Permanent canonical store. Two containers: `raw/` (the original files, used for citation linkback from Copilot Studio answers) and `chunks/` (one JSON file per chunk, consumed by the AI Search indexer). |
+| <img src="./assets/icons/document-intelligence.svg" width="24" alt=""/> **Azure Document Intelligence** | OCR. Use the **prebuilt-read** model (no training). Returns extracted text, page-aware structure, and confidence scores. **Served by the same Foundry/AIServices account** — there is no separate `Microsoft.CognitiveServices/accounts` of `kind=FormRecognizer` in this pattern; the DI REST/SDK endpoint is the Foundry resource's `*.cognitiveservices.azure.com` URL. |
+| <img src="./assets/icons/foundry.svg" width="24" alt=""/> **Microsoft Foundry resource** (model gateway; formerly **Azure AI Foundry**) | Provisioned for the AI Search integrated vectorizer: one **embedding** deployment (recommended: `text-embedding-3-large`) is required. A **chat completion** deployment (e.g. `gpt-4o`) is **opt-in** — the locked design does not consume one because Copilot Studio uses its own host model for generative answers; only deploy a chat model when a deployment explicitly needs a chat endpoint (custom app code, Foundry agent runtime, BYOM Copilot Studio). Foundry resource (kind `AIServices`) supersedes the legacy standalone Azure OpenAI resource for new deployments and exposes an OpenAI-compatible endpoint at `https://<resource>.openai.azure.com/` for backwards-compatible tooling. **This pattern uses Foundry's model-gateway capability only — not its agent runtime (Agent Service and projects), which is filled by Copilot Studio. Foundry agent runtime is a deployment-specific addition for cases that need multi-agent routing, custom tool calling, or query triage beyond knowledge-base Q&A.** |
+| <img src="./assets/icons/ai-search.svg" width="24" alt=""/> **Azure AI Search** | The retrieval engine. A single index with text, vector, and metadata fields. **Integrated vectorizer** (`azureOpenAI` kind, pointed at the Foundry resource's OpenAI-compatible endpoint) embeds chunks at index time and embeds user queries at search time — **zero custom embedding code anywhere**. **Hybrid query mode** (BM25 + vector) plus **semantic ranker** on top. **Standard (S1) tier or higher** required. |
 
 #### AI Search index schema (reference)
 
@@ -161,9 +162,9 @@ Enable both `semantic` and `vector` configurations on the index. Copilot Studio'
 
 | Component | Role |
 |---|---|
-| **Copilot Studio Agent** | The agent definition. Configured with **AI Search as a knowledge source** (native connector — point at the index and select "Use semantic search"). Defines the persona, behavior, topic flow, and answer generation behavior. |
-| **Microsoft Teams** | Day-one publishing channel. One click from Copilot Studio. Inherits Teams identity + permissions. |
-| **M365 Copilot** | Second channel via the M365 Copilot agent gallery. Surfaces the same agent inside the M365 Copilot host. |
+| <img src="./assets/icons/users.svg" width="24" alt=""/> **Copilot Studio Agent** ![Default](./assets/badges/default.svg) | The agent definition. Configured with **AI Search as a knowledge source** (native connector — point at the index and select "Use semantic search"). Defines the persona, behavior, topic flow, and answer generation behavior. |
+| <img src="./assets/icons/users.svg" width="24" alt=""/> **Microsoft Teams** | Day-one publishing channel. One click from Copilot Studio. Inherits Teams identity + permissions. |
+| <img src="./assets/icons/users.svg" width="24" alt=""/> **M365 Copilot** | Second channel via the M365 Copilot agent gallery. Surfaces the same agent inside the M365 Copilot host. |
 
 Copilot Studio's native AI Search knowledge source:
 
@@ -181,17 +182,20 @@ Layer 3 has **two interchangeable implementations**. The Copilot Studio version 
 
 | Component | Role |
 |---|---|
-| **Foundry agent** (`agent-rag-kb`) | The agent definition on the Agent Service runtime. Owns query planning, tool routing, grounding, and citation assembly. Generates answers on **your** chat-model deployment (the chat deployment that is *opt-in* for the Copilot Studio path is **required** here). |
-| **Azure AI Search tool** | Grounds the agent on `idx-rag-documents` via a project connection using the **Foundry project managed identity** (granted **Search Index Data Reader**). Same hybrid + semantic + integrated-vectorizer retrieval as the Copilot Studio knowledge source. |
-| **Microsoft Fabric tool** (Fabric Data Agent) | Adds **structured-data** Q&A over a published Fabric Data Agent. Uses **on-behalf-of caller identity** so Fabric **row-/object-level security** is enforced per user — the cleanest per-user trimming story for sensitive (e.g. HR) data. |
-| **Custom engine agent channel** (Teams + M365 Copilot) | A Microsoft 365 Agents SDK / Toolkit wrapper (Entra bot) forwards user turns to the agent endpoint. **Preview** — re-verify before production. End users consume on their existing M365 Copilot license. |
-| **Standalone web app** (optional) | A self-hosted chat UI on Azure Container Apps ([09](09-foundry-agent-webapp.md)) — an alternative front end to the custom engine agent, with per-user **OBO** identity passthrough (required for the Fabric tool). |
+| <img src="./assets/icons/foundry-agent-service.svg" width="24" alt=""/> **Foundry agent** (`agent-rag-kb`) ![Optional](./assets/badges/optional.svg) | The agent definition on the Agent Service runtime. Owns query planning, tool routing, grounding, and citation assembly. Generates answers on **your** chat-model deployment (the chat deployment that is *opt-in* for the Copilot Studio path is **required** here). |
+| <img src="./assets/icons/ai-search.svg" width="24" alt=""/> **Azure AI Search tool** | Grounds the agent on `idx-rag-documents` via a project connection using the **Foundry project managed identity** (granted **Search Index Data Reader**). Same hybrid + semantic + integrated-vectorizer retrieval as the Copilot Studio knowledge source. |
+| <img src="./assets/icons/folder.svg" width="24" alt=""/> **Microsoft Fabric tool** (Fabric Data Agent) | Adds **structured-data** Q&A over a published Fabric Data Agent. Uses **on-behalf-of caller identity** so Fabric **row-/object-level security** is enforced per user — the cleanest per-user trimming story for sensitive (e.g. HR) data. |
+| <img src="./assets/icons/users.svg" width="24" alt=""/> **Custom engine agent channel** (Teams + M365 Copilot) ![Preview](./assets/badges/preview.svg) | A Microsoft 365 Agents SDK / Toolkit wrapper (Entra bot) forwards user turns to the agent endpoint. **Preview** — re-verify before production. End users consume on their existing M365 Copilot license. |
+| <img src="./assets/icons/container-apps.svg" width="24" alt=""/> **Standalone web app** ![Opt-in](./assets/badges/opt-in.svg) | A self-hosted chat UI on Azure Container Apps ([09](09-foundry-agent-webapp.md)) — an alternative front end to the custom engine agent, with per-user **OBO** identity passthrough (required for the Fabric tool). |
 
 **Why pick this layer:** primarily **licensing** — connecting Azure AI Search *and* a Fabric Data Agent in Copilot Studio pulls them in as premium / message-capacity-billed connectors on top of M365 Copilot; the Foundry runtime shifts that to **Azure consumption**. Secondary reasons: richer orchestration (multi-tool routing, agentic actions) and unified Azure RBAC / Private Link. Full build steps in [03d-foundry-agent-setup.md](03d-foundry-agent-setup.md); the decision guide is [07-copilot-studio-vs-foundry.md](07-copilot-studio-vs-foundry.md).
 
 ---
 
 ## End-to-end data flow
+
+> [!TIP]
+> The numbered paths in the [end-to-end flow diagram](#architecture-diagram) map to the steps below: ingest is background and scheduled, retrieval is real-time per user turn.
 
 ### Ingest path (background, scheduled)
 
@@ -251,10 +255,10 @@ Because **each chunk is one index document**, "per-chunk security" *is* document
 
 | Approach | Status | When to use |
 |---|---|---|
-| **Security filters** (group/string trimming via a `group_ids` field) | **GA** | Default for this pattern — chunks are *derived* JSON, so source ACLs don't carry over; a push-model `group_ids` field is the reliable mechanism. |
-| POSIX ACL / RBAC scopes | Preview (2026-05-01) | Source is ADLS Gen2 / Blob with native ACL/RBAC; token-based query-time enforcement. |
-| Purview sensitivity labels | Preview | Strategic for OneLake/Fabric environments — indexer carries MIP labels; enforced via Entra + Purview policy. |
-| SharePoint M365 ACLs | Preview | Source is SharePoint M365 libraries/lists/pages. |
+| **Security filters** (group/string trimming via a `group_ids` field) | ![GA](./assets/badges/ga.svg) | Default for this pattern — chunks are *derived* JSON, so source ACLs don't carry over; a push-model `group_ids` field is the reliable mechanism. |
+| POSIX ACL / RBAC scopes | ![Preview](./assets/badges/preview.svg) (2026-05-01) | Source is ADLS Gen2 / Blob with native ACL/RBAC; token-based query-time enforcement. |
+| Purview sensitivity labels | ![Preview](./assets/badges/preview.svg) | Strategic for OneLake/Fabric environments — indexer carries MIP labels; enforced via Entra + Purview policy. |
+| SharePoint M365 ACLs | ![Preview](./assets/badges/preview.svg) | Source is SharePoint M365 libraries/lists/pages. |
 
 **Pattern default — GA security filters (push model):**
 1. Add a filterable `group_ids` field (`Collection(Edm.String)`) to the index — done in `post_deploy_search.py`.
@@ -286,6 +290,9 @@ Because **each chunk is one index document**, "per-chunk security" *is* document
 ## Locked decisions — rationale
 
 The README table summarized the locked design. The full rationale for each:
+
+> [!IMPORTANT]
+> These decisions are locked for the reference architecture. Changing one (for example the Layer-3 runtime) is a deliberate, documented deviation — see [07-copilot-studio-vs-foundry.md](07-copilot-studio-vs-foundry.md).
 
 ### 1. Copilot Studio orchestration (Foundry agent runtime is the alternative when needed)
 
@@ -335,6 +342,9 @@ Semantic ranker requires **Standard tier or higher**. S1 supports ~25 GB storage
 
 To adapt this pattern to a new document domain, only these settings change:
 
+> [!TIP]
+> Everything outside the six settings below — pipeline wiring, indexer, vectorizer, semantic ranker, knowledge-source binding — is reusable as-is.
+
 1. **Source attachment** — where OneLake gets its files (SharePoint shortcut, file share copy, mailbox integration, etc.)
 2. **Document type taxonomy** — the values in `doc_type` (e.g. for finance: `policy`, `procedure`, `regulation`; for HR: `offer-letter`, `nda`, `severance`)
 3. **Chunking parameters** — token size + overlap, tuned to document length and answer style
@@ -371,6 +381,8 @@ Everything else — pipeline activity wiring, indexer configuration, vectorizer 
 
 Future revisions track changes to the artifact (docs / IaC / scripts), not changes to the architectural decisions. Architectural changes get their own decision records.
 
+**Next:** [02 — Prerequisites](./02-prerequisites.md)
+
 ---
 
-*Last updated: 2026-05-21*
+*Last updated: 2026-10-02*

@@ -1,9 +1,44 @@
+[README](../README.md) › [docs index](./00-reproduce-this-demo.md) › 02 Prerequisites
+
 # 02 — Prerequisites
+
+<p>
+<img src="./assets/icons/subscription.svg" width="40" alt="Azure subscription"/>&nbsp;
+<img src="./assets/icons/foundry.svg" width="40" alt="Microsoft Foundry"/>&nbsp;
+<img src="./assets/icons/ai-search.svg" width="40" alt="Azure AI Search"/>&nbsp;
+<img src="./assets/icons/blob-block.svg" width="40" alt="Blob Storage"/>&nbsp;
+<img src="./assets/icons/key-vault.svg" width="40" alt="Key Vault"/>&nbsp;
+<img src="./assets/icons/powershell.svg" width="40" alt="PowerShell"/>
+</p>
+
+![Version](./assets/badges/version.svg) ![Default](./assets/badges/default.svg) ![Optional](./assets/badges/optional.svg) ![Static-only](./assets/badges/static-only.svg)
 
 Everything required before you can start building. Work through this list in order; the deployment guide assumes all of these are in place.
 
+## At a glance
+
+| | Area | Section |
+|---|---|---|
+| <img src="./assets/icons/powershell.svg" width="24" alt=""/> | Local developer tooling | [§ 0](#0--local-developer-tooling) |
+| <img src="./assets/icons/subscription.svg" width="24" alt=""/> | Azure subscription, resource providers | [§ 1](#1--azure-subscription), [§ 2](#2--resource-providers) |
+| <img src="./assets/icons/foundry.svg" width="24" alt=""/> | Microsoft Foundry (model gateway) | [§ 3](#3--microsoft-foundry-model-gateway) |
+| <img src="./assets/icons/ai-search.svg" width="24" alt=""/> | Azure AI Search | [§ 4](#4--azure-ai-search) |
+| <img src="./assets/icons/folder.svg" width="24" alt=""/> | Microsoft Fabric | [§ 5](#5--microsoft-fabric) |
+| <img src="./assets/icons/users.svg" width="24" alt=""/> | Copilot Studio ![Default](./assets/badges/default.svg) / Foundry agent ![Optional](./assets/badges/optional.svg) | [§ 6](#6--copilot-studio) |
+| <img src="./assets/icons/document-intelligence.svg" width="24" alt=""/> | Document Intelligence | [§ 7](#7--azure-document-intelligence) |
+| <img src="./assets/icons/blob-block.svg" width="24" alt=""/> | Storage (Blob) | [§ 8](#8--azure-storage-blob) |
+| <img src="./assets/icons/key-vault.svg" width="24" alt=""/> | Key Vault | [§ 9](#9--azure-key-vault) |
+| <img src="./assets/icons/keys.svg" width="24" alt=""/> | RBAC role assignments | [§ 10](#10--rbac-role-assignments-cheat-sheet) |
+| <img src="./assets/icons/resource-group.svg" width="24" alt=""/> | Regions, naming, quotas, cost | [§ 11](#11--regional-alignment)–[§ 14](#14--rough-cost-estimate) |
+
+[![Prerequisites map: tooling, Azure services, Fabric, agent licensing and approvals](./assets/prerequisites-map.png)](./assets/prerequisites-map.png)
+
+<sub>Editable source: [`assets/prerequisites-map.drawio`](./assets/prerequisites-map.drawio) - regenerate with `python scripts/export_diagrams.py docs/assets`.</sub>
+
+> [!IMPORTANT]
 > **Plan ahead.** Several items (Copilot Studio licensing, Foundry access approval, Fabric capacity allocation, AI Search tier selection) involve administrative approvals that can take hours to days. Start the slowest-moving ones first.
 
+> [!NOTE]
 > **Shell convention.** Every shell snippet in this doc set is **PowerShell** (`pwsh` 7+), tagged ```` ```pwsh ````. The deployment wrapper is [`infra/deploy.ps1`](../infra/deploy.ps1). Variables use `$VAR = "value"`; line continuations use backtick `` ` ``; HTTP examples use `curl.exe` (not `Invoke-WebRequest` aliases) or `Invoke-RestMethod`. JSON responses are handled with native `ConvertFrom-Json` / `Select-Object` — **no `jq` dependency**. See [README § Shell convention](../README.md#shell-convention) for the full convention map.
 
 ---
@@ -49,6 +84,9 @@ Several integration points require **role assignments**, not just resource creat
 - Assigning Fabric workspace identity → Blob Data Contributor on Blob
 
 Contributor-only is **not enough**; you will hit "Authorization failed" errors when wiring up identities.
+
+> [!WARNING]
+> Confirm both roles on the **intended** subscription before you start — the ambient `az` account can silently point at a different tenant/subscription. See the tenant-explicit auth check in [03-deployment-manual.md](./03-deployment-manual.md).
 
 ---
 
@@ -202,7 +240,7 @@ If you are building the agent on **Microsoft Foundry Agent Service** instead of 
 | **Chat-model deployment** | Not required (host model answers) | **Required** — deploy `gpt-4o` (or `gpt-4o-mini`) on the `aif-rag-<env>` resource; confirm TPM quota |
 | **Fabric Data Agent** | Optional connector (premium) | A **published Fabric Data Agent** in the workspace (for structured-data Q&A); Fabric admin enables Copilot/Azure OpenAI + Data Agents |
 | **Runtime billing** | Copilot Studio **message capacity** / per-user license | **Azure consumption** (tokens + tool calls + search QU + Fabric capacity) |
-| **Channel** | Native combined Teams + M365 Copilot (GA) | **Custom engine agent** via M365 Agents SDK/Toolkit (**preview**) |
+| **Channel** | Native combined Teams + M365 Copilot (![GA](./assets/badges/ga.svg)) | **Custom engine agent** via M365 Agents SDK/Toolkit (![Preview](./assets/badges/preview.svg)) |
 | **End-user license** | Microsoft 365 Copilot | Microsoft 365 Copilot (**unchanged**) |
 | **Teams admin approval** | One-time per environment | One-time per app (same gate) |
 
@@ -214,10 +252,13 @@ The end-user license is identical on both paths; the difference is **where the r
 
 ### Required
 
-- **No separate resource.** Document Intelligence is provided by the Foundry resource from § 6 — a `kind=AIServices` account is a multi-service Cognitive Services account that exposes both Azure OpenAI and Document Intelligence (and the rest of the Cognitive Services catalogue) from the same resource. See [01-architecture.md § 8](./01-architecture.md#8-document-intelligence-prebuilt-read-served-by-the-foundry-resource) for the design rationale.
+- **No separate resource.** Document Intelligence is provided by the Foundry resource from § 3 — a `kind=AIServices` account is a multi-service Cognitive Services account that exposes both Azure OpenAI and Document Intelligence (and the rest of the Cognitive Services catalogue) from the same resource. See [01-architecture.md § 8](./01-architecture.md#8-document-intelligence-prebuilt-read-served-by-the-foundry-resource) for the design rationale.
 - The DI SDK / REST endpoint is the Foundry resource's `https://<name>.cognitiveservices.azure.com/` host (the OpenAI vectorizer uses the `<name>.openai.azure.com/` host on the same resource).
 - Foundry's `S0` SKU covers DI usage — no separate page quota.
 - Only the `prebuilt-read` model is used — no custom training or Document Intelligence Studio work required.
+
+> [!NOTE]
+> Because Document Intelligence rides on the Foundry resource, there is nothing extra to provision, approve or budget for it beyond the Foundry resource in § 3.
 
 ---
 
@@ -235,6 +276,9 @@ The end-user license is identical on both paths; the difference is **where the r
 - **Hot** tier for `chunks/` (read frequently by indexer)
 - **Cool** tier acceptable for `raw/` if file size is large and access is rare (the citation linkback typically returns a pre-signed URL, not bulk reads)
 
+> [!TIP]
+> Keep `raw/` and `chunks/` as separate containers — the indexer data source points only at `chunks/`, and citations link back to `raw/`.
+
 ---
 
 ## 9 — Azure Key Vault
@@ -245,6 +289,7 @@ The end-user license is identical on both paths; the difference is **where the r
 - **Access policy / RBAC mode** decided (RBAC strongly preferred for new deployments)
 - Granted **Key Vault Secrets Officer** (or equivalent) to the building user for the duration of the build
 
+> [!NOTE]
 > **This pattern stores zero AI-service secrets in Key Vault.** Foundry (which serves both OpenAI **and** Document Intelligence), AI Search, and Storage all have local auth / shared-key access disabled — every cross-service call goes through Entra ID via managed identity. Key Vault is kept in the deployment as the standard place to put any secret that gets added later (e.g. credentials for a Snowflake / SharePoint Online / SQL Server connector you wire into the Fabric pipeline). If you delete the Key Vault module from `infra/main.bicep`, nothing in the default pattern breaks.
 
 ---
@@ -420,13 +465,13 @@ Copilot agent:    agent-<workload>                       e.g.  agent-rag-kb
 
 | Service | Quota | Typical demo need | Where to check |
 |---|---|---|---|
-| Foundry | TPM per OpenAI deployment | 10K each (embedding + chat) | Azure portal → Foundry resource → Quotas (uses the AOAI quota plane for OpenAI models) |
-| Foundry | Number of OpenAI deployments | 2 (embedding + chat) | Same |
-| AI Search | Services per subscription | 1 | Azure portal → subscription → Usage + quotas → Search |
-| AI Search | Semantic ranker queries / month | Free quota or paid | AI Search service → Semantic ranker blade |
-| Document Intelligence (served by the Foundry resource) | Pages per month | Standard tier: ≥ 1M | Azure portal → Foundry resource → Quotas (the DI sub-namespace shares Foundry's Cognitive Services quota plane) |
-| Storage | Account count + capacity | 1 account, ≤ 100 GB for demo | Subscription quotas |
-| Fabric | Capacity headroom | Demo: F4–F8 | Fabric Admin Portal |
+| <img src="./assets/icons/foundry.svg" width="24" alt=""/> Foundry | TPM per OpenAI deployment | 10K each (embedding + chat) | Azure portal → Foundry resource → Quotas (uses the AOAI quota plane for OpenAI models) |
+| <img src="./assets/icons/foundry.svg" width="24" alt=""/> Foundry | Number of OpenAI deployments | 2 (embedding + chat) | Same |
+| <img src="./assets/icons/ai-search.svg" width="24" alt=""/> AI Search | Services per subscription | 1 | Azure portal → subscription → Usage + quotas → Search |
+| <img src="./assets/icons/ai-search.svg" width="24" alt=""/> AI Search | Semantic ranker queries / month | Free quota or paid | AI Search service → Semantic ranker blade |
+| <img src="./assets/icons/document-intelligence.svg" width="24" alt=""/> Document Intelligence (served by the Foundry resource) | Pages per month | Standard tier: ≥ 1M | Azure portal → Foundry resource → Quotas (the DI sub-namespace shares Foundry's Cognitive Services quota plane) |
+| <img src="./assets/icons/storage.svg" width="24" alt=""/> Storage | Account count + capacity | 1 account, ≤ 100 GB for demo | Subscription quotas |
+| <img src="./assets/icons/folder.svg" width="24" alt=""/> Fabric | Capacity headroom | Demo: F4–F8 | Fabric Admin Portal |
 
 ---
 
@@ -436,15 +481,15 @@ Indicative monthly costs for a **demo / pilot** scale (single region, ~10K docs 
 
 | Component | Demo cost / month (USD) | Notes |
 |---|---|---|
-| AI Search Standard S1 | ~$250 | One replica, one partition |
-| Foundry — OpenAI embedding (text-embedding-3-large) | ~$10–$50 | One-time bulk embed + low ongoing |
-| Foundry — OpenAI chat (gpt-4o) | $0 by default; ~$50–$200 if opted in | Optional. The locked design does not deploy a chat model. Scales with query volume when enabled. |
-| Document Intelligence (prebuilt-read) | ~$15–$30 | $1.50 / 1K pages |
-| Blob Storage (Hot, ~50 GB) | ~$2 | |
-| Key Vault | ~$1 | |
-| Fabric F4 capacity | ~$525 (24/7) or pause when idle | Major variable cost; pause aggressively for demos |
-| Copilot Studio license | Per-user | Usually already in your M365 footprint |
-| **Total (demo, capacity paused off-hours)** | **~$400–$600 / month** | |
+| <img src="./assets/icons/ai-search.svg" width="24" alt=""/> AI Search Standard S1 | ~$250 | One replica, one partition |
+| <img src="./assets/icons/foundry-models.svg" width="24" alt=""/> Foundry — OpenAI embedding (text-embedding-3-large) | ~$10–$50 | One-time bulk embed + low ongoing |
+| <img src="./assets/icons/azure-openai.svg" width="24" alt=""/> Foundry — OpenAI chat (gpt-4o) | $0 by default; ~$50–$200 if opted in | Optional. The locked design does not deploy a chat model. Scales with query volume when enabled. |
+| <img src="./assets/icons/document-intelligence.svg" width="24" alt=""/> Document Intelligence (prebuilt-read) | ~$15–$30 | $1.50 / 1K pages |
+| <img src="./assets/icons/blob-block.svg" width="24" alt=""/> Blob Storage (Hot, ~50 GB) | ~$2 | |
+| <img src="./assets/icons/key-vault.svg" width="24" alt=""/> Key Vault | ~$1 | |
+| <img src="./assets/icons/folder.svg" width="24" alt=""/> Fabric F4 capacity | ~$525 (24/7) or pause when idle | Major variable cost; pause aggressively for demos |
+| <img src="./assets/icons/users.svg" width="24" alt=""/> Copilot Studio license | Per-user | Usually already in your M365 footprint |
+| <img src="./assets/icons/cost-management.svg" width="24" alt=""/> **Total (demo, capacity paused off-hours)** | **~$400–$600 / month** | |
 
 **Production** scale (~100K–1M docs, sustained QPS) typically lands **$2K–$10K / month** range with the largest variable being Fabric capacity sizing.
 
@@ -453,6 +498,9 @@ Indicative monthly costs for a **demo / pilot** scale (single region, ~10K docs 
 ## 15 — Pre-flight checklist
 
 Confirm all of these before moving to your chosen deployment path — [03-deployment-manual.md](./03-deployment-manual.md) (portal / CLI walkthrough) or [04-deployment-automated.md](./04-deployment-automated.md) (Bicep + script):
+
+> [!TIP]
+> Tick every box below before you provision anything — a missed approval (Foundry quota, channel publishing) costs far more time than the check.
 
 - [ ] Azure subscription chosen, Contributor + User Access Administrator confirmed
 - [ ] Target region(s) chosen with all 5 Azure services available
@@ -466,6 +514,8 @@ Confirm all of these before moving to your chosen deployment path — [03-deploy
 
 Once all boxes are checked → proceed to [03-deployment-manual.md](./03-deployment-manual.md) for the portal walkthrough OR [04-deployment-automated.md](./04-deployment-automated.md) for the Bicep + script-driven path.
 
+**Next:** [03 — Manual deployment](./03-deployment-manual.md)
+
 ---
 
-*Last updated: 2026-05-21*
+*Last updated: 2026-10-02*

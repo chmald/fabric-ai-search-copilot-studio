@@ -1,9 +1,36 @@
+[README](../README.md) › [docs index](./00-reproduce-this-demo.md) › 03c Copilot Studio agent
+
 # 03c — Copilot Studio agent setup (manual — both deployment paths)
+
+<p align="center">
+  <img src="./assets/icons/ai-search.svg" width="40" alt="Azure AI Search">&nbsp;&nbsp;
+  <img src="./assets/icons/entra-id.svg" width="40" alt="Microsoft Entra ID">&nbsp;&nbsp;
+  <img src="./assets/icons/app-registrations.svg" width="40" alt="Service principal app registration">&nbsp;&nbsp;
+  <img src="./assets/icons/users.svg" width="40" alt="Teams and Microsoft 365 Copilot users">&nbsp;&nbsp;
+  <img src="./assets/icons/enterprise-applications.svg" width="40" alt="Admin-approved enterprise apps">
+</p>
+
+![Version](./assets/badges/version.svg) ![GA](./assets/badges/ga.svg) ![Manual path](./assets/badges/manual-path.svg) ![Static only](./assets/badges/static-only.svg)
 
 The Copilot Studio layer of this pattern is **always manual**. Copilot Studio is a Power Platform service, not Azure — there is no Bicep / ARM / Terraform surface for agent definitions, knowledge sources, or channel publishing. Both the [manual Azure deployment](./03-deployment-manual.md) and the [Bicep-automated deployment](./04-deployment-automated.md) end at the same point: an AI Search index ready to be consumed by a Copilot Studio agent built with the steps in this document.
 
+## At a glance
+
+| | Item | Detail |
+|---|---|---|
+| <img src="./assets/icons/ai-search.svg" width="24" alt=""/> | **Knowledge source** | Azure AI Search `idx-rag-documents` via a Power Platform data connection |
+| <img src="./assets/icons/entra-id.svg" width="24" alt=""/> | **Auth** | Microsoft Entra ID Integrated or Service principal — never Access Key |
+| <img src="./assets/icons/gear.svg" width="24" alt=""/> | **Grounding** | General knowledge **Off**, ungrounded responses **Off** |
+| <img src="./assets/icons/users.svg" width="24" alt=""/> | **Channel** | Combined Teams and Microsoft 365 Copilot channel |
+
+[![Copilot Studio agent setup: prerequisites, create agent, bind AI Search knowledge source, strict grounding, test, publish to Teams and Microsoft 365 Copilot](./assets/copilot-studio-agent-setup.png)](./assets/copilot-studio-agent-setup.png)
+
+<sub>Editable source: [`assets/copilot-studio-agent-setup.drawio`](./assets/copilot-studio-agent-setup.drawio) - regenerate with `python scripts/export_diagrams.py docs/assets`.</sub>
+
+> [!IMPORTANT]
 > **Run this doc last.** You need the Azure platform layer ([03-deployment-manual.md](./03-deployment-manual.md) **or** [04-deployment-automated.md](./04-deployment-automated.md)) and the Fabric ingest pipeline ([03b-fabric-setup.md](./03b-fabric-setup.md)) complete first, with at least one batch of chunks already in the AI Search index. Without indexed content the agent will return "I don't have enough information" to every question.
 
+> [!TIP]
 > **Time budget.** First-time build: **30–45 minutes** of hands-on time, plus **1–2 business days** of waiting for Teams / M365 Copilot publishing approvals if your tenant hasn't already cleared them. Subsequent rebuilds in the same Power Platform environment: **15 minutes**.
 
 ---
@@ -78,13 +105,24 @@ Because admin / query keys are disabled on the AI Search service in this pattern
 
 Reference: [Add Azure AI Search as a knowledge source](https://learn.microsoft.com/microsoft-copilot-studio/knowledge-azure-ai-search).
 
+> [!NOTE]
 > **Document-level security trimming.** Because **Microsoft Entra ID Integrated** resolves to the calling user's identity, the user's token reaches AI Search — the prerequisite for chunk-level access control (see [01-architecture.md § Document-level access control](01-architecture.md#document-level-chunk-level-access-control)). Service-level access comes from the **Search Index Data Reader** grant above. Document-level trimming then comes from the `group_ids` security filter (GA) populated at chunk creation in [03b](03b-fabric-setup.md), validated in [05-testing.md § G](05-testing.md). **Nuance:** the GA security-filter approach needs the orchestration layer to inject a per-user `$filter` on `group_ids`; native Copilot Studio knowledge-source filter injection is deployment-specific. The preview ACL/RBAC-scope and Purview-label approaches enforce automatically from the user token instead.
 
+> [!WARNING]
 > **Connection lifecycle caveat.** Power Platform data connections live at the **environment** level — not per-agent. A misconfigured AI Search connection can break the AI Search add-knowledge dialog **for every agent in the environment** with no in-product way to delete it. Stick to the supported Entra auth types above. If you hit a broken-connection state, see [Troubleshooting pointers](#troubleshooting-pointers).
 
 ---
 
 ## Phase C1 — Create the agent
+
+| Step | | Action | Gate |
+|---|---|---|---|
+| **1** | <img src="./assets/icons/dev-console.svg" width="28" alt=""> | Open Copilot Studio and confirm the environment selector | ☐ Correct environment shown |
+| **2** | <img src="./assets/icons/users.svg" width="28" alt=""> | **Create → New agent**; name `agent-rag-kb` and add a description | ☐ Name and description set |
+| **3** | <img src="./assets/icons/gear.svg" width="28" alt=""> | Paste the starter instructions / system prompt and tailor | ☐ Grounding rules explicit |
+| **4** | <img src="./assets/icons/file.svg" width="28" alt=""> | Record agent name and environment GUID in `demo-ids.local.json` | ☐ Values recorded |
+
+Details for each step:
 
 1. Open **[Copilot Studio](https://copilotstudio.microsoft.com/)**
 2. Confirm the **environment selector** (top right) shows the environment you want the agent in. Switch if needed.
@@ -156,6 +194,7 @@ Reference: [Return citations](https://learn.microsoft.com/microsoft-copilot-stud
    - Check role propagation (up to 15 minutes), then refresh the Knowledge page
 3. If the row reports an unrecoverable error, see [Troubleshooting pointers](#troubleshooting-pointers) (broken connections can persist at the environment level).
 
+> [!CAUTION]
 > **Heads-up — "Microsoft Entra ID Integrated" flows the end-user identity to AI Search.** If you pick this auth type, **every user who chats with the agent** must hold `Search Index Data Reader` on the search service — not just the builder. That is why the *very first* query you run as the builder may fail until you grant the role to your own account, and why other testers will see "I don't have any information" until they are granted the role too. This is by design, not a missing config. For anything beyond a small demo audience, switch the connection to **Service principal** (see [C0.3](#c03-ai-search-access-pattern)) so the SP holds the role once and end users need no direct search RBAC. Full FAQ in [06-troubleshooting.md § 5.8](./06-troubleshooting.md#58-agent-works-for-me-but-fails-for-other-users-or-i-had-to-add-search-index-data-reader-to-my-own-account).
 
 ### C2.4 (Optional) Virtual Network support
@@ -167,6 +206,12 @@ If the AI Search service is locked down with a [private endpoint](https://learn.
 ## Phase C3 — Configure grounding behavior
 
 For a citation-required RAG agent, the goal is: **answer ONLY from the AI Search index, never from the model's general knowledge.** Two related settings together control this; both must be off.
+
+| Step | | Action | Gate |
+|---|---|---|---|
+| **1** | <img src="./assets/icons/gear.svg" width="28" alt=""> | Overview → Knowledge: **Allow the AI to use its own general knowledge** = Off | ☐ Toggle Off |
+| **2** | <img src="./assets/icons/gear.svg" width="28" alt=""> | Settings → Generative AI: confirm generative orchestration is on | ☐ Enabled |
+| **3** | <img src="./assets/icons/content-safety.svg" width="28" alt=""> | **Allow ungrounded responses** = Off; content moderation High; **Save** | ☐ Saved |
 
 ### C3.1 Turn off the agent-level general-knowledge fallback
 
@@ -226,6 +271,13 @@ If quality is poor, iterate on:
 
 ## Phase C5 — Publish to channels
 
+| Step | | Action | Gate |
+|---|---|---|---|
+| **1** | <img src="./assets/icons/app-service.svg" width="28" alt=""> | **Publish** the agent (C5.1) | ☐ Published successfully |
+| **2** | <img src="./assets/icons/users.svg" width="28" alt=""> | Add the **Teams and Microsoft 365 Copilot** channel (C5.2) | ☐ Channel added |
+| **3** | <img src="./assets/icons/users.svg" width="28" alt=""> | Install for yourself and test (C5.3) | ☐ Answer + citation in Teams and M365 Copilot |
+| **4** | <img src="./assets/icons/enterprise-applications.svg" width="28" alt=""> | Share or submit for admin approval (C5.4) | ☐ Availability scope set |
+
 Copilot Studio now uses a **single combined channel** for Teams and Microsoft 365 Copilot. Publishing to one or both is a matter of toggles, not two separate channel additions.
 
 ### C5.1 Publish the agent
@@ -278,6 +330,12 @@ Copilot Studio supports many other channels (web chat, Slack, Facebook, custom a
 
 ## Phase C6 — Validate end-to-end
 
+| Step | | Action | Gate |
+|---|---|---|---|
+| **1** | <img src="./assets/icons/users.svg" width="28" alt=""> | Open Teams as a normal user and install the agent | ☐ Agent found and installed |
+| **2** | <img src="./assets/icons/file.svg" width="28" alt=""> | Ask a golden-set question and click the citation | ☐ Answer + citation render; Blob opens |
+| **3** | <img src="./assets/icons/enterprise-applications.svg" width="28" alt=""> | Repeat from the M365 Copilot agent gallery | ☐ Parity with Teams |
+
 After publishing, validate from the user side — not from the Test pane.
 
 - [ ] Open Teams as a normal user (not the builder)
@@ -296,6 +354,13 @@ If a user can't see the agent in Teams / M365 Copilot:
 ---
 
 ## Phase C6 validation checklist
+
+| Area | | Gate |
+|---|---|---|
+| **Agent** | <img src="./assets/icons/users.svg" width="24" alt=""/> | ☐ Created in the expected Power Platform environment |
+| **Knowledge** | <img src="./assets/icons/ai-search.svg" width="24" alt=""/> | ☐ Bound via Entra auth, **Status: Ready**, index `idx-rag-documents` |
+| **Grounding** | <img src="./assets/icons/gear.svg" width="24" alt=""/> | ☐ Both general-knowledge and ungrounded-response toggles Off |
+| **Channel** | <img src="./assets/icons/enterprise-applications.svg" width="24" alt=""/> | ☐ Published, channel added, reachable from Teams and M365 Copilot |
 
 - [ ] Agent created in the expected Power Platform environment
 - [ ] AI Search knowledge source bound via **Microsoft Entra ID Integrated** or **Service principal** (not Access Key) and showing **Status: Ready**
@@ -337,18 +402,15 @@ For the AI Search-side issues (indexer failures, vectorizer auth, blob 403s on t
 
 ## Reference documentation
 
-- [Copilot Studio overview](https://learn.microsoft.com/microsoft-copilot-studio/fundamentals-what-is-copilot-studio)
-- [Copilot Studio licensing](https://learn.microsoft.com/microsoft-copilot-studio/requirements-licensing-subscriptions)
-- [Add Azure AI Search as a knowledge source](https://learn.microsoft.com/microsoft-copilot-studio/knowledge-azure-ai-search) — includes citation field convention and VNet support
-- [Knowledge sources summary](https://learn.microsoft.com/microsoft-copilot-studio/knowledge-copilot-studio) — includes the **Allow ungrounded responses** setting
-- [Orchestrate agent behavior with generative AI](https://learn.microsoft.com/microsoft-copilot-studio/advanced-generative-actions)
-- [Connect and configure an agent for Teams and Microsoft 365](https://learn.microsoft.com/microsoft-copilot-studio/publication-add-bot-to-microsoft-teams) — single combined channel reference
-- [Publish agents for Microsoft 365 Copilot](https://learn.microsoft.com/microsoft-365/copilot/extensibility/publish)
-- [Manage requested Copilot Studio agents](https://learn.microsoft.com/microsoft-365/copilot/agent-essentials/agent-lifecycle/agent-copilot-studio-requested) — admin approval flow
-- [Manage Power Platform apps in Teams](https://learn.microsoft.com/microsoftteams/manage-power-platform-apps)
-- [Power Platform environments overview](https://learn.microsoft.com/power-platform/admin/environments-overview)
-- [Index file content and metadata by using Azure AI Search](https://learn.microsoft.com/azure/architecture/ai-ml/architecture/search-blob-metadata) — `metadata_storage_path` convention
+| | Topic | Links |
+|---|---|---|
+| <img src="./assets/icons/users.svg" width="24" alt=""/> | Copilot Studio | [overview](https://learn.microsoft.com/microsoft-copilot-studio/fundamentals-what-is-copilot-studio) · [licensing](https://learn.microsoft.com/microsoft-copilot-studio/requirements-licensing-subscriptions) |
+| <img src="./assets/icons/ai-search.svg" width="24" alt=""/> | Knowledge and grounding | [Add Azure AI Search as a knowledge source](https://learn.microsoft.com/microsoft-copilot-studio/knowledge-azure-ai-search) — includes citation field convention and VNet support · [Knowledge sources summary](https://learn.microsoft.com/microsoft-copilot-studio/knowledge-copilot-studio) — includes the **Allow ungrounded responses** setting · [Orchestrate agent behavior with generative AI](https://learn.microsoft.com/microsoft-copilot-studio/advanced-generative-actions) · [Index file content and metadata by using Azure AI Search](https://learn.microsoft.com/azure/architecture/ai-ml/architecture/search-blob-metadata) — `metadata_storage_path` convention |
+| <img src="./assets/icons/enterprise-applications.svg" width="24" alt=""/> | Publishing and admin | [Connect and configure an agent for Teams and Microsoft 365](https://learn.microsoft.com/microsoft-copilot-studio/publication-add-bot-to-microsoft-teams) — single combined channel reference · [Publish agents for Microsoft 365 Copilot](https://learn.microsoft.com/microsoft-365/copilot/extensibility/publish) · [Manage requested Copilot Studio agents](https://learn.microsoft.com/microsoft-365/copilot/agent-essentials/agent-lifecycle/agent-copilot-studio-requested) — admin approval flow · [Manage Power Platform apps in Teams](https://learn.microsoft.com/microsoftteams/manage-power-platform-apps) |
+| <img src="./assets/icons/resource-group.svg" width="24" alt=""/> | Environments | [Power Platform environments overview](https://learn.microsoft.com/power-platform/admin/environments-overview) |
 
 ---
 
-*Last updated: 2026-05-24*
+Next: [03d - Foundry agent setup](./03d-foundry-agent-setup.md) →
+
+*Last updated: 2026-10-02*

@@ -1,8 +1,60 @@
+[README](../README.md) › [docs index](./00-reproduce-this-demo.md) › 06 Troubleshooting
+
 # 06 — Troubleshooting
+
+<p>
+<img src="./assets/icons/ai-search.svg" width="40" alt="Azure AI Search"/>&nbsp;
+<img src="./assets/icons/foundry-models.svg" width="40" alt="Foundry models"/>&nbsp;
+<img src="./assets/icons/document-intelligence.svg" width="40" alt="Document Intelligence"/>&nbsp;
+<img src="./assets/icons/storage.svg" width="40" alt="Storage"/>&nbsp;
+<img src="./assets/icons/key-vault.svg" width="40" alt="Key Vault"/>&nbsp;
+<img src="./assets/icons/entra-id.svg" width="40" alt="Microsoft Entra ID"/>
+</p>
+
+![version](./assets/badges/version.svg) ![Static only](./assets/badges/static-only.svg)
 
 Common failure modes and fixes for the RAG knowledge-base pattern. Organized by **where the symptom appears** so you can navigate quickly during a live incident.
 
 > **Diagnosis flow:** start from the symptom layer (where the user sees the problem). The fix is usually one layer down. If a symptom appears at multiple layers, address the deepest layer first.
+
+> [!IMPORTANT]
+> **Start at the symptom layer, fix one layer down.** If the same symptom shows at several layers, fix the deepest layer first. Most auth failures land in [§0 Entra-only auth](#0--entra-only-auth-local-auth-disabled) because this pattern disables local (key) auth on AI Search, Foundry and Storage.
+
+> [!NOTE]
+> The fixes in this guide are documented procedures. No dated live run that exercised each of them is recorded in this repo (see [05 § Validation status](./05-testing.md#validation-status)), so verify each fix against your own deployment.
+
+## At a glance
+
+| Where the symptom appears | First thing to check | Section |
+|---|---|---|
+| **Any REST call returns 401/403** | Local auth is disabled by design — use an Entra bearer token | [§0](#0--entra-only-auth-local-auth-disabled) |
+| **Platform / RBAC propagation** | Role assignments can lag; confirm identities exist | [§1](#1--foundation) |
+| **Source files not visible** | OneLake shortcut permissions or refresh lag | [§2](#2--onelake--source-attachment) |
+| **Pipeline / OCR / chunking** | Document Intelligence auth, notebook dependencies | [§3](#3--fabric-data-pipeline) |
+| **Index empty or vectors missing** | Indexer status, skillset, AI Search MI role on Foundry | [§4](#4--ai-search-index--indexer) |
+| **Copilot Studio answers wrong or empty** | Knowledge source binding and user identity | [§5](#5--copilot-studio) |
+| **Cost / quota / networking** | Capacity running, quota burn, private endpoints | [§6](#6--cost-and-quota), [§7](#7--networking) |
+
+## Decision tree
+
+> [!TIP]
+> Use the decision tree to pick the right section in under a minute; it mirrors the [quick triage table](#quick-triage-table) below. Page 1 is the entry point; follow the pointers to later pages.
+
+[![Troubleshooting decision tree, page 1 of 7](./assets/troubleshooting-decision-tree-1.png)](./assets/troubleshooting-decision-tree-1.png)
+
+[![Troubleshooting decision tree, page 2 of 7](./assets/troubleshooting-decision-tree-2.png)](./assets/troubleshooting-decision-tree-2.png)
+
+[![Troubleshooting decision tree, page 3 of 7](./assets/troubleshooting-decision-tree-3.png)](./assets/troubleshooting-decision-tree-3.png)
+
+[![Troubleshooting decision tree, page 4 of 7](./assets/troubleshooting-decision-tree-4.png)](./assets/troubleshooting-decision-tree-4.png)
+
+[![Troubleshooting decision tree, page 5 of 7](./assets/troubleshooting-decision-tree-5.png)](./assets/troubleshooting-decision-tree-5.png)
+
+[![Troubleshooting decision tree, page 6 of 7](./assets/troubleshooting-decision-tree-6.png)](./assets/troubleshooting-decision-tree-6.png)
+
+[![Troubleshooting decision tree, page 7 of 7](./assets/troubleshooting-decision-tree-7.png)](./assets/troubleshooting-decision-tree-7.png)
+
+<sub>Editable source: [`assets/troubleshooting-decision-tree.drawio`](./assets/troubleshooting-decision-tree.drawio) - regenerate with `python scripts/export_diagrams.py docs/assets`.</sub>
 
 ---
 
@@ -28,9 +80,22 @@ Common failure modes and fixes for the RAG knowledge-base pattern. Organized by 
 | OneLake shortcut shows no files | Shortcut permissions or refresh lag | [§2](#2--onelake--source-attachment) |
 | Cost spike | Fabric capacity left running, Foundry quota burned, indexer over-scheduled | [§6](#6--cost-and-quota) |
 
+### Quick triage by product
+
+| Product | Typical symptom | Go to |
+|---|---|---|
+| <img src="./assets/icons/entra-id.svg" width="24" alt="Entra ID"/> Entra ID / local auth | `401` + `WWW-Authenticate: Bearer`; key-based calls rejected | [§0](#0--entra-only-auth-local-auth-disabled) |
+| <img src="./assets/icons/storage.svg" width="24" alt="Storage"/> Storage / OneLake | `403 KeyBasedAuthenticationNotPermitted`; shortcut shows no files | [§0.2](#02-403-keybasedauthenticationnotpermitted-on-storage), [§2](#2--onelake--source-attachment) |
+| <img src="./assets/icons/document-intelligence.svg" width="24" alt="Document Intelligence"/> Document Intelligence | OCR activity fails (auth, endpoint, API version) | [§3.1](#31-document-intelligence-call-fails) |
+| <img src="./assets/icons/ai-search.svg" width="24" alt="AI Search"/> AI Search | 0 documents; `vectorIndexSize = 0`; `transientFailure` | [§4](#4--ai-search-index--indexer) |
+| <img src="./assets/icons/foundry-models.svg" width="24" alt="Foundry models"/> Foundry models | Embedding role wrong; soft-deleted account blocks redeploy | [§0.5](#05-bicep-deploy-fails-flagmustbesetforrestore-soft-deleted-foundry--cognitive-services-account), [§4.1](#41-vectorizer-auth-failure-loud-or-silent) |
+| <img src="./assets/icons/cost-management.svg" width="24" alt="Cost Management"/> Cost / quota | Cost spike from capacity, quota or indexer schedule | [§6](#6--cost-and-quota) |
+
 ---
 
 ## 0 — Entra-only auth (local auth disabled)
+
+<p><img src="./assets/icons/entra-id.svg" width="28" alt="Microsoft Entra ID"/>&nbsp;<img src="./assets/icons/managed-identity.svg" width="28" alt="Managed Identity"/>&nbsp;<img src="./assets/icons/key-vault.svg" width="28" alt="Key Vault"/></p>
 
 This pattern provisions the **Microsoft Foundry resource** (which serves both Azure OpenAI deployments **and** the Document Intelligence `prebuilt-read` API — single multi-service Cognitive Services account, `kind=AIServices`) and **AI Search** with `disableLocalAuth=true`, and **Storage** with `allowSharedKeyAccess=false`. Most auth failures end up here.
 
@@ -229,6 +294,11 @@ Reference: [Recover or purge deleted Azure AI Services resources](https://learn.
 
 ## 1 — Foundation
 
+<p><img src="./assets/icons/managed-identity.svg" width="28" alt="Managed Identity"/>&nbsp;<img src="./assets/icons/key-vault.svg" width="28" alt="Key Vault"/></p>
+
+> [!NOTE]
+> Platform-level failures (role propagation, identities) surface later as auth errors in the pipeline and search layers. Rule these out first.
+
 ### 1.1 RBAC propagation lag
 
 **Symptom.** You assigned a role; it shows in Azure portal IAM; but the consuming service still gets `403 Forbidden`.
@@ -253,6 +323,8 @@ Reference: [Recover or purge deleted Azure AI Services resources](https://learn.
 
 ## 2 — OneLake / source attachment
 
+<p><img src="./assets/icons/storage.svg" width="28" alt="Storage"/>&nbsp;<img src="./assets/icons/folder.svg" width="28" alt="Folder"/></p>
+
 ### 2.1 Shortcut shows no files
 
 **Symptom.** The OneLake shortcut to SharePoint / ADLS / Blob shows no contents in the Lakehouse Files view.
@@ -275,6 +347,8 @@ Reference: [Recover or purge deleted Azure AI Services resources](https://learn.
 ---
 
 ## 3 — Fabric Data Pipeline
+
+<p><img src="./assets/icons/document-intelligence.svg" width="28" alt="Document Intelligence"/>&nbsp;<img src="./assets/icons/storage.svg" width="28" alt="Storage"/>&nbsp;<img src="./assets/icons/code.svg" width="28" alt="Code"/></p>
 
 ### 3.1 Document Intelligence call fails
 
@@ -647,6 +721,8 @@ Then trigger `pl_ingest_docs` — the lookup activity's exit payload will report
 
 ## 4 — AI Search index / indexer
 
+<p><img src="./assets/icons/ai-search.svg" width="28" alt="Azure AI Search"/>&nbsp;<img src="./assets/icons/foundry-models.svg" width="28" alt="Foundry models"/></p>
+
 ### 4.1 Vectorizer auth failure (loud OR silent)
 
 **Symptom — loud variant.** Indexer status shows `lastResult.errorMessage` referencing OpenAI 401 / 403 from the Foundry endpoint, or "managed identity not authorized to invoke embedding deployment."
@@ -842,6 +918,8 @@ Manually run once to confirm health, then check scheduling settings.
 
 ## 5 — Copilot Studio
 
+<p><img src="./assets/icons/ai-search.svg" width="28" alt="Azure AI Search"/>&nbsp;<img src="./assets/icons/entra-id.svg" width="28" alt="Microsoft Entra ID"/></p>
+
 ### 5.1 Agent answers "I don't have any information"
 
 **Common causes:**
@@ -958,6 +1036,8 @@ There is no "agent managed identity" option for the AI Search knowledge source t
 
 ## 6 — Cost and quota
 
+<p><img src="./assets/icons/cost-management.svg" width="28" alt="Cost Management"/>&nbsp;<img src="./assets/icons/cost-alerts.svg" width="28" alt="Cost alerts"/>&nbsp;<img src="./assets/icons/foundry-models.svg" width="28" alt="Foundry models"/></p>
+
 ### 6.1 Fabric capacity cost spike
 
 **Symptom.** Monthly Fabric bill is significantly above estimate.
@@ -999,6 +1079,8 @@ There is no "agent managed identity" option for the AI Search knowledge source t
 
 ## 7 — Networking
 
+<p><img src="./assets/icons/private-endpoint.svg" width="28" alt="Private endpoint"/>&nbsp;<img src="./assets/icons/private-link.svg" width="28" alt="Private Link"/>&nbsp;<img src="./assets/icons/virtual-network.svg" width="28" alt="Virtual network"/></p>
+
 (Only relevant for production deployments with private endpoints.)
 
 ### 7.1 Indexer cannot reach Foundry resource through private endpoint
@@ -1020,6 +1102,8 @@ There is no "agent managed identity" option for the AI Search knowledge source t
 ---
 
 ## 8 — Diagnostic toolbox
+
+<p><img src="./assets/icons/monitor.svg" width="28" alt="Azure Monitor"/>&nbsp;<img src="./assets/icons/log-analytics.svg" width="28" alt="Log Analytics"/>&nbsp;<img src="./assets/icons/application-insights.svg" width="28" alt="Application Insights"/></p>
 
 When you can't figure out where the failure is:
 
@@ -1065,6 +1149,8 @@ LIMIT 20
 
 ## 9 — When to escalate
 
+<p><img src="./assets/icons/alerts.svg" width="28" alt="Alerts"/></p>
+
 Escalate to support / Microsoft if, after working through this guide:
 
 | Issue | Escalate to |
@@ -1079,4 +1165,6 @@ If the issue is blocking a demo or production deployment, open a support case th
 
 ---
 
-*Last updated: 2026-05-21*
+Next: [07 - Copilot Studio vs Foundry](./07-copilot-studio-vs-foundry.md) →
+
+*Last updated: 2026-10-02*

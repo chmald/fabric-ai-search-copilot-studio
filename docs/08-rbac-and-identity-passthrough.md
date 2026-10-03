@@ -1,8 +1,37 @@
+[README](../README.md) › [docs index](./00-reproduce-this-demo.md) › 08 RBAC & identity passthrough
+
 # 08 — RBAC & identity passthrough (service configuration + per-user data restrictions)
+
+<p>
+<img src="./assets/icons/entra-id.svg" width="40" alt="Microsoft Entra ID"/>&nbsp;
+<img src="./assets/icons/managed-identity.svg" width="40" alt="Managed Identity"/>&nbsp;
+<img src="./assets/icons/ai-search.svg" width="40" alt="Azure AI Search"/>&nbsp;
+<img src="./assets/icons/foundry-agent-service.svg" width="40" alt="Foundry Agent Service"/>&nbsp;
+<img src="./assets/icons/key-vault.svg" width="40" alt="Key Vault"/>&nbsp;
+<img src="./assets/icons/app-registrations.svg" width="40" alt="App registrations"/>
+</p>
+
+![version](./assets/badges/version.svg) ![GA](./assets/badges/ga.svg) ![Preview](./assets/badges/preview.svg) ![Static only](./assets/badges/static-only.svg)
 
 One place for **every identity** in the pattern, the **role** it needs, and — most importantly — **how a user's permissions flow through the agent so they only see data they're allowed to** (row-level security, object-level security, Purview/DLP, semantic-model restrictions).
 
 > **Core principle — no keys, Entra everywhere.** Every cross-service call uses **Microsoft Entra ID** (managed identity, a connection-scoped identity, or the end user's identity). Admin/query keys and storage shared keys are **disabled**. Secrets that can't be replaced by RBAC live in **Key Vault**.
+
+> [!WARNING]
+> **Documents and structured data behave differently.** The AI Search tool runs as the **project managed identity** (no user passthrough, so you must inject a `group_ids` filter). The Fabric data agent tool runs **as the signed-in user** (OBO), so Fabric enforces RLS/OLS/Purview itself. If you do nothing on the document side, every authenticated user can retrieve every chunk.
+
+## At a glance
+
+| | Topic | One-line answer |
+|---|---|---|
+| <img src="./assets/icons/managed-identity.svg" width="24" alt=""/> | **Documents (AI Search)** | Project MI queries the index; **you** inject the caller's group-ID `$filter` |
+| <img src="./assets/icons/entra-id.svg" width="24" alt=""/> | **Structured data (Fabric)** | OBO user identity; Fabric enforces RLS / OLS / Purview / DLP |
+| <img src="./assets/icons/key-vault.svg" width="24" alt=""/> | **Secrets** | Keys disabled; the one DI-caller secret lives in Key Vault |
+| <img src="./assets/icons/app-registrations.svg" width="24" alt=""/> | **Identities** | Workspace identity, three service MIs, a DI-caller SP, bot + web-app registrations, end users |
+
+[![RBAC and identity passthrough: AI Search tool (project MI) vs Fabric tool (OBO user)](./assets/rbac-identity-passthrough.png)](./assets/rbac-identity-passthrough.png)
+
+<sub>Editable source: [`assets/rbac-identity-passthrough.drawio`](./assets/rbac-identity-passthrough.drawio) - regenerate with `python scripts/export_diagrams.py docs/assets`.</sub>
 
 ---
 
@@ -65,7 +94,9 @@ Reference: [Agent identity (OBO vs agent identity)](https://learn.microsoft.com/
 |---|---|---|---|
 | Copilot Studio data connection (**Entra ID Integrated** or **service principal**) | **Search Index Data Reader** | AI Search service | Agent's AI Search knowledge source queries the index (no keys) |
 
-### Layer 3b — Foundry agent ([03d](./03d-foundry-agent-setup.md))
+### Layer 3b — Foundry agent (03d)
+
+Runbook: [03d](./03d-foundry-agent-setup.md).
 
 | Principal | Role | Scope | Why |
 |---|---|---|---|
@@ -75,6 +106,7 @@ Reference: [Agent identity (OBO vs agent identity)](https://learn.microsoft.com/
 | Custom-engine-agent bot | **Foundry User** (or toolkit-configured connection) | Foundry project | Teams bot forwards turns to the agent endpoint |
 | End users | **Microsoft 365 Copilot** license | M365 tenant | Consume the agent in Teams / M365 Copilot |
 
+> [!NOTE]
 > **Foundry RBAC role rename:** **Foundry User / Foundry Owner / Foundry Account Owner / Foundry Project Manager** were formerly *Azure AI User / Owner / Account Owner / Project Manager*. Role IDs and permissions are unchanged.
 
 ### Builder / operator (assigned once per environment, [02 § 10](./02-prerequisites.md#10--rbac-role-assignments-cheat-sheet))
@@ -134,7 +166,7 @@ The Fabric tool runs queries **as the signed-in user** (OBO). Fabric enforces ev
 | **Purview sensitivity labels + DLP** | The data agent **respects Microsoft Purview** governance on the sources — DLP policies (GA for Warehouse) can detect/restrict sensitive data; labels and access-restriction policies can block specific queries or fields. |
 | **Read-only** | The data agent maintains **read-only** connections — it can never write, regardless of the user's write rights. |
 | **Least-privilege + scope guardrails** | It uses the user's credentials for schema discovery and constrains tool outputs to the **scoped data sources** only. |
-| **Risk controls (preview)** | Optional **Azure AI Content Safety**; Purview **DSPM Data Risk Assessments**, risk discovery/auditing, and **Insider Risk Management** can monitor agent prompts/responses. |
+| **Risk controls** ![Preview](./assets/badges/preview.svg) | Optional **Azure AI Content Safety**; Purview **DSPM Data Risk Assessments**, risk discovery/auditing, and **Insider Risk Management** can monitor agent prompts/responses. |
 
 Because identity passes through, **a user who is restricted from certain rows, columns, or a whole table in Fabric is automatically restricted in the agent's answers** — no extra agent configuration. Reference: [Fabric Data Agent concept § security](https://learn.microsoft.com/fabric/data-science/concept-data-agent) · [end-to-end (incl. security)](https://learn.microsoft.com/fabric/data-science/data-agent-end-to-end-tutorial).
 
@@ -149,7 +181,7 @@ If the Fabric Data Agent points at a **Power BI semantic model** (instead of, or
 
 | Data | Restriction mechanism | Enforced by | Reaches the user via |
 |---|---|---|---|
-| Document chunks | `group_ids` security filter (GA) | the **agent** (filter injection) | project MI **+** injected caller group IDs |
+| Document chunks | `group_ids` security filter ![GA](./assets/badges/ga.svg) | the **agent** (filter injection) | project MI **+** injected caller group IDs |
 | Lakehouse / Warehouse rows | RLS | **Fabric** | OBO user identity |
 | Tables / columns | OLS | **Fabric / Power BI** | OBO user identity |
 | Semantic-model rows/objects | RLS / OLS | **Power BI** | OBO user identity (Build to query) |
@@ -171,6 +203,9 @@ If the Fabric Data Agent points at a **Power BI semantic model** (instead of, or
 ---
 
 ## Configuration checklist — are the services configured?
+
+> [!TIP]
+> Work top to bottom: platform and ingest roles first, then the agent path you chose, then the two-user checks. RBAC changes can take up to 15 minutes to propagate ([06 § 1.1](./06-troubleshooting.md#11-rbac-propagation-lag)).
 
 **Platform (machine-to-machine)**
 - [ ] AI Search MI has **Cognitive Services OpenAI User** on Foundry (not plain *Cognitive Services User* — silent-failure trap) and **Storage Blob Data Reader** on Storage.
@@ -208,6 +243,9 @@ If the Fabric Data Agent points at a **Power BI semantic model** (instead of, or
 
 ## References
 
+> [!NOTE]
+> Role names and preview surfaces change. Re-verify the Foundry, Fabric and AI Search role names against the Microsoft Learn pages below at deploy time.
+
 - [Agent identity (OBO vs agent identity)](https://learn.microsoft.com/azure/foundry/agents/concepts/agent-identity) · [RBAC in Microsoft Foundry](https://learn.microsoft.com/azure/foundry/concepts/rbac-foundry)
 - [Azure AI Search document-level access](https://learn.microsoft.com/azure/search/search-document-level-access-overview)
 - [Fabric Data Agent — concept (security)](https://learn.microsoft.com/fabric/data-science/concept-data-agent) · [end-to-end](https://learn.microsoft.com/fabric/data-science/data-agent-end-to-end-tutorial)
@@ -216,4 +254,6 @@ If the Fabric Data Agent points at a **Power BI semantic model** (instead of, or
 
 ---
 
-*Last updated: 2026-06-09*
+Next: [09 - Foundry agent web app](./09-foundry-agent-webapp.md) →
+
+*Last updated: 2026-10-02*

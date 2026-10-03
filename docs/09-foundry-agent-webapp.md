@@ -1,10 +1,24 @@
+[README](../README.md) › [docs index](./00-reproduce-this-demo.md) › 09 Foundry agent web app
+
 # 09 — Standalone web app front end (in-repo, Azure Container Apps)
+
+<p>
+<img src="./assets/icons/container-apps.svg" width="40" alt="Azure Container Apps"/>&nbsp;
+<img src="./assets/icons/container-registry.svg" width="40" alt="Container Registry"/>&nbsp;
+<img src="./assets/icons/foundry-agent-service.svg" width="40" alt="Foundry Agent Service"/>&nbsp;
+<img src="./assets/icons/managed-identity.svg" width="40" alt="Managed Identity"/>&nbsp;
+<img src="./assets/icons/app-registrations.svg" width="40" alt="App registrations"/>&nbsp;
+<img src="./assets/icons/log-analytics.svg" width="40" alt="Log Analytics"/>
+</p>
+
+![version](./assets/badges/version.svg) ![Optional](./assets/badges/optional.svg) ![Opt-in](./assets/badges/opt-in.svg) ![Static only](./assets/badges/static-only.svg)
 
 This document covers the **self-hosted chat front end** included in this repository at
 [`webapp/app/`](../webapp/app/). It is a third way to reach the Foundry agent built in
 [03d](./03d-foundry-agent-setup.md) — alongside the Copilot Studio combined channel
 ([03c](./03c-copilot-studio-setup.md)) and the M365/Teams custom engine agent
 ([03d Phase D6](./03d-foundry-agent-setup.md#phase-d6--publish-to-microsoft-365-copilot--teams-preview)).
+It is for builders who want a branded web URL outside Teams/M365, and it answers how to deploy it and which identity mode to pick.
 
 The web app is **part of this repo and deploys with the same flow as the rest of the
 pattern**: Bicep for the platform, a PowerShell script for the build and deploy. There is
@@ -16,6 +30,22 @@ no second toolchain, and nothing is scaffolded outside the repo.
 > `deployWebApp` parameter), and the deploy script
 > ([`scripts/deploy-webapp.ps1`](../scripts/deploy-webapp.ps1)). The container image is
 > built from source in Azure Container Registry — no local Docker required.
+
+> [!IMPORTANT]
+> **Choose the identity mode before you deploy.** MI mode (default) cannot pass user identity, so the Fabric data agent tool fails. If the agent uses the Fabric tool, deploy in **OBO mode** (`-EnableObo`) and also configure the Fabric tool/connection for identity passthrough. See [Identity: MI mode vs OBO mode](#identity-mi-mode-vs-obo-mode).
+
+## At a glance
+
+| | Topic | One-line answer |
+|---|---|---|
+| <img src="./assets/icons/container-apps.svg" width="24" alt=""/> | **Hosting** | FastAPI app on Azure Container Apps, image built in ACR (no local Docker) |
+| <img src="./assets/icons/managed-identity.svg" width="24" alt=""/> | **MI mode** ![Default](./assets/badges/default.svg) | App calls the agent as its managed identity; Fabric tool will not work |
+| <img src="./assets/icons/app-registrations.svg" width="24" alt=""/> | **OBO mode** ![Opt-in](./assets/badges/opt-in.svg) | `-EnableObo`: user identity reaches Agent Service; needs app registration + federated credential + admin consent |
+| <img src="./assets/icons/foundry-agent-service.svg" width="24" alt=""/> | **Deploy** | `infra/deploy.ps1` (`deployWebApp = true`), then `scripts/deploy-webapp.ps1` |
+
+[![Foundry agent web app topology: Container App, ACR, managed identity, OBO app registration, Foundry agent](./assets/agent-webapp-topology.png)](./assets/agent-webapp-topology.png)
+
+<sub>Editable source: [`assets/agent-webapp-topology.drawio`](./assets/agent-webapp-topology.drawio) - regenerate with `python scripts/export_diagrams.py docs/assets`.</sub>
 
 ---
 
@@ -44,8 +74,8 @@ it. Three front ends are documented:
 | Front end | Where users chat | Identity passthrough | Doc |
 |---|---|---|---|
 | **Copilot Studio combined channel** | Teams + M365 Copilot | per-user (Entra ID Integrated) | [03c](./03c-copilot-studio-setup.md) (different runtime) |
-| **Custom engine agent** | Teams + M365 Copilot | per-user (SSO to agent) | [03d D6](./03d-foundry-agent-setup.md#phase-d6--publish-to-microsoft-365-copilot--teams-preview) |
-| **Standalone web app** *(this doc)* | a branded web URL you own | **per-user via OBO** | **09** |
+| **Custom engine agent** ![Preview](./assets/badges/preview.svg) | Teams + M365 Copilot | per-user (SSO to agent) | [03d D6](./03d-foundry-agent-setup.md#phase-d6--publish-to-microsoft-365-copilot--teams-preview) |
+| **Standalone web app** *(this doc)* ![Optional](./assets/badges/optional.svg) | a branded web URL you own | **per-user via OBO** | **09** |
 
 Choose the standalone web app for a self-hosted, brandable chat experience outside
 Teams/M365 — for example an internal portal — with the agent runtime and tools unchanged.
@@ -142,6 +172,16 @@ guessing:
 
 ## Validate
 
+| Step | | Action | Gate |
+|---|---|---|---|
+| **1** | <img src="./assets/icons/container-apps.svg" width="28" alt=""> | Open the printed app URL; in OBO mode sign in as a normal user (not the deployer) | ☐ Chat UI loads |
+| **2** | <img src="./assets/icons/ai-search.svg" width="28" alt=""> | **Document question** (AI Search tool): ask for a clause or wording from the indexed corpus | ☐ Grounded answer |
+| **3** | <img src="./assets/icons/foundry-agent-service.svg" width="28" alt=""> | **Structured question** (Fabric data agent tool): ask a count/aggregate | ☐ Correct answer |
+| **4** | <img src="./assets/icons/entra-id.svg" width="28" alt=""> | **Per-user restriction** (OBO): two users with different Fabric scope ask the same "list all …" question | ☐ Each sees only permitted rows |
+| **5** | <img src="./assets/icons/ai-search.svg" width="28" alt=""> | **Document trimming** (if configured): in-group vs out-of-group ([05 § G](./05-testing.md)) | ☐ Results differ |
+
+Detail for each step:
+
 1. Open the printed app URL. In OBO mode, sign in as a normal user (not the deployer).
 2. **Document question** (Azure AI Search tool): ask for a clause or wording from the
    indexed corpus; confirm a grounded answer.
@@ -155,6 +195,9 @@ guessing:
 
 A liveness probe is available at `/healthz` (unauthenticated) and reports whether the agent
 endpoint and OBO mode are configured.
+
+> [!NOTE]
+> No dated live run of the web app is recorded in this repo. These are the validation steps to execute against your own deployment.
 
 ---
 
@@ -176,6 +219,12 @@ per-restriction enforcement model are in
 ---
 
 ## Caveats
+
+> [!WARNING]
+> **SDK sunset (act before 2026-08-26).** The app pins `azure-ai-projects` v1.x (Assistants-era surface), documented to sunset with the classic Assistants API. Plan the migration to the v2.x Responses API (details below).
+
+> [!CAUTION]
+> **OBO is opt-in and adds dependencies**; Conditional Access / device-compliance policies can break the OBO token exchange. Do not promise per-user behavior until the two-user test passes.
 
 - **OBO is opt-in and adds dependencies** the Teams/M365 channel does not: a backend app
   registration, a federated identity credential, Container Apps authentication, and Entra
@@ -200,6 +249,14 @@ per-restriction enforcement model are in
 
 ## Validation checklist
 
+| Phase | Gate |
+|---|---|
+| <img src="./assets/icons/foundry-agent-service.svg" width="24" alt=""/> **W0** | ☐ Agent published with the tools |
+| <img src="./assets/icons/resource-group.svg" width="24" alt=""/> **W1** | ☐ Platform provisioned (`deployWebApp = true`) |
+| <img src="./assets/icons/container-apps.svg" width="24" alt=""/> **W2** | ☐ App built, deployed, URL reachable |
+| <img src="./assets/icons/app-registrations.svg" width="24" alt=""/> **W3** (OBO) | ☐ Federated credential, admin consent, per-user grants |
+| <img src="./assets/icons/entra-id.svg" width="24" alt=""/> **Validate** | ☐ Document + structured answers; two-user RLS check |
+
 - [ ] Foundry agent published with the AI Search (and, in scope, Fabric) tools (W0)
 - [ ] Platform provisioned with `deployWebApp = true` (W1)
 - [ ] App built + deployed; app URL reachable (W2)
@@ -212,6 +269,9 @@ per-restriction enforcement model are in
 
 ## References
 
+> [!TIP]
+> Re-verify the `azure-ai-projects` client surface, token scope, API version and Foundry role names against Microsoft Learn at deploy time.
+
 - App: [webapp/app/](../webapp/app/) · Platform: [infra/modules/containerapp.bicep](../infra/modules/containerapp.bicep) · Deploy: [scripts/deploy-webapp.ps1](../scripts/deploy-webapp.ps1)
 - Agent build: [03d-foundry-agent-setup.md](./03d-foundry-agent-setup.md) · Fabric data agent: [03e-fabric-data-agent.md](./03e-fabric-data-agent.md)
 - Identity & RBAC: [08-rbac-and-identity-passthrough.md](./08-rbac-and-identity-passthrough.md)
@@ -220,4 +280,6 @@ per-restriction enforcement model are in
 
 ---
 
-*Last updated: 2026-06-19*
+Next: [README](../README.md) →
+
+*Last updated: 2026-10-02*

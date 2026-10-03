@@ -1,16 +1,45 @@
+[README](../README.md) › [docs index](./00-reproduce-this-demo.md) › 03 Manual deployment
+
 # 03 — Azure platform layer — Manual deployment (portal + CLI)
+
+<p>
+<img src="./assets/icons/resource-group.svg" width="40" alt="Resource group"/>&nbsp;
+<img src="./assets/icons/key-vault.svg" width="40" alt="Key Vault"/>&nbsp;
+<img src="./assets/icons/blob-block.svg" width="40" alt="Blob Storage"/>&nbsp;
+<img src="./assets/icons/foundry.svg" width="40" alt="Microsoft Foundry"/>&nbsp;
+<img src="./assets/icons/document-intelligence.svg" width="40" alt="Document Intelligence"/>&nbsp;
+<img src="./assets/icons/ai-search.svg" width="40" alt="Azure AI Search"/>
+</p>
+
+![Version](./assets/badges/version.svg) ![Manual path](./assets/badges/manual-path.svg) ![Static-only](./assets/badges/static-only.svg)
 
 Step-by-step manual build of the **Azure platform layer** of the RAG knowledge-base pattern. Assumes all of [02-prerequisites.md](./02-prerequisites.md) is complete.
 
+## At a glance
+
+| | Phase | What you build | ~Time |
+|---|---|---|---|
+| <img src="./assets/icons/azure-devops.svg" width="24" alt=""/> | **Step 0** | Tenant-explicit sign-in check | 5 min |
+| <img src="./assets/icons/resource-group.svg" width="24" alt=""/> | **1** | Foundation: RG, Key Vault, Blob, Foundry (+ DI), AI Search, RBAC | 60–90 min |
+| <img src="./assets/icons/folder.svg" width="24" alt=""/> | **2–3** | Fabric setup — see [03b](./03b-fabric-setup.md) | separate runbook |
+| <img src="./assets/icons/ai-search.svg" width="24" alt=""/> | **4** | AI Search index, skillset, indexer | 45–60 min |
+
+[![Manual deployment steps: sign-in check, Azure foundation, Fabric hand-off, AI Search index](./assets/manual-deployment-steps.png)](./assets/manual-deployment-steps.png)
+
+<sub>Editable source: [`assets/manual-deployment-steps.drawio`](./assets/manual-deployment-steps.drawio) - regenerate with `python scripts/export_diagrams.py docs/assets`.</sub>
+
+> [!NOTE]
 > **What this document is.** A no-IaC, click-through walkthrough that provisions the **Azure resources** in the pattern (RG, Key Vault, Storage, Microsoft Foundry + 2 model deployments + built-in Document Intelligence, AI Search, RBAC, and the AI Search index / data source / indexer). The same Azure end-state is reproducible with [Bicep](./04-deployment-automated.md) — use this manual path when you want to learn the components hands-on or for one-off demo labs; use Bicep for repeatable / CI deployments.
 
+> [!IMPORTANT]
 > **What this document is NOT.** It does **not** cover the Fabric ingestion pipeline or the Copilot Studio agent. Both of those layers are always manual (no IaC surface exists for them today) and have their own dedicated runbooks:
 >
 > - **Fabric** (workspace, identity, Lakehouse, OneLake shortcut, control table, ingest pipeline) → [03b-fabric-setup.md](./03b-fabric-setup.md)
-> - **Copilot Studio** (agent, AI Search knowledge source binding, channel publishing) → [03c-copilot-studio-setup.md](./03c-copilot-studio-setup.md)
+> - **Copilot Studio** ![Default](./assets/badges/default.svg) (agent, AI Search knowledge source binding, channel publishing) → [03c-copilot-studio-setup.md](./03c-copilot-studio-setup.md)
 >
-> The full end-to-end build sequence — Azure (this doc or Bicep) → Fabric → Copilot Studio — is orchestrated by [00-reproduce-this-demo.md](./00-reproduce-this-demo.md).
+> The full end-to-end build sequence — Azure (this doc or Bicep) → Fabric → Copilot Studio — is orchestrated by [00-reproduce-this-demo.md](./00-reproduce-this-demo.md). The ![Optional](./assets/badges/optional.svg) Foundry Agent Service alternative to Copilot Studio is covered in [03d-foundry-agent-setup.md](./03d-foundry-agent-setup.md).
 
+> [!NOTE]
 > **Build order matters.** Phases are sequential because each depends on artifacts from the prior phase. Within a phase, steps are also sequential unless explicitly marked parallel-safe.
 
 ---
@@ -40,6 +69,34 @@ In between Phase 1 and Phase 4 you switch to **[03b-fabric-setup.md](./03b-fabri
 
 ---
 
+## Step 0 — Verify tenant and subscription (before any command)
+
+> [!WARNING]
+> **Never trust the ambient `az` account.** The active Azure CLI account silently drifts across tenants and subscriptions whenever any other `az login` runs on the machine. A bare `az group create` or `az account get-access-token` can therefore provision into — or mint a token for — the **wrong tenant and subscription**. Resolve the intended **tenant ID** and **subscription ID** first (if you do not know them, ask the owner — never guess), verify the active context matches, and re-authenticate when it does not. Use placeholders below; never commit real GUIDs.
+
+| ☐ | Step 0 gate | Command / expected result |
+|---|---|---|
+| ☐ | Resolve the target | `$TENANT = "<TENANT_ID>"` and `$SUB = "<SUBSCRIPTION_ID>"` from your deployment plan |
+| ☐ | Verify the active context | `az account show --query "{tenant:tenantId, subscription:id, subName:name, user:user.name}" -o table` — tenant and subscription **must equal** `$TENANT` / `$SUB` |
+| ☐ | Re-authenticate if they differ | `az login --tenant $TENANT`, then `az account set --subscription $SUB` |
+| ☐ | Re-verify | Run the `az account show` command again and confirm the match before continuing |
+
+```pwsh
+$TENANT = "<TENANT_ID>"
+$SUB    = "<SUBSCRIPTION_ID>"
+
+az account show --query "{tenant:tenantId, subscription:id, subName:name, user:user.name}" -o table
+
+# Only if the tenant or subscription above does not match:
+az login --tenant $TENANT            # add --use-device-code when no browser is available
+az account set --subscription $SUB
+az account show --query "{tenant:tenantId, subscription:id, subName:name, user:user.name}" -o table
+```
+
+Keep `$TENANT` and `$SUB` defined in the same terminal for the rest of this runbook: resource commands below pass `--subscription $SUB`, and token requests pass `--tenant $TENANT`.
+
+---
+
 ## Phase 1 — Foundation
 
 ### 1.1 Create the resource group
@@ -48,7 +105,7 @@ In between Phase 1 and Phase 4 you switch to **[03b-fabric-setup.md](./03b-fabri
 $LOC = "eastus"
 $RG  = "rg-rag-demo-eus"
 
-az group create --name $RG --location $LOC
+az group create --subscription $SUB --name $RG --location $LOC
 ```
 
 ### 1.2 Create Key Vault
@@ -57,6 +114,7 @@ az group create --name $RG --location $LOC
 $KV = "kv-rag-demo-eus"
 
 az keyvault create `
+  --subscription $SUB `
   --name $KV --resource-group $RG --location $LOC `
   --enable-rbac-authorization true
 
@@ -79,6 +137,7 @@ az role assignment create `
 $ST = "stragdemoeus"
 
 az storage account create `
+  --subscription $SUB `
   --name $ST --resource-group $RG --location $LOC `
   --sku Standard_LRS `
   --kind StorageV2 `
@@ -232,6 +291,9 @@ Fabric workspace identity → Blob (Data Contributor) and DI-caller SP → Found
 
 ## Phases 2 and 3 — Fabric setup
 
+> [!IMPORTANT]
+> Phases 2 and 3 are a hand-off to [03b-fabric-setup.md](./03b-fabric-setup.md). Return here for Phase 4 only after 03b's validation checklist is fully checked.
+
 The Fabric workspace, Lakehouse, OneLake shortcut, control Delta table, connections (Key Vault + Blob), pipeline notebooks, and the Data Pipeline itself are all manual and **identical for both the manual and the automated Azure path**.
 
 👉 **Follow [03b-fabric-setup.md](./03b-fabric-setup.md) end-to-end now**, then come back here to continue with [Phase 4 — AI Search index](#phase-4--ai-search-index). The 10 Fabric phases (F0–F10) cover tenant prerequisites, workspace + identity, Lakehouse, OneLake shortcut, control table, connections, pipeline notebooks, the `pl_ingest_docs` Data Pipeline, end-to-end validation, and pipeline scheduling.
@@ -245,7 +307,7 @@ The Fabric workspace, Lakehouse, OneLake shortcut, control Delta table, connecti
 > **Auth model.** Admin keys are disabled on the AI Search service (from Phase 1.6). Every REST call below must include an Entra bearer token:
 >
 > ```pwsh
-> $TOKEN = az account get-access-token --resource https://search.azure.com --query accessToken -o tsv
+> $TOKEN = az account get-access-token --tenant $TENANT --resource https://search.azure.com --query accessToken -o tsv
 > # then add the header to every PUT/POST/GET:
 > #   -H "Authorization: Bearer $TOKEN"
 > ```
@@ -431,7 +493,7 @@ Content-Type: application/json
 ### 4.5 Run the indexer manually
 
 ```pwsh
-$TOKEN = az account get-access-token --resource https://search.azure.com --query accessToken -o tsv
+$TOKEN = az account get-access-token --tenant $TENANT --resource https://search.azure.com --query accessToken -o tsv
 
 curl.exe -X POST `
   -H "Authorization: Bearer $TOKEN" `
@@ -508,6 +570,9 @@ Confirm:
 
 ## Next: build the Copilot Studio agent
 
+> [!TIP]
+> Prefer the Foundry Agent Service ![Optional](./assets/badges/optional.svg) instead? Use [03d-foundry-agent-setup.md](./03d-foundry-agent-setup.md) after Fabric; Copilot Studio ![Default](./assets/badges/default.svg) remains the default.
+
 The Azure platform layer is complete. The remaining step is to build the **Copilot Studio agent** on top of the populated AI Search index. Copilot Studio is Power Platform (not Azure) and is **always manual** regardless of which Azure deployment path you took.
 
 👉 **Continue to [03c-copilot-studio-setup.md](./03c-copilot-studio-setup.md)** for agent creation, AI Search knowledge source binding, generative-answers configuration, and Teams + M365 Copilot channel publishing.
@@ -515,6 +580,9 @@ The Azure platform layer is complete. The remaining step is to build the **Copil
 ---
 
 ## Post-deployment checklist (Azure layer)
+
+> [!NOTE]
+> Treat the exported RBAC inventory as the rotation surface — there are no API keys to rotate in this pattern.
 
 Once Phases 1 + 4 validate green and Fabric ([03b](./03b-fabric-setup.md)) + Copilot Studio ([03c](./03c-copilot-studio-setup.md)) are complete, proceed to [05-testing.md](./05-testing.md) to run the full test suite.
 
@@ -528,6 +596,8 @@ Once Phases 1 + 4 validate green and Fabric ([03b](./03b-fabric-setup.md)) + Cop
 - [ ] **Auth posture audited:** Foundry / DI / AI Search show **Local authentication: Disabled**; Storage shows **Allow storage account key access: Disabled**
 - [ ] **RBAC inventory exported:** the role assignments from Phase 1.7 documented per environment (these become the rotation surface in place of API keys)
 
+**Next:** [03b — Fabric setup](./03b-fabric-setup.md)
+
 ---
 
-*Last updated: 2026-05-24*
+*Last updated: 2026-10-02*

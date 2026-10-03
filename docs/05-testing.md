@@ -1,26 +1,71 @@
+[README](../README.md) › [docs index](./00-reproduce-this-demo.md) › 05 Testing
+
 # 05 — Testing
 
-End-to-end test plan for the RAG knowledge-base pattern. Run these tests after [03-deployment-manual.md](./03-deployment-manual.md) (or [04-deployment-automated.md](./04-deployment-automated.md)) Phase 4 validation passes **and** the Copilot Studio agent in [03c-copilot-studio-setup.md](./03c-copilot-studio-setup.md) is built — the manual and automated Azure paths converge to the same end-state, and Fabric ([03b](./03b-fabric-setup.md)) + Copilot Studio ([03c](./03c-copilot-studio-setup.md)) layer on top identically for both.
+<p>
+<img src="./assets/icons/ai-search.svg" width="40" alt="Azure AI Search"/>&nbsp;
+<img src="./assets/icons/foundry-models.svg" width="40" alt="Foundry Models"/>&nbsp;
+<img src="./assets/icons/blob-block.svg" width="40" alt="Blob storage"/>&nbsp;
+<img src="./assets/icons/data-factory.svg" width="40" alt="Data pipeline"/>&nbsp;
+<img src="./assets/icons/entra-id.svg" width="40" alt="Microsoft Entra ID"/>&nbsp;
+<img src="./assets/icons/code.svg" width="40" alt="Tests"/>
+</p>
+
+![version](./assets/badges/version.svg) ![Static only](./assets/badges/static-only.svg)
+
+End-to-end test plan for the RAG knowledge-base pattern. It answers one question: *how do I prove the pipeline, the index, the retrieval quality, the agent experience and the security trimming actually work before a demo or a production change?* Run these tests after [03-deployment-manual.md](./03-deployment-manual.md) (or [04-deployment-automated.md](./04-deployment-automated.md)) Phase 4 validation passes **and** the Copilot Studio agent in [03c-copilot-studio-setup.md](./03c-copilot-studio-setup.md) is built — the manual and automated Azure paths converge to the same end-state, and Fabric ([03b](./03b-fabric-setup.md)) + Copilot Studio ([03c](./03c-copilot-studio-setup.md)) layer on top identically for both.
 
 > **Purpose.** Catch regressions early, prove retrieval quality before a demo, and provide a repeatable evaluation harness that travels with the pattern to new deployments.
+
+> [!IMPORTANT]
+> **This is a test *plan*, not a record of passing runs.** The repository ships an offline pytest suite for the AI Search payload builder (26 tests, none touch Azure) and doc-lint tests. Nothing in the CHANGELOG or docs records a dated live run of categories A–G against a deployed environment, so every category below is badged **Static only** until you run it and record the result. See [Validation status](#validation-status).
+
+## At a glance
+
+| | Topic | One-line answer |
+|---|---|---|
+| <img src="./assets/icons/data-factory.svg" width="24" alt=""/> | **Pipeline (A)** | New file, idempotent re-run, update, failure recovery, chunk sanity |
+| <img src="./assets/icons/ai-search.svg" width="24" alt=""/> | **Index (B)** | Document count, vector field, semantic ranker, citation linkback |
+| <img src="./assets/icons/foundry-models.svg" width="24" alt=""/> | **Quality (C, D)** | Golden Q&A set with recall@5 / MRR, then hybrid vs semantic A/B |
+| <img src="./assets/icons/entra-id.svg" width="24" alt=""/> | **Security (G)** | `group_ids` `$filter` returns only chunks the caller's groups may see |
+| <img src="./assets/icons/code.svg" width="24" alt=""/> | **Offline suite** | `python -m pytest scripts/tests -q` runs 26 payload tests, none touch Azure |
+
+[![Testing matrix (page 1 of 3)](./assets/testing-matrix-1.png)](./assets/testing-matrix-1.png)
+
+[![Testing matrix (page 2 of 3)](./assets/testing-matrix-2.png)](./assets/testing-matrix-2.png)
+
+[![Testing matrix (page 3 of 3)](./assets/testing-matrix-3.png)](./assets/testing-matrix-3.png)
+
+<sub>Editable source: [`assets/testing-matrix.drawio`](./assets/testing-matrix.drawio) - regenerate with `python scripts/export_diagrams.py docs/assets`.</sub>
 
 ---
 
 ## Test categories
 
-| Category | Goal | Cadence |
-|---|---|---|
-| **A. Pipeline functional** | Ingest → OCR → chunk → index path works end-to-end with no errors | Every deployment; after every pipeline change |
-| **B. Index quality smoke** | Index has correct shape, semantic ranker fires, citations are present | Every deployment |
-| **C. Retrieval quality (golden set)** | Top-K retrieval recall + ranking on a known Q&A set | Before a demo; quarterly post-launch |
-| **D. Semantic ranker A/B** | Quantify the lift from semantic ranker vs hybrid-only | Once per pattern instance |
-| **E. End-to-end demo script** | The lived user experience in Teams / M365 Copilot | Day-of-demo dry run |
-| **F. Regression** | Cumulative checks before any production change | After every change to chunking, index schema, or agent config |
-| **G. Document-level security** | Chunk-level access trimming returns only documents the caller is authorized to see | After any change to `group_ids` population or the security model |
+| Category | Goal | Cadence | Validation |
+|---|---|---|---|
+| **A. Pipeline functional** | Ingest → OCR → chunk → index path works end-to-end with no errors | Every deployment; after every pipeline change | ![Static only](./assets/badges/static-only.svg) |
+| **B. Index quality smoke** | Index has correct shape, semantic ranker fires, citations are present | Every deployment | ![Static only](./assets/badges/static-only.svg) |
+| **C. Retrieval quality (golden set)** | Top-K retrieval recall + ranking on a known Q&A set | Before a demo; quarterly post-launch | ![Static only](./assets/badges/static-only.svg) |
+| **D. Semantic ranker A/B** | Quantify the lift from semantic ranker vs hybrid-only | Once per pattern instance | ![Static only](./assets/badges/static-only.svg) |
+| **E. End-to-end demo script** | The lived user experience in Teams / M365 Copilot | Day-of-demo dry run | ![Static only](./assets/badges/static-only.svg) |
+| **F. Regression** | Cumulative checks before any production change | After every change to chunking, index schema, or agent config | ![Static only](./assets/badges/static-only.svg) |
+| **G. Document-level security** | Chunk-level access trimming returns only documents the caller is authorized to see | After any change to `group_ids` population or the security model | ![Static only](./assets/badges/static-only.svg) |
+
+> [!NOTE]
+> The badge describes the evidence recorded **in this repo** for the test procedure, not how often you should run it. The offline payload tests *do* run (see [Validation status](#validation-status)); the procedures themselves are runbooks you execute against your own deployment.
 
 ---
 
 ## A — Pipeline functional tests
+
+| Test | Provokes | Pass when |
+|---|---|---|
+| <img src="./assets/icons/blob-block.svg" width="20" alt=""/> **A1** New file | One new source document + manual trigger | New control-table row (`ocr_status`/`chunk_status` = `succeeded`), `raw/` blob, N chunk JSONs |
+| <img src="./assets/icons/data-factory.svg" width="20" alt=""/> **A2** Idempotency | Second run, no source change | Zero new rows, blob writes or indexer changes |
+| <img src="./assets/icons/file.svg" width="20" alt=""/> **A3** Update | Modified source, same name | New `file_id`, new row + chunks (old chunks remain) |
+| <img src="./assets/icons/managed-identity.svg" width="20" alt=""/> **A4** Failure recovery | Revoke a role, run, restore, re-run | `index_status=failed` + `last_error`, then `succeeded` |
+| <img src="./assets/icons/code.svg" width="20" alt=""/> **A5** Chunk sanity | Compare chunks to the original | Overlap present, token budget respected, page numbers monotonic |
 
 ### A1. New file ingestion
 
@@ -295,6 +340,13 @@ For the live demo, have **rehearsed answer text** ready for each question in cas
 
 ## F — Regression checklist
 
+| Gate | Re-run | Compare against |
+|---|---|---|
+| <img src="./assets/icons/data-factory.svg" width="20" alt=""/> **Pipeline** | A1–A5 | Previous run's control-table outcomes |
+| <img src="./assets/icons/ai-search.svg" width="20" alt=""/> **Index** | B1–B4 | Expected document count and vector dimensionality |
+| <img src="./assets/icons/foundry-models.svg" width="20" alt=""/> **Retrieval** | C2 | Last baseline in `results/` (degradation > 5 % = roll back) |
+| <img src="./assets/icons/entra-id.svg" width="20" alt=""/> **Security** | G1–G3 | Restricted chunk present for in-group, absent for out-of-group |
+
 Before any production change (chunking, schema, agent config, model version):
 
 - [ ] Re-run pipeline functional tests (A1–A5)
@@ -389,4 +441,27 @@ Confirm a chunk written with `group_ids: []` is treated as open (G1/G2 both retu
 
 ---
 
-*Last updated: 2026-05-21*
+## Validation status
+
+An honest record of what has been validated **in this repository** (evidence from the repo's own tests, docs and [CHANGELOG](../CHANGELOG.md)), versus what remains a runbook for you to execute.
+
+| Layer | Evidence in this repo | Status |
+|---|---|---|
+| <img src="./assets/icons/code.svg" width="20" alt=""/> **AI Search payload builder** (`scripts/post_deploy_search.py`) | `scripts/tests/test_post_deploy_search.py`: 26 offline tests (index schema, `group_ids` filterable string collection, vector dimensions, vectorizer, semantic config, datasource, indexer, skillset). Last confirmed run: 26 passed, no Azure calls. | ![Static only](./assets/badges/static-only.svg) |
+| <img src="./assets/icons/file.svg" width="20" alt=""/> **Doc visuals / links** | `tests/test_doc_visuals.py` runs `scripts/lint_doc_visuals.py` | ![Static only](./assets/badges/static-only.svg) |
+| <img src="./assets/icons/resource-group.svg" width="20" alt=""/> **Bicep platform** (`infra/`) | Compiled template `infra/main.json` is committed; no dated deployment result is recorded | ![Static only](./assets/badges/static-only.svg) |
+| <img src="./assets/icons/ai-search.svg" width="20" alt=""/> **Categories A–F** (this page) | Runbook with acceptance thresholds; no recorded live run in the docs or CHANGELOG | ![Static only](./assets/badges/static-only.svg) |
+| <img src="./assets/icons/entra-id.svg" width="20" alt=""/> **Category G** (document-level security) | Runnable `$filter` queries added in v1.2; the CHANGELOG records them as the demonstrable example, not as a recorded run | ![Static only](./assets/badges/static-only.svg) |
+| <img src="./assets/icons/foundry-agent-service.svg" width="20" alt=""/> **Agent paths** (03c / 03d) and **web app** ([09](./09-foundry-agent-webapp.md)) | Validation checklists in each doc; no recorded live results | ![Static only](./assets/badges/static-only.svg) |
+
+> [!WARNING]
+> **No `live-tested` badge appears in this demo.** The docs and CHANGELOG record no dated end-to-end run, so nothing is claimed as live-tested. When you run a category against a real deployment, record the date and results (for example under `tests/results/`) before upgrading its badge. The acceptance thresholds in [C3](#c3-acceptance-thresholds) are starting points, not measured results, and the benchmark lift in [D3](#d3-compare) is quoted from Microsoft benchmarks, not measured here.
+
+> [!TIP]
+> Re-run the offline suite any time you touch `post_deploy_search.py`: `python -m pytest scripts/tests -q`. It is the only automated check in the repo and needs no Azure access.
+
+---
+
+Next: [06 - Troubleshooting](./06-troubleshooting.md) →
+
+*Last updated: 2026-10-02*

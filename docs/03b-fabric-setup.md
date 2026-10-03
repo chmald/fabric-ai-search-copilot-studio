@@ -1,14 +1,45 @@
+[README](../README.md) › [docs index](./00-reproduce-this-demo.md) › 03b Fabric setup
+
 # 03b — Fabric setup (manual — both deployment paths)
+
+<p align="center">
+  <img src="./assets/icons/storage.svg" width="40" alt="Lakehouse and OneLake storage">&nbsp;&nbsp;
+  <img src="./assets/icons/data-factory.svg" width="40" alt="Fabric Data Pipeline">&nbsp;&nbsp;
+  <img src="./assets/icons/document-intelligence.svg" width="40" alt="Document Intelligence">&nbsp;&nbsp;
+  <img src="./assets/icons/key-vault.svg" width="40" alt="Key Vault">&nbsp;&nbsp;
+  <img src="./assets/icons/managed-identity.svg" width="40" alt="Workspace identity">&nbsp;&nbsp;
+  <img src="./assets/icons/ai-search.svg" width="40" alt="Azure AI Search">
+</p>
+
+![Version](./assets/badges/version.svg) ![Manual path](./assets/badges/manual-path.svg) ![Static only](./assets/badges/static-only.svg)
 
 The Fabric layer of this pattern is **always manual**. Neither the manual Azure path ([03-deployment-manual.md](./03-deployment-manual.md)) nor the Bicep-automated path ([04-deployment-automated.md](./04-deployment-automated.md)) can provision Fabric items today — Fabric workspaces, Lakehouses, OneLake shortcuts, and Data Pipelines have no Bicep/ARM resource provider as of this pattern's publication, and the [Fabric REST APIs](https://learn.microsoft.com/en-us/rest/api/fabric/articles/) for items are only partially covered for automation.
 
+## At a glance
+
+| | Item | Detail |
+|---|---|---|
+| <img src="./assets/icons/storage.svg" width="24" alt=""/> | **Lakehouse** `lh_rag_<env>` | Source shortcut, `control_table_files` Delta table, per-run `_tmp_new_files` handoff |
+| <img src="./assets/icons/managed-identity.svg" width="24" alt=""/> | **Workspace identity** | Keyless auth to Blob and Key Vault via trusted workspace access |
+| <img src="./assets/icons/dev-console.svg" width="24" alt=""/> | **Notebooks** | Lookup, OCR + chunk + upload, control-table updates |
+| <img src="./assets/icons/data-factory.svg" width="24" alt=""/> | **Pipeline** `pl_ingest_docs` | Lookup → ForEach → Copy → OCR/chunk → status updates |
+| <img src="./assets/icons/gear.svg" width="24" alt=""/> | **Effort** | 2–3 hours first build; 45–60 minutes on rebuilds |
+
+[![Fabric setup flow: workspace, workspace identity, Lakehouse, OneLake shortcut, control table, Blob connection, notebooks, pipeline, validate and schedule](./assets/fabric-setup-flow.png)](./assets/fabric-setup-flow.png)
+
+<sub>Editable source: [`assets/fabric-setup-flow.drawio`](./assets/fabric-setup-flow.drawio) - regenerate with `python scripts/export_diagrams.py docs/assets`.</sub>
+
+> [!IMPORTANT]
 > **Run this doc after Azure platform layer is up.** You need the Azure resources from [03-deployment-manual.md § Phase 1](./03-deployment-manual.md#phase-1--foundation) (manual) **or** the deployment outputs from [04-deployment-automated.md § Step 3](./04-deployment-automated.md) (automated) before you can wire the Fabric pipeline to them. Specifically you need: the storage account name, the **Microsoft Foundry resource's Cognitive Services endpoint** (which serves the Document Intelligence `prebuilt-read` API — there is no separate FormRecognizer resource in this pattern), and a Key Vault that holds the DI-caller service principal's client secret (no DI / Foundry API keys are stored anywhere; all DI calls go through the SP via MSAL).
 
+> [!TIP]
 > **Time budget.** First-time Fabric build: **2–3 hours** end-to-end. Subsequent rebuilds in the same tenant: **45–60 minutes** once the workspace identity, connections, and notebook artifacts can be reused.
 
 ---
 
 ## What you'll build
+
+<details><summary><b>Text view of the full build (Azure side, workspace, Lakehouse, notebooks, pipeline)</b></summary>
 
 ```
 Azure side (one-time setup)
@@ -51,6 +82,8 @@ Fabric workspace (ws-rag-<env>)
         └── On-error handler           → nb_update_control_table (status=failed, last_error)
 ```
 
+</details>
+
 **Design rationale at a glance.** Document Intelligence is called from a notebook (not a pipeline Web activity) and the pipeline contains no `Until` loop — both choices work around real Fabric constraints documented in [Appendix A.1](#a1-no-web-activity-until-or-child-pipeline). The auth model uses Fabric's workspace identity for Blob + Key Vault and a dedicated service principal (`sp-rag-di-caller`) for Document Intelligence, scoped to the Foundry resource that hosts the DI endpoint — explained in [Appendix A.2](#a2-msal--service-principal-for-document-intelligence). All Azure services have local-key auth disabled; there are no API keys to store or rotate.
 
 ---
@@ -89,7 +122,13 @@ Trial capacity (60-day) is acceptable for an initial build, but plan to move to 
 
 ## Phase F1 — Create the workspace
 
-In the **[Fabric portal](https://app.fabric.microsoft.com/)**:
+| Step | | Action | Gate |
+|---|---|---|---|
+| **1** | <img src="./assets/icons/folder.svg" width="28" alt=""> | **Workspaces → + New workspace**; name `ws-rag-<env>` and add a description | ☐ Name and description set |
+| **2** | <img src="./assets/icons/gear.svg" width="28" alt=""> | **Advanced → License mode → Fabric capacity** (from F0.2); leave default storage format; **Apply** | ☐ Workspace created |
+| **3** | <img src="./assets/icons/file.svg" width="28" alt=""> | Record `workspaceId` and `workspaceName` in `demo-ids.local.json` | ☐ Values recorded |
+
+Details for each step, in the **[Fabric portal](https://app.fabric.microsoft.com/)**:
 
 1. **Workspaces** (left nav) → **+ New workspace**
 2. **Name:** `ws-rag-<env>` (e.g. `ws-rag-demo`, `ws-rag-prod`)
@@ -98,6 +137,7 @@ In the **[Fabric portal](https://app.fabric.microsoft.com/)**:
 5. **Default storage format** → leave as **Small dataset storage format** (lakehouse uses Delta regardless)
 6. **Apply**
 
+> [!WARNING]
 > **Do not use a "My workspace".** My workspaces cannot have a workspace identity (Phase F2) and cannot be shared. Personal workspaces are not viable for this pattern.
 
 Confirm the workspace appears in **Workspaces** with your capacity name shown.
@@ -107,6 +147,12 @@ Record `workspaceId` and `workspaceName` in `demo-ids.local.json` under `fabric.
 ---
 
 ## Phase F2 — Create the workspace identity
+
+| Step | | Action | Gate |
+|---|---|---|---|
+| **1** | <img src="./assets/icons/managed-identity.svg" width="28" alt=""> | Workspace settings → **Workspace identity** → **+ Workspace identity** | ☐ State is **Active** |
+| **2** | <img src="./assets/icons/key-vault.svg" width="28" alt=""> | Grant it Blob and Key Vault roles (F2.1) | ☐ Roles assigned (allow up to 15 min) |
+| **3** | <img src="./assets/icons/app-registrations.svg" width="28" alt=""> | Create the DI-caller service principal and store its secret (F2.2) | ☐ Secret `di-sp-secret` in Key Vault |
 
 This is the **single most important Fabric setup step** in this pattern. The workspace identity is a managed service principal that lets your pipeline authenticate to Azure Blob Storage (and other Entra-protected services) **without keys or secrets**, using trusted workspace access. Without it you fall back to account keys (insecure) or SAS tokens (operationally painful).
 
@@ -120,6 +166,7 @@ Reference: [Fabric workspace identity overview](https://learn.microsoft.com/en-u
 
 Behind the scenes, Fabric creates a service principal + app registration in Microsoft Entra ID. You can see it in the Azure portal under **Microsoft Entra ID → Enterprise applications** filtered by the workspace name — **do not modify it there**.
 
+> [!NOTE]
 > **Trusted workspace access.** Because the workspace has an identity, OneLake shortcuts and pipeline activities running in this workspace can use **trusted workspace access** to reach firewall-protected Azure Data Lake Storage Gen2 / Blob accounts. This is the only path that works cleanly for production environments where the storage account has the public network disabled. See [Trusted workspace access](https://learn.microsoft.com/en-us/fabric/security/security-trusted-workspace-access).
 
 ### F2.1 Grant the workspace identity the required roles
@@ -147,6 +194,7 @@ az role assignment create `
   --scope $KV_RES_ID
 ```
 
+> [!CAUTION]
 > **Propagation:** Azure role assignments to Fabric workspace identities can take up to **15 minutes** to be honored end-to-end (Fabric token cache + Azure RBAC cache). If your first pipeline run fails with `401 Unauthorized` or `403 Forbidden`, wait and retry before debugging further.
 
 ### F2.2 Create a DI-caller service principal (for MSAL from the notebook)
@@ -200,6 +248,14 @@ For Document Intelligence (`https://cognitiveservices.azure.com/`), the supporte
 
 ## Phase F3 — Create the Lakehouse
 
+| Step | | Action | Gate |
+|---|---|---|---|
+| **1** | <img src="./assets/icons/storage.svg" width="28" alt=""> | **+ New item → Lakehouse** named `lh_rag_<env>` (schemas off) | ☐ Lakehouse created |
+| **2** | <img src="./assets/icons/sql-database.svg" width="28" alt=""> | Confirm the SQL analytics endpoint and OneLake location were provisioned | ☐ Endpoint visible in Settings |
+| **3** | <img src="./assets/icons/file.svg" width="28" alt=""> | Record `lakehouseId`, `lakehouseName`, `lakehouseSqlEndpoint` | ☐ Values recorded |
+
+Details for each step:
+
 1. Inside the workspace: **+ New item** (or **+ New** depending on UI version) → **Lakehouse**
 2. **Name:** `lh_rag_<env>` (lowercase, underscores — Lakehouse name allows underscores; do NOT use hyphens)
 3. **Enable schemas** → leave **off** for this pattern (the control table doesn't need a custom schema)
@@ -221,15 +277,23 @@ Reference: [What is a lakehouse in Microsoft Fabric?](https://learn.microsoft.co
 
 The pattern is source-agnostic: the OneLake shortcut layer normalizes whatever upstream document store you use (SharePoint Online, ADLS Gen2, S3, GCS, etc.) into a unified `Files/source_docs/` location that the pipeline reads from.
 
-| Source | Shortcut type | Reference |
-|---|---|---|
-| **SharePoint Online document library** | OneLake shortcut → Microsoft 365 / Microsoft Dataverse → SharePoint Online | [Create a Dataverse / SharePoint shortcut](https://learn.microsoft.com/en-us/fabric/onelake/onelake-shortcuts) |
-| **Azure Data Lake Storage Gen2** | OneLake shortcut → ADLS Gen2 | [Create an ADLS Gen2 shortcut](https://learn.microsoft.com/en-us/fabric/onelake/create-adls-shortcut) |
-| **Azure Blob (separate account)** | OneLake shortcut → ADLS Gen2 (Blob is exposed via the dfs endpoint) | Same as above |
-| **Amazon S3 / GCS** | OneLake shortcut → S3 / GCS | [Create an S3 shortcut](https://learn.microsoft.com/en-us/fabric/onelake/create-s3-shortcut) |
-| **File share / FTP / mailbox** | No shortcut — use a scheduled **Copy data** pipeline activity to land files into `Files/source_docs/` | [Copy data activity](https://learn.microsoft.com/en-us/fabric/data-factory/copy-data-activity) |
+| | Source | Shortcut type | Reference |
+|---|---|---|---|
+| <img src="./assets/icons/folder.svg" width="24" alt=""/> | **SharePoint Online document library** | OneLake shortcut → Microsoft 365 / Microsoft Dataverse → SharePoint Online | [Create a Dataverse / SharePoint shortcut](https://learn.microsoft.com/en-us/fabric/onelake/onelake-shortcuts) |
+| <img src="./assets/icons/storage.svg" width="24" alt=""/> | **Azure Data Lake Storage Gen2** | OneLake shortcut → ADLS Gen2 | [Create an ADLS Gen2 shortcut](https://learn.microsoft.com/en-us/fabric/onelake/create-adls-shortcut) |
+| <img src="./assets/icons/blob-block.svg" width="24" alt=""/> | **Azure Blob (separate account)** | OneLake shortcut → ADLS Gen2 (Blob is exposed via the dfs endpoint) | Same as above |
+| <img src="./assets/icons/file.svg" width="24" alt=""/> | **Amazon S3 / GCS** | OneLake shortcut → S3 / GCS | [Create an S3 shortcut](https://learn.microsoft.com/en-us/fabric/onelake/create-s3-shortcut) |
+| <img src="./assets/icons/data-factory.svg" width="24" alt=""/> | **File share / FTP / mailbox** | No shortcut — use a scheduled **Copy data** pipeline activity to land files into `Files/source_docs/` | [Copy data activity](https://learn.microsoft.com/en-us/fabric/data-factory/copy-data-activity) |
 
 ### F4.1 Create the shortcut (default demo source: SharePoint Online)
+
+| Step | | Action | Gate |
+|---|---|---|---|
+| **1** | <img src="./assets/icons/folder.svg" width="28" alt=""> | Lakehouse Explorer → right-click **Files** → **New shortcut** → pick the external source | ☐ Connector dialog open |
+| **2** | <img src="./assets/icons/entra-id.svg" width="28" alt=""> | Create the connection: URL, authentication kind, privacy level | ☐ Connection validates |
+| **3** | <img src="./assets/icons/file.svg" width="28" alt=""> | Select the library/folder; name the shortcut `source_docs`; **Create** | ☐ `Files/source_docs/` is browsable |
+
+Details for each step:
 
 Reference: [Create an internal OneLake shortcut](https://learn.microsoft.com/en-us/fabric/onelake/create-onelake-shortcut) (the menu paths are the same for external sources — only the connector selection differs).
 
@@ -265,9 +329,17 @@ The control table is the pattern's source-of-truth for file processing state. On
 
 ### F5.1 Create the notebook `nb_create_control_table`
 
+| Step | | Action | Gate |
+|---|---|---|---|
+| **1** | <img src="./assets/icons/dev-console.svg" width="28" alt=""> | **+ New item → Notebook** named `nb_create_control_table` | ☐ Notebook created |
+| **2** | <img src="./assets/icons/storage.svg" width="28" alt=""> | **Add lakehouse** → `lh_rag_<env>` | ☐ Lakehouse attached |
+| **3** | <img src="./assets/icons/code.svg" width="28" alt=""> | Paste the cell below and run it once | ☐ `control_table_files` exists |
+
 1. Inside the workspace: **+ New item → Notebook** → name `nb_create_control_table`
 2. In the notebook, attach the lakehouse: **Add lakehouse** (left pane) → select `lh_rag_<env>` → **Add**
 3. Paste the following cell and run it once:
+
+<details><summary><b>Show the control-table notebook cell</b></summary>
 
 ```python
 from pyspark.sql.types import (
@@ -301,6 +373,8 @@ empty.write.format("delta").mode("overwrite").saveAsTable("control_table_files")
 print("control_table_files created.")
 ```
 
+</details>
+
 > **Why `overwrite`?** Idempotent setup — re-running drops & recreates the empty table. Once the pipeline has produced rows, never re-run this notebook in `overwrite` mode in a live environment; use `mode("ignore")` after first build to make the cell a true no-op.
 
 4. Confirm the table appears under **Tables** in the Lakehouse explorer and is queryable from the SQL analytics endpoint:
@@ -320,6 +394,15 @@ Fabric pipelines authenticate to external services through **connections**. For 
 Reference: [Connector overview](https://learn.microsoft.com/fabric/data-factory/connector-overview) and [Set up your Azure Blob Storage connection](https://learn.microsoft.com/fabric/data-factory/connector-azure-blob-storage).
 
 ### F6.1 Azure Blob Storage connection (for Copy activity to raw/)
+
+| Step | | Action | Gate |
+|---|---|---|---|
+| **1** | <img src="./assets/icons/gear.svg" width="28" alt=""> | Gear icon → **Manage connections and gateways → Connections → + New** | ☐ New-connection dialog open |
+| **2** | <img src="./assets/icons/blob-block.svg" width="28" alt=""> | Type **Azure Blob Storage**; account URL `https://<storage-account>.blob.core.windows.net` | ☐ Endpoint entered |
+| **3** | <img src="./assets/icons/entra-id.svg" width="28" alt=""> | Authentication: **Organizational account** or **Service principal** — never Account key | ☐ Auth kind chosen |
+| **4** | <img src="./assets/icons/file.svg" width="28" alt=""> | Name it `blob-rag-<env>`; **Create** | ☐ Connection saved |
+
+Details for each step:
 
 1. **Fabric portal → top-right gear icon → Manage connections and gateways → Connections → + New**
 2. **Connection type:** **Azure Blob Storage**
@@ -351,6 +434,8 @@ Then in supported connectors that take a credential, use the **AKV reference** i
 
 In a quick scratch notebook (with the lakehouse attached), confirm the workspace identity can reach Blob:
 
+<details><summary><b>Show the test and cleanup cells</b></summary>
+
 ```python
 blob_account = "<storage-account>"
 container    = "raw"
@@ -373,17 +458,27 @@ notebookutils.fs.rm(
 )
 ```
 
+</details>
+
 ---
 
 ## Phase F7 — Author the pipeline notebooks
 
 The pipeline calls three notebooks. Create them now so the pipeline activities in Phase F8 can reference them.
 
+| Step | | Action | Gate |
+|---|---|---|---|
+| **1** | <img src="./assets/icons/dev-console.svg" width="28" alt=""> | Create `nb_lookup_new_files` (F7.1) and attach `lh_rag_<env>` | ☐ Notebook saved |
+| **2** | <img src="./assets/icons/code.svg" width="28" alt=""> | Create `nb_ocr_chunk_upload` (F7.2); install packages or attach an Environment | ☐ Notebook saved, packages resolved |
+| **3** | <img src="./assets/icons/sql-database.svg" width="28" alt=""> | Create `nb_update_control_table` (F7.3) | ☐ Notebook saved |
+
 ### F7.1 `nb_lookup_new_files`
 
 Parameters expected (set as **parameters cell** at the top — the pipeline passes them in):
 
 - `source_path` (string) — the Files-relative path to scan, e.g. `Files/source_docs/`
+
+<details><summary><b>Show the <code>nb_lookup_new_files</code> notebook code</b></summary>
 
 ```python
 # Parameters
@@ -469,6 +564,8 @@ exit_payload = json.dumps({
 notebookutils.notebook.exit(exit_payload)
 ```
 
+</details>
+
 > **`notebookutils.notebook.exit(value)`** returns a single string from a notebook activity (use `json.dumps(...)` for structured data). The legacy `mssparkutils` namespace still works but is being retired. See [NotebookUtils notebook run and orchestration](https://learn.microsoft.com/fabric/data-engineering/notebookutils/notebookutils-notebook-run#exit-a-notebook).
 >
 > **Retry behavior.** The lookup picks up brand-new files **and** any row in `control_table_files` where any per-stage status is `'failed'` (unless `tombstoned = true`). `mark_pending` uses `MERGE … WHEN MATCHED THEN UPDATE`, so retries flip the existing row through `pending` → `succeeded`/`failed` automatically. The exit payload reports `{"new_count": N, "retry_count": M, "total": N+M}`. Full operating playbook (manual retry, tombstoning a corrupt file, bulk reprocess): [06-troubleshooting.md § 3.11](./06-troubleshooting.md#311-failed-files-are-not-retried-on-the-next-pipeline-run). Background on the staging-table design: [Appendix A.3](#a3-staging-delta-table-for-the-foreach-handoff).
@@ -495,6 +592,8 @@ Parameters expected:
 - `di_sp_client_id` (string) — from F2.2 step 1
 - `di_sp_secret_name` (string) — default `di-sp-secret`
 
+<details><summary><b>Show the parameters and package-install cells</b></summary>
+
 ```python
 # Parameters (overridden by pipeline)
 file_id           = ""
@@ -515,10 +614,13 @@ di_sp_secret_name = "di-sp-secret"
 %pip install azure-ai-documentintelligence==1.0.0 azure-storage-blob==12.21.0 azure-core==1.30.2 msal==1.30.0 "pyjwt>=2.6.0" tiktoken==0.7.0 --quiet
 ```
 
+</details>
 > **`%pip install` is disabled in pipeline runs by default.** Per [Manage Apache Spark libraries in Microsoft Fabric](https://learn.microsoft.com/fabric/data-engineering/library-management#inline-installation), Fabric blocks inline `%pip` in pipeline-triggered notebook runs (it works fine in interactive runs from the notebook editor). You have two ways to make the cell above work from the pipeline:
 >
 > - **Quick fix** — pass `_inlineInstallationEnabled = true` as a **base parameter** on the `ocr_chunk_upload` notebook activity in the pipeline (see [F8.7](#f87-activity-2c--ocr--chunk--upload-notebook)). This re-enables `%pip` for that specific activity. Best for demo / proof-of-concept.
 > - **Production pattern (recommended)** — create a Fabric **Environment** (e.g. `env-rag-<env>`) with these packages installed in **Full mode**, then attach the environment to `nb_ocr_chunk_upload`. Once the environment is attached, **delete the `%pip install` cell** (libraries are loaded by Fabric when the Spark session starts). See [Manage libraries in Fabric environments](https://learn.microsoft.com/fabric/data-engineering/environment-manage-library). Full mode adds 1–3 minutes to session startup but eliminates per-run resolution variance.
+
+<details><summary><b>Show the <code>nb_ocr_chunk_upload</code> main notebook code</b></summary>
 
 ```python
 import json
@@ -666,6 +768,8 @@ for i, c in enumerate(chunks):
 notebookutils.notebook.exit(json.dumps({"chunk_count": len(chunks)}))
 ```
 
+</details>
+
 > **`urlSource` access requires the Foundry resource's managed identity** (Document Intelligence runs inside the Foundry account in this pattern) to have **Storage Blob Data Reader** on the storage account (shared-key access is disabled). The Bicep `rbac.bicep` module grants this automatically; manual deployments wire it in [03-deployment-manual.md § 1.7 step 3](./03-deployment-manual.md#17-rbac-wiring). If you see `InvalidContent: Could not download the file` at runtime, see [06-troubleshooting.md § 3.9](./06-troubleshooting.md#39-document-intelligence-invalidcontent-could-not-download-the-file).
 >
 > Rationale for the MSAL + SP auth model (rather than using the workspace identity directly): [Appendix A.2](#a2-msal--service-principal-for-document-intelligence).
@@ -685,6 +789,8 @@ Parameters expected:
 - `chunk_count` (int, optional)
 - `status` (string) — one of `pending`, `succeeded`, `failed`
 - `last_error` (string, optional)
+
+<details><summary><b>Show the <code>nb_update_control_table</code> notebook code</b></summary>
 
 ```python
 # Parameters
@@ -779,9 +885,18 @@ import json
 notebookutils.notebook.exit(json.dumps({"file_id": file_id, "status": status}))
 ```
 
+</details>
+
 ---
 
 ## Phase F8 — Build the Data Pipeline
+
+| Step | | Action | Gate |
+|---|---|---|---|
+| **1** | <img src="./assets/icons/data-factory.svg" width="28" alt=""> | Create the pipeline `pl_ingest_docs`; declare the 9 parameters (F8.0) | ☐ Parameters saved |
+| **2** | <img src="./assets/icons/dev-console.svg" width="28" alt=""> | Add `lookup_new_files` → `refresh_sql_endpoint` → `lookup_new_files_rows` (F8.1–F8.3) | ☐ Activities chained with green arrows |
+| **3** | <img src="./assets/icons/storage.svg" width="28" alt=""> | Add the ForEach with Copy → `mark_pending` → `ocr_chunk_upload` → `mark_succeeded` (F8.4–F8.8) | ☐ Four inner activities in sequence |
+| **4** | <img src="./assets/icons/alerts.svg" width="28" alt=""> | Attach the `mark_failed` handler to the red arrow (F8.9) | ☐ Failure path wired |
 
 1. Inside the workspace: **+ New item → Data pipeline** → name `pl_ingest_docs` → **Create**
 2. Open the pipeline.
@@ -814,6 +929,7 @@ Reference: [Transform data by running a notebook (Fabric)](https://learn.microso
 
 ### F8.2 Activity [1.5] — Refresh SQL Endpoint
 
+> [!IMPORTANT]
 > **Required** because the Lookup activity in [F8.3](#f83-activity-1--lookup-read-_tmp_new_files-for-the-foreach) reads `_tmp_new_files` via the Lakehouse SQL analytics endpoint, but `nb_lookup_new_files` wrote that table through Spark. The SQL endpoint syncs Delta metadata via a **background process** — syncs can lag seconds to minutes behind Spark writes ([SQL analytics endpoint metadata sync](https://learn.microsoft.com/fabric/data-engineering/sql-analytics-endpoint-metadata-sync)). Without this refresh, the first run will Lookup zero rows and the ForEach will iterate zero times, even though `nb_lookup_new_files` just wrote N rows. Microsoft's first documented [common scenario for this activity](https://learn.microsoft.com/fabric/data-factory/refresh-sql-endpoint-activity#common-scenarios) is exactly this case: *"Refreshing the SQL endpoint after a Notebook writes transformed data to a Lakehouse."*
 
 Drag a **Refresh SQL Endpoint** activity after `lookup_new_files`. Connect with the green (success) arrow.
@@ -925,6 +1041,13 @@ On the **red (failure) arrow** of any of [2a] / [2c], add a final **Notebook** a
 
 ## Phase F9 — Validate end-to-end
 
+| Step | | Action | Gate |
+|---|---|---|---|
+| **1** | <img src="./assets/icons/data-factory.svg" width="28" alt=""> | Save and **Run** `pl_ingest_docs`; watch the Output tab (F9.1) | ☐ Every activity succeeded |
+| **2** | <img src="./assets/icons/sql-database.svg" width="28" alt=""> | Query `control_table_files`; inspect `raw/` and `chunks/` (F9.2) | ☐ One succeeded row per file, `chunk_count > 0` |
+| **3** | <img src="./assets/icons/gear.svg" width="28" alt=""> | Re-run with no source changes (F9.3) | ☐ `new_count = 0`, zero new writes |
+| **4** | <img src="./assets/icons/ai-search.svg" width="28" alt=""> | Check the indexer status (F9.4) | ☐ `lastResult.status = "success"` |
+
 ### F9.1 Sample run
 
 1. Open the pipeline `pl_ingest_docs` → **Save** → **Run**
@@ -983,6 +1106,12 @@ GET https://<search-svc>.search.windows.net/indexers/ixr-chunks/status?api-versi
 
 ## Phase F10 — Schedule the pipeline
 
+| Step | | Action | Gate |
+|---|---|---|---|
+| **1** | <img src="./assets/icons/data-factory.svg" width="28" alt=""> | Open `pl_ingest_docs` → **Schedule**; status **On** | ☐ Schedule enabled |
+| **2** | <img src="./assets/icons/gear.svg" width="28" alt=""> | Repeat every 30 min (batch) or 5 min (low-latency demo) → **Apply** | ☐ Schedule applied |
+| **3** | <img src="./assets/icons/file.svg" width="28" alt=""> | Record the pipeline GUID under `fabric.pipelineId` | ☐ Value recorded |
+
 For demo, leave on manual trigger. For ongoing operation:
 
 1. Open `pl_ingest_docs` → **Schedule**
@@ -997,6 +1126,16 @@ Record the pipeline GUID in `demo-ids.local.json` under `fabric.pipelineId`.
 ---
 
 ## Validation checklist
+
+| | Gate group | Confirms |
+|---|---|---|
+| <img src="./assets/icons/gear.svg" width="24" alt=""/> | ☐ **Tenant and capacity** | F0.1 settings confirmed; F-SKU capacity (not trial in prod) assigned to the workspace |
+| <img src="./assets/icons/managed-identity.svg" width="24" alt=""/> | ☐ **Identity and RBAC** | Workspace identity Active; Storage Blob Data Contributor and Key Vault Secrets User granted; `sp-rag-di-caller` created with Cognitive Services User and its secret in Key Vault |
+| <img src="./assets/icons/storage.svg" width="24" alt=""/> | ☐ **Lakehouse and source** | `lh_rag_<env>` with `control_table_files`; `Files/source_docs/` shortcut shows documents; Blob connection `blob-rag-<env>` tested |
+| <img src="./assets/icons/data-factory.svg" width="24" alt=""/> | ☐ **Pipeline** | Three notebooks runnable; 9 parameters declared; end-to-end run succeeds; re-run is a no-op |
+| <img src="./assets/icons/ai-search.svg" width="24" alt=""/> | ☐ **Hand-off** | Control table, `raw/` and `chunks/` populated; AI Search indexer picks up chunks within 5 min |
+
+Full checklist:
 
 - [ ] Tenant settings F0.1 confirmed by Fabric admin
 - [ ] Capacity assigned to workspace (F-SKU, not trial in prod)
@@ -1022,7 +1161,16 @@ When all boxes are checked → continue to [03c-copilot-studio-setup.md](./03c-c
 
 ## Troubleshooting pointers
 
-Common Fabric-layer issues are catalogued in [06-troubleshooting.md](./06-troubleshooting.md):
+Common Fabric-layer issues are catalogued in [06-troubleshooting.md](./06-troubleshooting.md). Quick triage by layer:
+
+| | Layer | Start here |
+|---|---|---|
+| <img src="./assets/icons/folder.svg" width="24" alt=""/> | **Shortcut / source** | [§ 2 OneLake and source attachment](./06-troubleshooting.md#2--onelake--source-attachment) |
+| <img src="./assets/icons/data-factory.svg" width="24" alt=""/> | **Pipeline activities** | [§ 3.5](./06-troubleshooting.md#35-copy-activity-fails-with-pathnotfound-and-an-abfss-uri-in-the-path), [§ 3.6](./06-troubleshooting.md#36-lookup-activity-returns-zero-rows-after-a-spark-write), [§ 3.4](./06-troubleshooting.md#34-pipeline-runs-duplicate-files) |
+| <img src="./assets/icons/code.svg" width="24" alt=""/> | **Notebooks** | [§ 3.7](./06-troubleshooting.md#37-nb_ocr_chunk_upload-cant-authenticate-to-document-intelligence) – [§ 3.11](./06-troubleshooting.md#311-failed-files-are-not-retried-on-the-next-pipeline-run) |
+| <img src="./assets/icons/managed-identity.svg" width="24" alt=""/> | **RBAC** | [§ 1.1 propagation lag](./06-troubleshooting.md#11-rbac-propagation-lag) |
+
+Detailed symptom list:
 
 - **OneLake shortcut shows no files / can't be read** → [§ 2](./06-troubleshooting.md#2--onelake--source-attachment)
 - **`copy_raw_to_blob` fails with `PathNotFound` and an `abfss:/...` URI in the path** → [§ 3.5](./06-troubleshooting.md#35-copy-activity-fails-with-pathnotfound-and-an-abfss-uri-in-the-path) — `nb_lookup_new_files` is writing absolute abfss URIs instead of paths relative to `Files/`
@@ -1108,6 +1256,16 @@ If the storage account firewall is locked down (private endpoints or `defaultAct
 
 Authoritative Microsoft Learn pages this guide tracks (verified against current Microsoft Learn at publication):
 
+| | Topic | Start with |
+|---|---|---|
+| <img src="./assets/icons/managed-identity.svg" width="24" alt=""/> | **Tenant, workspace, identity** | [Workspace identity](https://learn.microsoft.com/fabric/security/workspace-identity), [Trusted workspace access](https://learn.microsoft.com/fabric/security/security-trusted-workspace-access) |
+| <img src="./assets/icons/storage.svg" width="24" alt=""/> | **Lakehouse and OneLake** | [Lakehouse overview](https://learn.microsoft.com/fabric/data-engineering/lakehouse-overview), [OneLake shortcuts](https://learn.microsoft.com/fabric/onelake/create-onelake-shortcut) |
+| <img src="./assets/icons/data-factory.svg" width="24" alt=""/> | **Pipeline and activities** | [Notebook activity](https://learn.microsoft.com/fabric/data-factory/notebook-activity), [Refresh SQL Endpoint](https://learn.microsoft.com/fabric/data-factory/refresh-sql-endpoint-activity) |
+| <img src="./assets/icons/code.svg" width="24" alt=""/> | **Notebook utilities** | [NotebookUtils](https://learn.microsoft.com/fabric/data-engineering/notebook-utilities), [MSAL for Python](https://learn.microsoft.com/entra/msal/python/) |
+| <img src="./assets/icons/document-intelligence.svg" width="24" alt=""/> | **Document Intelligence** | [Python SDK](https://learn.microsoft.com/python/api/overview/azure/ai-documentintelligence-readme), [prebuilt-read](https://learn.microsoft.com/azure/ai-services/document-intelligence/prebuilt/read) |
+
+Full list:
+
 **Fabric tenant + workspace + identity**
 
 - [About tenant settings](https://learn.microsoft.com/fabric/admin/about-tenant-settings)
@@ -1155,4 +1313,6 @@ Authoritative Microsoft Learn pages this guide tracks (verified against current 
 
 ---
 
-*Last updated: 2026-05-22*
+Next: [03c - Copilot Studio agent setup](./03c-copilot-studio-setup.md) →
+
+*Last updated: 2026-10-02*
