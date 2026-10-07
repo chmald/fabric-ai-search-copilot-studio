@@ -1,6 +1,6 @@
-[README](../README.md) › [docs index](./00-reproduce-this-demo.md) › 03 Manual deployment
+[README](../README.md) › [docs index](./00-reproduce-this-demo.md) › 03b Manual deployment
 
-# 03 — Azure platform layer — Manual deployment (portal + CLI)
+# 03b — Azure platform layer — Manual deployment (portal + CLI)
 
 <p>
 <img src="./assets/icons/resource-group.svg" width="40" alt="Resource group"/>&nbsp;
@@ -21,7 +21,7 @@ Step-by-step manual build of the **Azure platform layer** of the RAG knowledge-b
 |---|---|---|---|
 | <img src="./assets/icons/azure-devops.svg" width="24" alt=""/> | **Step 0** | Tenant-explicit sign-in check | 5 min |
 | <img src="./assets/icons/resource-group.svg" width="24" alt=""/> | **1** | Foundation: RG, Key Vault, Blob, Foundry (+ DI), AI Search, RBAC | 60–90 min |
-| <img src="./assets/icons/folder.svg" width="24" alt=""/> | **2–3** | Fabric setup — see [03b](./03b-fabric-setup.md) | separate runbook |
+| <img src="./assets/icons/folder.svg" width="24" alt=""/> | **2–3** | Fabric setup — see [06](./06-fabric-setup.md) | separate runbook |
 | <img src="./assets/icons/ai-search.svg" width="24" alt=""/> | **4** | AI Search index, skillset, indexer | 45–60 min |
 
 [![Manual deployment steps: sign-in check, Azure foundation, Fabric hand-off, AI Search index](./assets/manual-deployment-steps.png)](./assets/manual-deployment-steps.png)
@@ -29,15 +29,15 @@ Step-by-step manual build of the **Azure platform layer** of the RAG knowledge-b
 <sub>Editable source: [`assets/manual-deployment-steps.drawio`](./assets/manual-deployment-steps.drawio) - regenerate with `python scripts/export_diagrams.py docs/assets`.</sub>
 
 > [!NOTE]
-> **What this document is.** A no-IaC, click-through walkthrough that provisions the **Azure resources** in the pattern (RG, Key Vault, Storage, Microsoft Foundry + 2 model deployments + built-in Document Intelligence, AI Search, RBAC, and the AI Search index / data source / indexer). The same Azure end-state is reproducible with [Bicep](./04-deployment-automated.md) — use this manual path when you want to learn the components hands-on or for one-off demo labs; use Bicep for repeatable / CI deployments.
+> **What this document is.** A no-IaC, click-through walkthrough that provisions the **Azure resources** in the pattern (RG, Key Vault, Storage, Microsoft Foundry + 2 model deployments + built-in Document Intelligence, AI Search, RBAC, and the AI Search index / data source / indexer). The same Azure end-state is reproducible with [Bicep](./03-deployment.md) — use this manual path when you want to learn the components hands-on or for one-off demo labs; use Bicep for repeatable / CI deployments.
 
 > [!IMPORTANT]
 > **What this document is NOT.** It does **not** cover the Fabric ingestion pipeline or the Copilot Studio agent. Both of those layers are always manual (no IaC surface exists for them today) and have their own dedicated runbooks:
 >
-> - **Fabric** (workspace, identity, Lakehouse, OneLake shortcut, control table, ingest pipeline) → [03b-fabric-setup.md](./03b-fabric-setup.md)
-> - **Copilot Studio** ![Default](./assets/badges/default.svg) (agent, AI Search knowledge source binding, channel publishing) → [03c-copilot-studio-setup.md](./03c-copilot-studio-setup.md)
+> - **Fabric** (workspace, identity, Lakehouse, OneLake shortcut, control table, ingest pipeline) → [06-fabric-setup.md](./06-fabric-setup.md)
+> - **Copilot Studio** ![Default](./assets/badges/default.svg) (agent, AI Search knowledge source binding, channel publishing) → [07-copilot-studio-setup.md](./07-copilot-studio-setup.md)
 >
-> The full end-to-end build sequence — Azure (this doc or Bicep) → Fabric → Copilot Studio — is orchestrated by [00-reproduce-this-demo.md](./00-reproduce-this-demo.md). The ![Optional](./assets/badges/optional.svg) Foundry Agent Service alternative to Copilot Studio is covered in [03d-foundry-agent-setup.md](./03d-foundry-agent-setup.md).
+> The full end-to-end build sequence — Azure (this doc or Bicep) → Fabric → Copilot Studio — is orchestrated by [00-reproduce-this-demo.md](./00-reproduce-this-demo.md). The ![Optional](./assets/badges/optional.svg) Foundry Agent Service alternative to Copilot Studio is covered in [08-foundry-agent-setup.md](./08-foundry-agent-setup.md).
 
 > [!NOTE]
 > **Build order matters.** Phases are sequential because each depends on artifacts from the prior phase. Within a phase, steps are also sequential unless explicitly marked parallel-safe.
@@ -48,9 +48,9 @@ Step-by-step manual build of the **Azure platform layer** of the RAG knowledge-b
 
 | Layer | Owner | Doc | Automatable? |
 |---|---|---|---|
-| **Azure platform** (RG, KV, Storage, Foundry+DI, AI Search, RBAC, index/indexer) | This doc | **03 (this doc, manual)** or [04 (Bicep)](./04-deployment-automated.md) | Yes — via Bicep + post-deploy Python script |
-| **Fabric workspace + ingest pipeline** | Fabric tenant admin + builder | [03b-fabric-setup.md](./03b-fabric-setup.md) | No — Fabric workspaces / Lakehouses / pipelines have no Bicep / ARM provider today |
-| **Copilot Studio agent + publishing** | Power Platform admin + builder | [03c-copilot-studio-setup.md](./03c-copilot-studio-setup.md) | No — Power Platform, not Azure |
+| **Azure platform** (RG, KV, Storage, Foundry+DI, AI Search, RBAC, index/indexer) | This doc | **03 (this doc, manual)** or [03 (Bicep)](./03-deployment.md) | Yes — via Bicep + post-deploy Python script |
+| **Fabric workspace + ingest pipeline** | Fabric tenant admin + builder | [06-fabric-setup.md](./06-fabric-setup.md) | No — Fabric workspaces / Lakehouses / pipelines have no Bicep / ARM provider today |
+| **Copilot Studio agent + publishing** | Power Platform admin + builder | [07-copilot-studio-setup.md](./07-copilot-studio-setup.md) | No — Power Platform, not Azure |
 
 ## Phase overview (this doc)
 
@@ -59,9 +59,9 @@ Step-by-step manual build of the **Azure platform layer** of the RAG knowledge-b
 | **1** | **Azure foundation:** RG + Key Vault + Blob + Microsoft Foundry (multi-service — includes both OpenAI deployments and Document Intelligence) + AI Search + RBAC | 60–90 min | All Azure resources deployed; identities + RBAC set |
 | **4** | **AI Search index:** schema, integrated vectorizer, hybrid + semantic configuration; indexer pointed at Blob `chunks/` | 45–60 min | Indexer run succeeds; sample query returns chunks with semantic captions |
 
-In between Phase 1 and Phase 4 you switch to **[03b-fabric-setup.md](./03b-fabric-setup.md)** to build the Fabric ingest pipeline (which produces the chunk JSON files in Blob `chunks/` that the Phase 4 indexer consumes). After Phase 4 validates, switch to **[03c-copilot-studio-setup.md](./03c-copilot-studio-setup.md)** to build the agent on top of the populated index.
+In between Phase 1 and Phase 4 you switch to **[06-fabric-setup.md](./06-fabric-setup.md)** to build the Fabric ingest pipeline (which produces the chunk JSON files in Blob `chunks/` that the Phase 4 indexer consumes). After Phase 4 validates, switch to **[07-copilot-studio-setup.md](./07-copilot-studio-setup.md)** to build the agent on top of the populated index.
 
-> **Why phases 2, 3, and 5 are not in this document.** They are the Fabric layer (§03b) and Copilot Studio layer (§03c) respectively. Phase numbering for the Azure-side phases is preserved across versions so existing cross-references (testing, troubleshooting, orchestrator) continue to resolve.
+> **Why phases 2, 3, and 5 are not in this document.** They are the Fabric layer (§06) and Copilot Studio layer (§07) respectively. Phase numbering for the Azure-side phases is preserved across versions so existing cross-references (testing, troubleshooting, orchestrator) continue to resolve.
 
 **Total Azure-only manual build: roughly 2–3 hours of hands-on time.** Full demo (Azure + Fabric + Copilot Studio): **4–6 hours** — see [00-reproduce-this-demo.md](./00-reproduce-this-demo.md) for the orchestrated time budget.
 
@@ -119,7 +119,7 @@ az keyvault create `
   --enable-rbac-authorization true
 
 # Grant yourself Key Vault Secrets Officer on the vault — required for the rest of
-# the build (DI-caller SP secret in 03b § F2.2 step 3, any future connector creds).
+# the build (DI-caller SP secret in 06 § F2.2 step 3, any future connector creds).
 # Without this you'll hit `403 Forbidden` on `az keyvault secret set` later.
 $ME_OBJID  = az ad signed-in-user show --query id -o tsv
 $KV_RES_ID = az keyvault show --name $KV --query id -o tsv
@@ -129,7 +129,7 @@ az role assignment create `
   --scope $KV_RES_ID
 ```
 
-> The Bicep path grants this automatically when `deployerPrincipalId` is set in `main.parameters.local.json` (see [04-deployment-automated.md](./04-deployment-automated.md)). For the manual path you grant it yourself.
+> The Bicep path grants this automatically when `deployerPrincipalId` is set in `main.parameters.local.json` (see [03-deployment.md](./03-deployment.md)). For the manual path you grant it yourself.
 
 ### 1.3 Create Storage account + containers
 
@@ -166,7 +166,7 @@ In the Azure portal:
 3. Pricing tier: **Standard S0**
 4. After deployment: open **Microsoft Foundry portal** (foundry.azure.com) → select the resource → **Models + endpoints → Deploy a model**:
    - Deploy `text-embedding-3-large` → name it `embedding` (set capacity to 10K TPM for demo)
-   - **(Optional)** Deploy `gpt-4o` → name it `chat`. The locked design does **not** consume a chat completion model — Copilot Studio uses its own host model for generative answers. Only deploy a chat model when a deployment explicitly needs a chat endpoint (custom app code, Foundry agent runtime, BYOM Copilot Studio).
+   - **(Optional)** Deploy a current GA chat model (e.g. `gpt-5.5`, deployment type Global Standard) → name it `chat`. The locked design does **not** consume a chat completion model — Copilot Studio uses its own host model for generative answers. Only deploy a chat model when a deployment explicitly needs a chat endpoint (custom app code, Foundry agent runtime, BYOM Copilot Studio).
    - (Optional) browse the Foundry catalog for non-OpenAI models if you plan to extend later; this pattern only requires the embedding deployment above
 5. Confirm endpoints — the **Endpoints** view shows both host names for this single resource:
    - `https://aif-rag-demo-eus.openai.azure.com/` — used by the AI Search OpenAI vectorizer + embedding skill
@@ -180,7 +180,7 @@ In the Azure portal:
      --properties '{"disableLocalAuth": true}'
    ```
 
-No keys are stored anywhere. The AI Search service uses its system-assigned managed identity to call the embedding deployment — both at **query time** (the `azureOpenAI` vectorizer on the index, configured in § 4.1) **and at index time** (the `AzureOpenAIEmbeddingSkill` in the skillset, configured in § 4.3). Both call paths require the MI to have **Cognitive Services OpenAI User** on this resource (granted in step 1.7 — *not* the similarly-named **Cognitive Services User** role, which doesn't include OpenAI data-plane access). The Fabric OCR notebook calls Document Intelligence on the same resource using its own dedicated service principal (see [03b-fabric-setup.md § F2.2](./03b-fabric-setup.md#f22-create-a-di-caller-service-principal-for-msal-from-the-notebook)) with **Cognitive Services User** on the same resource.
+No keys are stored anywhere. The AI Search service uses its system-assigned managed identity to call the embedding deployment — both at **query time** (the `azureOpenAI` vectorizer on the index, configured in § 4.1) **and at index time** (the `AzureOpenAIEmbeddingSkill` in the skillset, configured in § 4.3). Both call paths require the MI to have **Cognitive Services OpenAI User** on this resource (granted in step 1.7 — *not* the similarly-named **Cognitive Services User** role, which doesn't include OpenAI data-plane access). The Fabric OCR notebook calls Document Intelligence on the same resource using its own dedicated service principal (see [06-fabric-setup.md § F2.2](./06-fabric-setup.md#f22-create-a-di-caller-service-principal-for-msal-from-the-notebook)) with **Cognitive Services User** on the same resource.
 
 ### 1.6 Create AI Search
 
@@ -188,7 +188,7 @@ In the Azure portal:
 
 1. **Create a resource → Azure AI Search**
 2. Same RG, region
-3. **Pricing tier: Standard (S1)** — semantic ranker is NOT available below this
+3. **Pricing tier: Standard (S1)** — the default. **Basic** also works (semantic ranker, integrated vectorization and managed identity are all supported) and is cheaper for a demo; Free does not (no managed identity)
 4. Replicas: 1, Partitions: 1
 5. **Networking** — leave Public network access enabled for demo; lock down with private endpoints for production
 6. **Identity → System assigned → Status: On → Save** (note the object ID — needed in step 1.7)
@@ -224,7 +224,7 @@ $ST_RES_ID   = az storage account show --name $ST -g $RG --query id -o tsv
 #    non-OpenAI Cognitive Services (Document Intelligence, Translator, etc.) but
 #    does NOT cover Azure OpenAI / Foundry OpenAI deployments. Using the wrong
 #    role causes the indexer to succeed while silently committing documents with
-#    a null content_vector (see docs/06-troubleshooting.md § 4.1).
+#    a null content_vector (see docs/05-troubleshooting.md § 4.1).
 az role assignment create `
   --assignee-object-id $SEARCH_OBJID --assignee-principal-type ServicePrincipal `
   --role "Cognitive Services OpenAI User" `
@@ -261,7 +261,7 @@ az role assignment create `
   --role "Storage Blob Data Contributor" `
   --scope $ST_RES_ID
 
-# 6. You → Key Vault (set/read secrets — needed for 03b § F2.2 step 3 where you
+# 6. You → Key Vault (set/read secrets — needed for 06 § F2.2 step 3 where you
 #    store the DI-caller SP secret, and any later connector credentials).
 #    If you already ran this in § 1.2, this re-issue is idempotent.
 $KV_RES_ID = az keyvault show --name $KV --query id -o tsv
@@ -273,7 +273,7 @@ az role assignment create `
 
 > **Propagation:** Azure role assignments take up to **15 minutes** to be honored, especially cross-resource-type assignments (Search MI → Foundry, Search MI → Storage). If subsequent steps return 401 or 403, wait and retry before debugging further.
 
-Fabric workspace identity → Blob (Data Contributor) and DI-caller SP → Foundry (Cognitive Services User) are configured later from the Fabric side once the workspace identity / SP exist, in [03b-fabric-setup.md §§ F2.1–F2.2](./03b-fabric-setup.md#f21-grant-the-workspace-identity-the-required-roles). Skip them here.
+Fabric workspace identity → Blob (Data Contributor) and DI-caller SP → Foundry (Cognitive Services User) are configured later from the Fabric side once the workspace identity / SP exist, in [06-fabric-setup.md §§ F2.1–F2.2](./06-fabric-setup.md#f21-grant-the-workspace-identity-the-required-roles). Skip them here.
 
 ### Phase 1 validation
 
@@ -283,7 +283,7 @@ Fabric workspace identity → Blob (Data Contributor) and DI-caller SP → Found
 - [ ] AI Search system-assigned MI has both role assignments visible in IAM (**Cognitive Services OpenAI User** on Foundry, **Storage Blob Data Reader** on Storage). Verify the OpenAI variant of the role specifically — a plain `Cognitive Services User` assignment will let the indexer run but produce zero-vector documents.
 - [ ] Foundry resource system-assigned MI has **Storage Blob Data Reader** on the storage account (required for Document Intelligence `urlSource` fetches)
 - [ ] You have **Search Service Contributor** + **Search Index Data Contributor** on the AI Search service
-- [ ] Foundry resource has the `embedding` (text-embedding-3-large) deployment. A `chat` (gpt-4o) deployment is **optional** — only deploy one if you've opted in for a deployment-specific extension (the locked design does not require it).
+- [ ] Foundry resource has the `embedding` (text-embedding-3-large) deployment. A `chat` deployment (e.g. gpt-5.5) is **optional** — only deploy one if you've opted in for a deployment-specific extension (the locked design does not require it).
 - [ ] Foundry resource exposes **both** host names: `<name>.openai.azure.com` (OpenAI / vectorizer) and `<name>.cognitiveservices.azure.com` (Document Intelligence and other Cognitive Services)
 - [ ] Key Vault exists and you have **Key Vault Secrets Officer** on it (used later if any secret-based fallback becomes necessary; this pattern stores no API keys in it)
 
@@ -292,13 +292,13 @@ Fabric workspace identity → Blob (Data Contributor) and DI-caller SP → Found
 ## Phases 2 and 3 — Fabric setup
 
 > [!IMPORTANT]
-> Phases 2 and 3 are a hand-off to [03b-fabric-setup.md](./03b-fabric-setup.md). Return here for Phase 4 only after 03b's validation checklist is fully checked.
+> Phases 2 and 3 are a hand-off to [06-fabric-setup.md](./06-fabric-setup.md). Return here for Phase 4 only after 06's validation checklist is fully checked.
 
 The Fabric workspace, Lakehouse, OneLake shortcut, control Delta table, connections (Key Vault + Blob), pipeline notebooks, and the Data Pipeline itself are all manual and **identical for both the manual and the automated Azure path**.
 
-👉 **Follow [03b-fabric-setup.md](./03b-fabric-setup.md) end-to-end now**, then come back here to continue with [Phase 4 — AI Search index](#phase-4--ai-search-index). The 10 Fabric phases (F0–F10) cover tenant prerequisites, workspace + identity, Lakehouse, OneLake shortcut, control table, connections, pipeline notebooks, the `pl_ingest_docs` Data Pipeline, end-to-end validation, and pipeline scheduling.
+👉 **Follow [06-fabric-setup.md](./06-fabric-setup.md) end-to-end now**, then come back here to continue with [Phase 4 — AI Search index](#phase-4--ai-search-index). The 10 Fabric phases (F0–F10) cover tenant prerequisites, workspace + identity, Lakehouse, OneLake shortcut, control table, connections, pipeline notebooks, the `pl_ingest_docs` Data Pipeline, end-to-end validation, and pipeline scheduling.
 
-**Do not proceed to Phase 4 below until 03b's validation checklist is fully checked** — Phase 4 requires chunk JSON files to be landing in Blob `chunks/` for the indexer to be testable end-to-end.
+**Do not proceed to Phase 4 below until 06's validation checklist is fully checked** — Phase 4 requires chunk JSON files to be landing in Blob `chunks/` for the indexer to be testable end-to-end.
 
 ---
 
@@ -408,7 +408,7 @@ Using the `ResourceId=...;` connection string enables **managed-identity authent
 >
 > To populate `content_vector` for each indexed chunk at ingestion time, you need a **skillset** with an `AzureOpenAIEmbeddingSkill`, and you wire that skill's output into the index's `content_vector` field via the indexer's `outputFieldMappings` (added in [§ 4.4](#44-create-the-indexer) below).
 >
-> **Skip this step** and the indexer will run cleanly with `itemsProcessed: N`, zero errors, zero warnings — but every document will have a null `content_vector`, the service's `vectorIndexSize` will stay at `0`, and Copilot Studio queries (which are vector-first) will return nothing. See [06-troubleshooting.md § 4.1](./06-troubleshooting.md#41-vectorizer-auth-failure-loud-or-silent) for the silent-failure signature.
+> **Skip this step** and the indexer will run cleanly with `itemsProcessed: N`, zero errors, zero warnings — but every document will have a null `content_vector`, the service's `vectorIndexSize` will stay at `0`, and Copilot Studio queries (which are vector-first) will return nothing. See [05-troubleshooting.md § 4.1](./05-troubleshooting.md#41-vectorizer-auth-failure-loud-or-silent) for the silent-failure signature.
 
 ```http
 PUT https://srch-rag-demo-eus.search.windows.net/skillsets/skill-rag-embeddings?api-version=2024-07-01
@@ -520,7 +520,7 @@ A successful run shows `lastResult.status = "success"` and `itemsProcessed` matc
 >   | Select-Object documentCount, vectorIndexSize, storageSize
 > ```
 >
-> If `documentCount > 0` but `vectorIndexSize: 0`, you're hitting silent vectorizer failure — almost always the missing skillset (§ 4.3 skipped) or the wrong role on the AI Search MI (plain `Cognitive Services User` instead of `Cognitive Services OpenAI User`). See [06-troubleshooting.md § 4.1](./06-troubleshooting.md#41-vectorizer-auth-failure-loud-or-silent).
+> If `documentCount > 0` but `vectorIndexSize: 0`, you're hitting silent vectorizer failure — almost always the missing skillset (§ 4.3 skipped) or the wrong role on the AI Search MI (plain `Cognitive Services User` instead of `Cognitive Services OpenAI User`). See [05-troubleshooting.md § 4.1](./05-troubleshooting.md#41-vectorizer-auth-failure-loud-or-silent).
 
 ### 4.6 Smoke-test the index
 
@@ -571,11 +571,11 @@ Confirm:
 ## Next: build the Copilot Studio agent
 
 > [!TIP]
-> Prefer the Foundry Agent Service ![Optional](./assets/badges/optional.svg) instead? Use [03d-foundry-agent-setup.md](./03d-foundry-agent-setup.md) after Fabric; Copilot Studio ![Default](./assets/badges/default.svg) remains the default.
+> Prefer the Foundry Agent Service ![Optional](./assets/badges/optional.svg) instead? Use [08-foundry-agent-setup.md](./08-foundry-agent-setup.md) after Fabric; Copilot Studio ![Default](./assets/badges/default.svg) remains the default.
 
 The Azure platform layer is complete. The remaining step is to build the **Copilot Studio agent** on top of the populated AI Search index. Copilot Studio is Power Platform (not Azure) and is **always manual** regardless of which Azure deployment path you took.
 
-👉 **Continue to [03c-copilot-studio-setup.md](./03c-copilot-studio-setup.md)** for agent creation, AI Search knowledge source binding, generative-answers configuration, and Teams + M365 Copilot channel publishing.
+👉 **Continue to [07-copilot-studio-setup.md](./07-copilot-studio-setup.md)** for agent creation, AI Search knowledge source binding, generative-answers configuration, and Teams + M365 Copilot channel publishing.
 
 ---
 
@@ -584,20 +584,20 @@ The Azure platform layer is complete. The remaining step is to build the **Copil
 > [!NOTE]
 > Treat the exported RBAC inventory as the rotation surface — there are no API keys to rotate in this pattern.
 
-Once Phases 1 + 4 validate green and Fabric ([03b](./03b-fabric-setup.md)) + Copilot Studio ([03c](./03c-copilot-studio-setup.md)) are complete, proceed to [05-testing.md](./05-testing.md) to run the full test suite.
+Once Phases 1 + 4 validate green and Fabric ([06](./06-fabric-setup.md)) + Copilot Studio ([07](./07-copilot-studio-setup.md)) are complete, proceed to [04-testing.md](./04-testing.md) to run the full test suite.
 
 - [ ] All Phase 1 + Phase 4 validation boxes checked
-- [ ] Fabric pipeline scheduled (not just on-demand) — see [03b § F10](./03b-fabric-setup.md#phase-f10--schedule-the-pipeline)
+- [ ] Fabric pipeline scheduled (not just on-demand) — see [06 § F10](./06-fabric-setup.md#phase-f10--schedule-the-pipeline)
 - [ ] AI Search indexer scheduled (set in [§ 4.4](#44-create-the-indexer) above with `"interval": "PT5M"`)
-- [ ] Copilot Studio agent published to Teams + M365 Copilot — see [03c § C5](./03c-copilot-studio-setup.md#phase-c5--publish-to-channels)
+- [ ] Copilot Studio agent published to Teams + M365 Copilot — see [07 § C5](./07-copilot-studio-setup.md#phase-c5--publish-to-channels)
 - [ ] Cost alerts configured on the resource group
 - [ ] Backup / disaster-recovery plan written (at minimum: re-runnable pipeline from `raw/` blob)
 - [ ] Owners identified for ongoing operation
 - [ ] **Auth posture audited:** Foundry / DI / AI Search show **Local authentication: Disabled**; Storage shows **Allow storage account key access: Disabled**
 - [ ] **RBAC inventory exported:** the role assignments from Phase 1.7 documented per environment (these become the rotation surface in place of API keys)
 
-**Next:** [03b — Fabric setup](./03b-fabric-setup.md)
+**Next:** [04 — Testing](./04-testing.md)
 
 ---
 
-*Last updated: 2026-10-02*
+*Last updated: 2026-10-07*

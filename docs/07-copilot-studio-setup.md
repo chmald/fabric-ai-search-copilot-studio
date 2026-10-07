@@ -1,6 +1,6 @@
-[README](../README.md) › [docs index](./00-reproduce-this-demo.md) › 03c Copilot Studio agent
+[README](../README.md) › [docs index](./00-reproduce-this-demo.md) › 07 Copilot Studio agent
 
-# 03c — Copilot Studio agent setup (manual — both deployment paths)
+# 07 — Copilot Studio agent setup (manual — both deployment paths)
 
 <p align="center">
   <img src="./assets/icons/ai-search.svg" width="40" alt="Azure AI Search">&nbsp;&nbsp;
@@ -12,7 +12,7 @@
 
 ![Version](./assets/badges/version.svg) ![GA](./assets/badges/ga.svg) ![Manual path](./assets/badges/manual-path.svg) ![Static only](./assets/badges/static-only.svg)
 
-The Copilot Studio layer of this pattern is **always manual**. Copilot Studio is a Power Platform service, not Azure — there is no Bicep / ARM / Terraform surface for agent definitions, knowledge sources, or channel publishing. Both the [manual Azure deployment](./03-deployment-manual.md) and the [Bicep-automated deployment](./04-deployment-automated.md) end at the same point: an AI Search index ready to be consumed by a Copilot Studio agent built with the steps in this document.
+The Copilot Studio layer of this pattern is **always manual**. Copilot Studio is a Power Platform service, not Azure — there is no Bicep / ARM / Terraform surface for agent definitions, knowledge sources, or channel publishing. Both the [manual Azure deployment](./03b-manual-deployment.md) and the [Bicep-automated deployment](./03-deployment.md) end at the same point: an AI Search index ready to be consumed by a Copilot Studio agent built with the steps in this document.
 
 ## At a glance
 
@@ -28,7 +28,7 @@ The Copilot Studio layer of this pattern is **always manual**. Copilot Studio is
 <sub>Editable source: [`assets/copilot-studio-agent-setup.drawio`](./assets/copilot-studio-agent-setup.drawio) - regenerate with `python scripts/export_diagrams.py docs/assets`.</sub>
 
 > [!IMPORTANT]
-> **Run this doc last.** You need the Azure platform layer ([03-deployment-manual.md](./03-deployment-manual.md) **or** [04-deployment-automated.md](./04-deployment-automated.md)) and the Fabric ingest pipeline ([03b-fabric-setup.md](./03b-fabric-setup.md)) complete first, with at least one batch of chunks already in the AI Search index. Without indexed content the agent will return "I don't have enough information" to every question.
+> **Run this doc last.** You need the Azure platform layer ([03b-manual-deployment.md](./03b-manual-deployment.md) **or** [03-deployment.md](./03-deployment.md)) and the Fabric ingest pipeline ([06-fabric-setup.md](./06-fabric-setup.md)) complete first, with at least one batch of chunks already in the AI Search index. Without indexed content the agent will return "I don't have enough information" to every question.
 
 > [!TIP]
 > **Time budget.** First-time build: **30–45 minutes** of hands-on time, plus **1–2 business days** of waiting for Teams / M365 Copilot publishing approvals if your tenant hasn't already cleared them. Subsequent rebuilds in the same Power Platform environment: **15 minutes**.
@@ -106,7 +106,7 @@ Because admin / query keys are disabled on the AI Search service in this pattern
 Reference: [Add Azure AI Search as a knowledge source](https://learn.microsoft.com/microsoft-copilot-studio/knowledge-azure-ai-search).
 
 > [!NOTE]
-> **Document-level security trimming.** Because **Microsoft Entra ID Integrated** resolves to the calling user's identity, the user's token reaches AI Search — the prerequisite for chunk-level access control (see [01-architecture.md § Document-level access control](01-architecture.md#document-level-chunk-level-access-control)). Service-level access comes from the **Search Index Data Reader** grant above. Document-level trimming then comes from the `group_ids` security filter (GA) populated at chunk creation in [03b](03b-fabric-setup.md), validated in [05-testing.md § G](05-testing.md). **Nuance:** the GA security-filter approach needs the orchestration layer to inject a per-user `$filter` on `group_ids`; native Copilot Studio knowledge-source filter injection is deployment-specific. The preview ACL/RBAC-scope and Purview-label approaches enforce automatically from the user token instead.
+> **Document-level security trimming.** Because **Microsoft Entra ID Integrated** resolves to the calling user's identity, the user's token reaches AI Search — the prerequisite for chunk-level access control (see [01-architecture.md § Document-level access control](01-architecture.md#document-level-chunk-level-access-control)). Service-level access comes from the **Search Index Data Reader** grant above. Document-level trimming then comes from the `group_ids` security filter (GA) populated at chunk creation in [06](06-fabric-setup.md), validated in [04-testing.md § G](04-testing.md). **Nuance:** the GA security-filter approach needs the orchestration layer to inject a per-user `$filter` on `group_ids`; native Copilot Studio knowledge-source filter injection is deployment-specific. The preview ACL/RBAC-scope and Purview-label approaches enforce automatically from the user token instead.
 
 > [!WARNING]
 > **Connection lifecycle caveat.** Power Platform data connections live at the **environment** level — not per-agent. A misconfigured AI Search connection can break the AI Search add-knowledge dialog **for every agent in the environment** with no in-product way to delete it. Stick to the supported Entra auth types above. If you hit a broken-connection state, see [Troubleshooting pointers](#troubleshooting-pointers).
@@ -177,13 +177,13 @@ Copilot Studio derives behavior from your index schema:
 |---|---|
 | **Content** the LLM grounds answers on | All searchable text fields in the index — in this pattern, the `content` field on `idx-rag-documents` |
 | **Vector field** used for embedding-based retrieval | Detected from the index's `vectorSearch` configuration — in this pattern, `content_vector` with the `aif-vectorizer` integrated AOAI vectorizer |
-| **Semantic ranking** | Triggered automatically when the index has a semantic configuration (`semantic-default` in [03-deployment-manual.md § 4.1](./03-deployment-manual.md#41-create-the-index)) |
-| **Citation URL** (clickable link shown next to each answer) | Copilot Studio looks for `metadata_storage_path` first; if not present, it uses **any field whose value is a complete URL**. In this pattern, the chunk JSON written by [`nb_ocr_chunk_upload`](./03b-fabric-setup.md#f72-nb_ocr_chunk_upload) populates `source_uri` with the raw blob URL, which satisfies this convention. |
+| **Semantic ranking** | Triggered automatically when the index has a semantic configuration (`semantic-default` in [03b-manual-deployment.md § 4.1](./03b-manual-deployment.md#41-create-the-index)) |
+| **Citation URL** (clickable link shown next to each answer) | Copilot Studio looks for `metadata_storage_path` first; if not present, it uses **any field whose value is a complete URL**. In this pattern, the chunk JSON written by [`nb_ocr_chunk_upload`](./06-fabric-setup.md#f72-nb_ocr_chunk_upload) populates `source_uri` with the raw blob URL, which satisfies this convention. |
 | **Citation label** | Generated from the content of the cited chunk — there is no separate "Title field" picker in the current UI |
 
 Reference: [Return citations](https://learn.microsoft.com/microsoft-copilot-studio/knowledge-azure-ai-search#return-citations).
 
-> **Adding a friendly title for citations.** If you prefer human-readable citation labels over auto-generated previews, add a `title` string field to the AI Search index and populate it from `source_path` (the original filename) in the chunk JSON. Add it to the index schema in [§ 4.1](./03-deployment-manual.md#41-create-the-index) and to the chunk-build code in [`nb_ocr_chunk_upload`](./03b-fabric-setup.md#f72-nb_ocr_chunk_upload). Copilot Studio will surface the value automatically once it's in the index.
+> **Adding a friendly title for citations.** If you prefer human-readable citation labels over auto-generated previews, add a `title` string field to the AI Search index and populate it from `source_path` (the original filename) in the chunk JSON. Add it to the index schema in [§ 4.1](./03b-manual-deployment.md#41-create-the-index) and to the chunk-build code in [`nb_ocr_chunk_upload`](./06-fabric-setup.md#f72-nb_ocr_chunk_upload). Copilot Studio will surface the value automatically once it's in the index.
 
 ### C2.3 Validate the connection
 
@@ -195,7 +195,7 @@ Reference: [Return citations](https://learn.microsoft.com/microsoft-copilot-stud
 3. If the row reports an unrecoverable error, see [Troubleshooting pointers](#troubleshooting-pointers) (broken connections can persist at the environment level).
 
 > [!CAUTION]
-> **Heads-up — "Microsoft Entra ID Integrated" flows the end-user identity to AI Search.** If you pick this auth type, **every user who chats with the agent** must hold `Search Index Data Reader` on the search service — not just the builder. That is why the *very first* query you run as the builder may fail until you grant the role to your own account, and why other testers will see "I don't have any information" until they are granted the role too. This is by design, not a missing config. For anything beyond a small demo audience, switch the connection to **Service principal** (see [C0.3](#c03-ai-search-access-pattern)) so the SP holds the role once and end users need no direct search RBAC. Full FAQ in [06-troubleshooting.md § 5.8](./06-troubleshooting.md#58-agent-works-for-me-but-fails-for-other-users-or-i-had-to-add-search-index-data-reader-to-my-own-account).
+> **Heads-up — "Microsoft Entra ID Integrated" flows the end-user identity to AI Search.** If you pick this auth type, **every user who chats with the agent** must hold `Search Index Data Reader` on the search service — not just the builder. That is why the *very first* query you run as the builder may fail until you grant the role to your own account, and why other testers will see "I don't have any information" until they are granted the role too. This is by design, not a missing config. For anything beyond a small demo audience, switch the connection to **Service principal** (see [C0.3](#c03-ai-search-access-pattern)) so the SP holds the role once and end users need no direct search RBAC. Full FAQ in [05-troubleshooting.md § 5.8](./05-troubleshooting.md#58-agent-works-for-me-but-fails-for-other-users-or-i-had-to-add-search-index-data-reader-to-my-own-account).
 
 ### C2.4 (Optional) Virtual Network support
 
@@ -235,7 +235,7 @@ Reference: [Knowledge sources summary](https://learn.microsoft.com/microsoft-cop
 5. **Content moderation** — leave at **High** unless you have a specific reason to lower it.
 6. **Save**.
 
-> **Why both toggles matter.** The Overview-page "Allow the AI to use its own general knowledge" gates the AI's right to **consult** general knowledge at all. The Generative-AI-settings "Allow ungrounded responses" enforces the per-turn rule that the model must have called the knowledge source for that response. With both off, the agent is in strict-grounding mode. Note: even with both off, the model can still blend general knowledge into a response that *did* retrieve a chunk — these settings prevent ungrounded responses, not ungrounded *phrases*. For per-user audit-grade verification, validate citations in the [05-testing.md § D](./05-testing.md) golden set.
+> **Why both toggles matter.** The Overview-page "Allow the AI to use its own general knowledge" gates the AI's right to **consult** general knowledge at all. The Generative-AI-settings "Allow ungrounded responses" enforces the per-turn rule that the model must have called the knowledge source for that response. With both off, the agent is in strict-grounding mode. Note: even with both off, the model can still blend general knowledge into a response that *did* retrieve a chunk — these settings prevent ungrounded responses, not ungrounded *phrases*. For per-user audit-grade verification, validate citations in the [04-testing.md § D](./04-testing.md) golden set.
 
 Reference: [Allow ungrounded responses](https://learn.microsoft.com/microsoft-copilot-studio/knowledge-copilot-studio#allow-ungrounded-responses), [Orchestrate agent behavior with generative AI](https://learn.microsoft.com/microsoft-copilot-studio/advanced-generative-actions).
 
@@ -245,7 +245,7 @@ Reference: [Allow ungrounded responses](https://learn.microsoft.com/microsoft-co
 
 Use the **Test** pane (right side of the agent designer) to validate quality before publishing.
 
-Run at least four categories of questions per [05-testing.md § E](./05-testing.md):
+Run at least four categories of questions per [04-testing.md § E](./04-testing.md):
 
 | Category | Example | Expected behavior |
 |---|---|---|
@@ -264,8 +264,8 @@ For each answer, confirm:
 If quality is poor, iterate on:
 
 1. The system prompt (Phase C1 step 6) — make grounding requirements more explicit
-2. The chunking strategy in `nb_ocr_chunk_upload` ([03b § F7.2](./03b-fabric-setup.md#f72-nb_ocr_chunk_upload)) — change `CHUNK_TOKENS` / `OVERLAP_TOKENS`
-3. The AI Search semantic configuration ([03-deployment-manual.md § 4.1](./03-deployment-manual.md#41-create-the-index)) — adjust `prioritizedContentFields` / `prioritizedKeywordsFields`
+2. The chunking strategy in `nb_ocr_chunk_upload` ([06 § F7.2](./06-fabric-setup.md#f72-nb_ocr_chunk_upload)) — change `CHUNK_TOKENS` / `OVERLAP_TOKENS`
+3. The AI Search semantic configuration ([03b-manual-deployment.md § 4.1](./03b-manual-deployment.md#41-create-the-index)) — adjust `prioritizedContentFields` / `prioritizedKeywordsFields`
 
 ---
 
@@ -304,7 +304,7 @@ Before sharing, install the agent in your own Teams / M365 Copilot to confirm it
 
 1. In the Teams and Microsoft 365 Copilot channel panel, select **See agent in Teams**. The Teams app store install dialog opens.
 2. Select **Add**. The agent appears in your Teams left nav and in your Microsoft 365 Copilot agent list (if M365 was enabled in C5.2 step 3).
-3. Open a chat with the agent in Teams and ask a representative question from your golden set ([05-testing.md § C](./05-testing.md)). Confirm answer + citation.
+3. Open a chat with the agent in Teams and ask a representative question from your golden set ([04-testing.md § C](./04-testing.md)). Confirm answer + citation.
 4. In Microsoft 365 Copilot (Word, Outlook, Teams, or copilot.microsoft.com), type `@` and select the agent from the list. Ask the same question and confirm parity.
 
 ### C5.4 Share with others (optional)
@@ -340,7 +340,7 @@ After publishing, validate from the user side — not from the Test pane.
 
 - [ ] Open Teams as a normal user (not the builder)
 - [ ] Find the agent in the Teams app catalogue → install
-- [ ] Ask a representative question from your golden set ([05-testing.md § C](./05-testing.md))
+- [ ] Ask a representative question from your golden set ([04-testing.md § C](./04-testing.md))
 - [ ] Confirm answer + citation render correctly
 - [ ] Click the citation → confirm it opens the original document in Blob (may require the user to have **Storage Blob Data Reader** on the storage account, or a SAS-token rewrite layer if the source blobs are private)
 - [ ] Repeat from the M365 Copilot agent gallery in a host app (Word or Outlook)
@@ -374,7 +374,7 @@ If a user can't see the agent in Teams / M365 Copilot:
 - [ ] For broader rollout: Availability options set to the appropriate scope (shared users or org-wide with admin approval)
 - [ ] End-to-end: question in Teams → answer with clickable citation → opens raw file in Blob
 
-When all boxes are checked → proceed to [05-testing.md](./05-testing.md) for the formal retrieval-quality evaluation (golden set, semantic-ranker A/B, demo script rehearsal).
+When all boxes are checked → proceed to [04-testing.md](./04-testing.md) for the formal retrieval-quality evaluation (golden set, semantic-ranker A/B, demo script rehearsal).
 
 ---
 
@@ -387,8 +387,8 @@ Common Copilot Studio-layer issues:
 | Knowledge source stuck on **In progress** | Caller / SP missing **Search Index Data Reader** on the AI Search service | Grant the role; wait 15 min for propagation, then refresh the Knowledge page |
 | Knowledge source shows auth error | Tried to use an Access Key against a search service with `disableLocalAuth=true` | Recreate the connection with **Microsoft Entra ID Integrated** or **Service principal**. See [C2.1](#c21-add-the-knowledge-source). |
 | **Add knowledge** dialog briefly opens then errors out and is unusable for any agent | A previously created Azure AI Search connection in this Power Platform environment is broken; the broken connection lives at the environment scope and there is no in-product way to delete it | Reset the agent's external access, or delete and recreate the affected agent. When re-adding, use one of the **Entra ID** auth types, not **Access Key**. See [Add Azure AI Search as a knowledge source — Create the connection](https://learn.microsoft.com/microsoft-copilot-studio/knowledge-azure-ai-search#create-the-connection-to-azure-ai-search). |
-| Test pane returns "I don't have information" for every question | Index is empty, or the wrong vector index name was entered in C2.1 step 9, or the `content` field is empty in chunk JSONs | Check index doc count ([03-deployment-manual.md § 4](./03-deployment-manual.md#phase-4--ai-search-index) validation), re-check the index name in the Knowledge source configuration |
-| Citations missing or unclickable | Indexed chunks have no field containing a complete URL (no `metadata_storage_path`, no other URL-valued field) | Verify `source_uri` in chunk JSON is populated with the full `https://<storage>.blob.core.windows.net/...` URL — see [`nb_ocr_chunk_upload`](./03b-fabric-setup.md#f72-nb_ocr_chunk_upload). Re-run the AI Search indexer if the field was added after first index. |
+| Test pane returns "I don't have information" for every question | Index is empty, or the wrong vector index name was entered in C2.1 step 9, or the `content` field is empty in chunk JSONs | Check index doc count ([03b-manual-deployment.md § 4](./03b-manual-deployment.md#phase-4--ai-search-index) validation), re-check the index name in the Knowledge source configuration |
+| Citations missing or unclickable | Indexed chunks have no field containing a complete URL (no `metadata_storage_path`, no other URL-valued field) | Verify `source_uri` in chunk JSON is populated with the full `https://<storage>.blob.core.windows.net/...` URL — see [`nb_ocr_chunk_upload`](./06-fabric-setup.md#f72-nb_ocr_chunk_upload). Re-run the AI Search indexer if the field was added after first index. |
 | Agent gives answers but no citations | Knowledge source isn't bound at the agent level (maybe only on a topic-level generative answers node) | Confirm the source appears in the agent's **Knowledge** page, not only inside a topic |
 | Hallucinated answers (claims with no citation) | **Allow ungrounded responses** is still On, or **Allow the AI to use its own general knowledge** is still On | Turn both off per [C3.1](#c31-turn-off-the-agent-level-general-knowledge-fallback) and [C3.2](#c32-block-ungrounded-responses-generative-orchestration) |
 | **Add channel** button greyed out | Agent has never been published | Publish the agent first ([C5.1](#c51-publish-the-agent)). The channel cannot be added until at least one publish has succeeded. |
@@ -396,7 +396,7 @@ Common Copilot Studio-layer issues:
 | User in Teams sees "Agent not available" / "Built for your org" tab missing | User not licensed for Microsoft 365 Copilot, or in a different Power Platform environment than the agent, or admin approval hasn't propagated, or your tenant doesn't allow Power Platform apps in Teams | Check licensing, environment, approval status, and [Manage Power Platform apps in Teams](https://learn.microsoft.com/microsoftteams/manage-power-platform-apps) |
 | User can open the agent and chat, but citation link returns 403 or AuthorizationFailure | The Blob URL in `source_uri` requires Entra auth the end-user doesn't have | Either grant users **Storage Blob Data Reader** on the source storage account, or layer a SAS-token rewrite proxy on top of the blob URL before chunk upload |
 
-For the AI Search-side issues (indexer failures, vectorizer auth, blob 403s on the **indexer**, semantic ranker), see [06-troubleshooting.md § 4](./06-troubleshooting.md#4--ai-search-index--indexer).
+For the AI Search-side issues (indexer failures, vectorizer auth, blob 403s on the **indexer**, semantic ranker), see [05-troubleshooting.md § 4](./05-troubleshooting.md#4--ai-search-index--indexer).
 
 ---
 
@@ -411,6 +411,6 @@ For the AI Search-side issues (indexer failures, vectorizer auth, blob 403s on t
 
 ---
 
-Next: [03d - Foundry agent setup](./03d-foundry-agent-setup.md) →
+Next: [08 - Foundry agent setup](./08-foundry-agent-setup.md) →
 
-*Last updated: 2026-10-02*
+*Last updated: 2026-10-07*

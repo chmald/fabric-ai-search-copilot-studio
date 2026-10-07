@@ -27,7 +27,7 @@
 //      (post_deploy_search.py uses the deployer's identity to PUT index / datasource /
 //      indexer via bearer token instead of admin keys)
 //
-// Not made here (manual portal step — see docs/03b-fabric-setup.md):
+// Not made here (manual portal step — see docs/06-fabric-setup.md):
 //   * Fabric workspace identity → Storage Blob Data Contributor on Storage
 //     (workspace identity GUID isn't known until the Fabric workspace is created)
 //   * DI-caller service principal → Cognitive Services User on the Foundry resource
@@ -75,7 +75,7 @@ param deployerPrincipalType string = 'User'
 // Vision, etc.) and does NOT grant OpenAI data-plane access on a Foundry resource.
 // Using Cognitive Services User here causes the indexer to succeed but every document
 // to be committed with a null `content_vector` (vectorIndexSize=0). See
-// docs/06-troubleshooting.md § 4.1 for the silent-failure signature.
+// docs/05-troubleshooting.md § 4.1 for the silent-failure signature.
 //
 // References:
 //   https://learn.microsoft.com/azure/search/vector-search-vectorizer-azure-open-ai#vectorizer-parameters
@@ -114,7 +114,7 @@ resource keyVault 'Microsoft.KeyVault/vaults@2024-04-01-preview' existing = {
 // (Integrated vectorizer calls embedding deployment with a bearer token.
 //  Using the wrong role here — e.g. plain "Cognitive Services User" — causes the
 //  indexer to silently produce documents with null content_vector. See
-//  docs/06-troubleshooting.md § 4.1.)
+//  docs/05-troubleshooting.md § 4.1.)
 // =====================================================================================
 resource searchToFoundry 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   scope: foundry
@@ -182,7 +182,7 @@ resource deployerToSearchIndexData 'Microsoft.Authorization/roleAssignments@2022
 
 // =====================================================================================
 // (Optional) deployer -> Key Vault Secrets Officer on the Key Vault.
-// Lets the deployer (operator running 03b-fabric-setup.md § F2.2 step 3, or any
+// Lets the deployer (operator running 06-fabric-setup.md § F2.2 step 3, or any
 // later step that creates/rotates secrets in the vault) write the DI-caller SP
 // secret (and any future connector credentials). Without this assignment, the
 // `az keyvault secret set` call in F2.2 step 3 fails with `403 Forbidden`.

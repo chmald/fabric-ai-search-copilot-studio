@@ -1,6 +1,6 @@
-[README](../README.md) › [docs index](./00-reproduce-this-demo.md) › 09 Foundry agent web app
+[README](../README.md) › [docs index](./00-reproduce-this-demo.md) › 12 Foundry agent web app
 
-# 09 — Standalone web app front end (in-repo, Azure Container Apps)
+# 12 — Standalone web app front end (in-repo, Azure Container Apps)
 
 <p>
 <img src="./assets/icons/container-apps.svg" width="40" alt="Azure Container Apps"/>&nbsp;
@@ -15,9 +15,9 @@
 
 This document covers the **self-hosted chat front end** included in this repository at
 [`webapp/app/`](../webapp/app/). It is a third way to reach the Foundry agent built in
-[03d](./03d-foundry-agent-setup.md) — alongside the Copilot Studio combined channel
-([03c](./03c-copilot-studio-setup.md)) and the M365/Teams custom engine agent
-([03d Phase D6](./03d-foundry-agent-setup.md#phase-d6--publish-to-microsoft-365-copilot--teams-preview)).
+[08](./08-foundry-agent-setup.md) — alongside the Copilot Studio combined channel
+([07](./07-copilot-studio-setup.md)) and the M365/Teams custom engine agent
+([08 Phase D6](./08-foundry-agent-setup.md#phase-d6--publish-to-microsoft-365-copilot--teams)).
 It is for builders who want a branded web URL outside Teams/M365, and it answers how to deploy it and which identity mode to pick.
 
 The web app is **part of this repo and deploys with the same flow as the rest of the
@@ -68,14 +68,14 @@ identity, OBO flag) is supplied as an environment variable at deploy time.
 
 ## Front-end options at a glance
 
-The agent runtime ([03d](./03d-foundry-agent-setup.md)) is independent of how users reach
+The agent runtime ([08](./08-foundry-agent-setup.md)) is independent of how users reach
 it. Three front ends are documented:
 
 | Front end | Where users chat | Identity passthrough | Doc |
 |---|---|---|---|
-| **Copilot Studio combined channel** | Teams + M365 Copilot | per-user (Entra ID Integrated) | [03c](./03c-copilot-studio-setup.md) (different runtime) |
-| **Custom engine agent** ![Preview](./assets/badges/preview.svg) | Teams + M365 Copilot | per-user (SSO to agent) | [03d D6](./03d-foundry-agent-setup.md#phase-d6--publish-to-microsoft-365-copilot--teams-preview) |
-| **Standalone web app** *(this doc)* ![Optional](./assets/badges/optional.svg) | a branded web URL you own | **per-user via OBO** | **09** |
+| **Copilot Studio combined channel** | Teams + M365 Copilot | per-user (Entra ID Integrated) | [07](./07-copilot-studio-setup.md) (different runtime) |
+| **Teams + M365 Copilot publish** ![GA](./assets/badges/ga.svg) | Teams + M365 Copilot | per-user (verify per tool) | [08 D6](./08-foundry-agent-setup.md#phase-d6--publish-to-microsoft-365-copilot--teams) |
+| **Standalone web app** *(this doc)* ![Optional](./assets/badges/optional.svg) | a branded web URL you own | **per-user via OBO** | **12** |
 
 Choose the standalone web app for a self-hosted, brandable chat experience outside
 Teams/M365 — for example an internal portal — with the agent runtime and tools unchanged.
@@ -95,13 +95,13 @@ variable (set by the deploy script):
 | Extra setup | none | Entra app registration + federated identity credential + Container Apps authentication |
 
 Because this pattern's agent connects a **Fabric data agent**
-([03d Phase D3](./03d-foundry-agent-setup.md#phase-d3--add-the-microsoft-fabric-data-agent-tool-structured-data)),
+([08 Phase D3](./08-foundry-agent-setup.md#phase-d3--add-the-microsoft-fabric-data-agent-tool-structured-data)),
 deploy in **OBO mode**. OBO is necessary but not sufficient on its own: it carries the
 user token to Agent Service, while the **Fabric tool/connection must also be configured
-for identity passthrough** in the portal ([03e](./03e-fabric-data-agent.md)). Most other
+for identity passthrough** in the portal ([09](./09-fabric-data-agent.md)). Most other
 agent tools (MCP, OpenAPI, Logic Apps) run as the agent's own connection identity, so
 always confirm per-user behavior with the two-user test in [Validate](#validate). The full
-identity model is in [08-rbac-and-identity-passthrough.md](./08-rbac-and-identity-passthrough.md).
+identity model is in [11-rbac-and-identity-passthrough.md](./11-rbac-and-identity-passthrough.md).
 
 > If the agent uses **only** the Azure AI Search tool (no Fabric data agent), MI mode is
 > sufficient and simpler — omit `-EnableObo`.
@@ -114,11 +114,11 @@ identity model is in [08-rbac-and-identity-passthrough.md](./08-rbac-and-identit
 
 | Requirement | Detail |
 |---|---|
-| **A published Foundry agent** | The agent from [03d](./03d-foundry-agent-setup.md), with the Azure AI Search tool (and, in scope here, the Microsoft Fabric data agent tool). Note its **project endpoint** and **agent ID**. |
+| **A published Foundry agent** | The agent from [08](./08-foundry-agent-setup.md), with the Azure AI Search tool (and, in scope here, the Microsoft Fabric data agent tool). Note its **project endpoint** and **agent ID**. |
 | **Azure platform deployed** | The base Bicep deployment ([Part B](./00-reproduce-this-demo.md#part-b--deploy-the-azure-platform-layer)), with `deployWebApp = true` (W1 below). |
 | **Tooling** | **Azure CLI** and **PowerShell 7+**. No local Docker, `azd`, .NET, or Node toolchain is needed — the image builds in ACR. |
 | **Entra admin consent** (OBO) | OBO provisioning creates a backend app registration whose delegated permission requires **admin consent**. Confirm an admin can grant it. |
-| **Per-user Fabric access** (OBO) | Every end user needs **Read** on the Fabric data agent + its sources (Lakehouse Read; semantic model **Build**) — see [03e](./03e-fabric-data-agent.md) and [08 § Layer 3b](./08-rbac-and-identity-passthrough.md#layer-3b--foundry-agent-03d). |
+| **Per-user Fabric access** (OBO) | Every end user needs **Read** on the Fabric data agent + its sources (Lakehouse Read; semantic model **Build**) — see [09](./09-fabric-data-agent.md) and [11 § Layer 3b](./11-rbac-and-identity-passthrough.md#layer-3b--foundry-agent-08). |
 
 ### W1 — Provision the platform (Bicep)
 
@@ -166,7 +166,7 @@ guessing:
 1. Add a **delegated permission** on the app registration for the Foundry data plane
    (Azure AI / Cognitive Services `user_impersonation`) and grant **admin consent**.
 2. Grant each end user a **Foundry data-plane role** (e.g. Azure AI User) and **Read** on
-   the Fabric data agent + sources ([03e](./03e-fabric-data-agent.md), [08](./08-rbac-and-identity-passthrough.md)).
+   the Fabric data agent + sources ([09](./09-fabric-data-agent.md), [11](./11-rbac-and-identity-passthrough.md)).
 
 ---
 
@@ -178,7 +178,7 @@ guessing:
 | **2** | <img src="./assets/icons/ai-search.svg" width="28" alt=""> | **Document question** (AI Search tool): ask for a clause or wording from the indexed corpus | ☐ Grounded answer |
 | **3** | <img src="./assets/icons/foundry-agent-service.svg" width="28" alt=""> | **Structured question** (Fabric data agent tool): ask a count/aggregate | ☐ Correct answer |
 | **4** | <img src="./assets/icons/entra-id.svg" width="28" alt=""> | **Per-user restriction** (OBO): two users with different Fabric scope ask the same "list all …" question | ☐ Each sees only permitted rows |
-| **5** | <img src="./assets/icons/ai-search.svg" width="28" alt=""> | **Document trimming** (if configured): in-group vs out-of-group ([05 § G](./05-testing.md)) | ☐ Results differ |
+| **5** | <img src="./assets/icons/ai-search.svg" width="28" alt=""> | **Document trimming** (if configured): in-group vs out-of-group ([04 § G](./04-testing.md)) | ☐ Results differ |
 
 Detail for each step:
 
@@ -191,7 +191,7 @@ Detail for each step:
    (e.g. region-restricted via RLS) and ask the same "list all …" question — each must see
    only their permitted rows. This proves OBO passthrough end to end.
 5. **Document trimming** (if configured): confirm in-group vs out-of-group results differ
-   ([05 § G](./05-testing.md)).
+   ([04 § G](./04-testing.md)).
 
 A liveness probe is available at `/healthz` (unauthenticated) and reports whether the agent
 endpoint and OBO mode are configured.
@@ -205,7 +205,7 @@ endpoint and OBO mode are configured.
 
 The platform module and deploy script assign these. The full identity map and the
 per-restriction enforcement model are in
-[08-rbac-and-identity-passthrough.md](./08-rbac-and-identity-passthrough.md).
+[11-rbac-and-identity-passthrough.md](./11-rbac-and-identity-passthrough.md).
 
 | Identity | Role / grant | Why |
 |---|---|---|
@@ -214,14 +214,14 @@ per-restriction enforcement model are in
 | **End user** (OBO) | a Foundry data-plane role to **call the agent** (e.g. **Foundry User**¹) **and** **Read** on the Fabric data agent + sources | The user must be allowed to invoke the agent; Fabric then enforces RLS/OLS/Purview for that user |
 | Deployer | Subscription **Contributor** + **User Access Administrator** (role assignments), **plus** an Entra role that can create the app registration and grant **admin consent** (e.g. **Application Administrator**) for OBO | Run the Bicep + the deploy script |
 
-> ¹ **Foundry RBAC** (per [Microsoft Learn](https://learn.microsoft.com/azure/foundry/concepts/rbac-foundry)). Use **Foundry User** for agent/project data-plane access — do **not** use *Azure AI Developer*, which is scoped to Azure ML workspaces and Foundry hubs, not Foundry projects/agents. *Foundry User / Owner / Project Manager* were formerly *Azure AI User / Owner / Project Manager* (role IDs unchanged). Re-verify at deploy time. See also [08 § Layer 3b](./08-rbac-and-identity-passthrough.md#layer-3b--foundry-agent-03d).
+> ¹ **Foundry RBAC** (per [Microsoft Learn](https://learn.microsoft.com/azure/foundry/concepts/rbac-foundry)). Use **Foundry User** for agent/project data-plane access — do **not** use *Azure AI Developer*, which is scoped to Azure ML workspaces and Foundry hubs, not Foundry projects/agents. *Foundry User / Owner / Project Manager* were formerly *Azure AI User / Owner / Project Manager* (role IDs unchanged). Re-verify at deploy time. See also [11 § Layer 3b](./11-rbac-and-identity-passthrough.md#layer-3b--foundry-agent-08).
 
 ---
 
 ## Caveats
 
 > [!WARNING]
-> **SDK sunset (act before 2026-08-26).** The app pins `azure-ai-projects` v1.x (Assistants-era surface), documented to sunset with the classic Assistants API. Plan the migration to the v2.x Responses API (details below).
+> **The app still uses the classic agents surface — migration pending.** It pins `azure-ai-projects` v1.x (threads / messages / runs), which talks to **Foundry Agent Service (classic)** agents. Classic agents are deprecated and **retire 2027-03-31**; the OpenAI-compatible Assistants API already sunset on 2026-08-26. Agents built the GA way in [08](./08-foundry-agent-setup.md) (Responses API) need the **`azure-ai-projects` ≥ 2.3 Responses / conversations** client — until the app is migrated, point it at a classic agent or use the Teams / M365 publish instead. Details below.
 
 > [!CAUTION]
 > **OBO is opt-in and adds dependencies**; Conditional Access / device-compliance policies can break the OBO token exchange. Do not promise per-user behavior until the two-user test passes.
@@ -229,20 +229,21 @@ per-restriction enforcement model are in
 - **OBO is opt-in and adds dependencies** the Teams/M365 channel does not: a backend app
   registration, a federated identity credential, Container Apps authentication, and Entra
   **admin consent**.
-- **SDK version + migration (act before 2026-08-26).** The app pins `azure-ai-projects`
-  **v1.x** and uses the threads/messages/runs (Assistants-era) agents surface with a
-  configurable token scope (`AGENT_TOKEN_SCOPE`, default `https://ai.azure.com/.default`).
-  That surface is documented to **sunset 2026-08-26** with the classic Assistants API —
-  migrate to the **`azure-ai-projects` v2.x Responses API** (`openai.responses.create` /
-  conversations) before then. See [navigate from classic](https://learn.microsoft.com/azure/foundry/how-to/navigate-from-classic)
+- **SDK version + migration (open item).** The app pins `azure-ai-projects`
+  **v1.x** and uses the threads/messages/runs agents surface (Foundry Agent Service
+  **classic**) with a configurable token scope (`AGENT_TOKEN_SCOPE`, default
+  `https://ai.azure.com/.default`). Classic agents **retire 2027-03-31** (the separate
+  Assistants API sunset on 2026-08-26). Migrate to **`azure-ai-projects` ≥ 2.3**
+  (`project.get_openai_client()` → `responses.create` with conversations) so the app can call
+  agents built with the GA Foundry Agent Service. See [navigate from classic](https://learn.microsoft.com/azure/foundry/how-to/navigate-from-classic)
   and the [agent migration guide](https://learn.microsoft.com/azure/foundry/agents/how-to/migrate); re-verify the client surface + token scope at deploy time.
 - **Preview surfaces.** The Foundry Fabric data agent tool is in preview; re-verify against
-  current Microsoft Learn (see [03d](./03d-foundry-agent-setup.md) and [03e](./03e-fabric-data-agent.md)).
+  current Microsoft Learn (see [08](./08-foundry-agent-setup.md) and [09](./09-fabric-data-agent.md)).
 - **Conditional Access / device-compliance** policies can interfere with the OBO token
   exchange. Prefer a compliant environment for deploy and use.
 - **Azure AI Search document-level trimming is still separate.** The AI Search tool runs as
   its connection identity, not the user — so the `group_ids` caller-filter from
-  [08 § 5a](./08-rbac-and-identity-passthrough.md#5a-document-data-ai-search--no-passthrough-you-inject-the-filter)
+  [11 § 5a](./11-rbac-and-identity-passthrough.md#5a-document-data-ai-search--no-passthrough-you-inject-the-filter)
   remains a deployment-specific step even in OBO mode.
 
 ---
@@ -273,13 +274,13 @@ per-restriction enforcement model are in
 > Re-verify the `azure-ai-projects` client surface, token scope, API version and Foundry role names against Microsoft Learn at deploy time.
 
 - App: [webapp/app/](../webapp/app/) · Platform: [infra/modules/containerapp.bicep](../infra/modules/containerapp.bicep) · Deploy: [scripts/deploy-webapp.ps1](../scripts/deploy-webapp.ps1)
-- Agent build: [03d-foundry-agent-setup.md](./03d-foundry-agent-setup.md) · Fabric data agent: [03e-fabric-data-agent.md](./03e-fabric-data-agent.md)
-- Identity & RBAC: [08-rbac-and-identity-passthrough.md](./08-rbac-and-identity-passthrough.md)
+- Agent build: [08-foundry-agent-setup.md](./08-foundry-agent-setup.md) · Fabric data agent: [09-fabric-data-agent.md](./09-fabric-data-agent.md)
+- Identity & RBAC: [11-rbac-and-identity-passthrough.md](./11-rbac-and-identity-passthrough.md)
 - [Microsoft Foundry Agent Service overview](https://learn.microsoft.com/azure/foundry/agents/overview) · [Agent identity (OBO)](https://learn.microsoft.com/azure/foundry/agents/concepts/agent-identity)
 - [Azure Container Apps authentication](https://learn.microsoft.com/azure/container-apps/authentication) · [On-Behalf-Of flow](https://learn.microsoft.com/entra/identity-platform/v2-oauth2-on-behalf-of-flow)
 
 ---
 
-Next: [README](../README.md) →
+Next: [13 - Configuration reference](./13-configuration-reference.md) →
 
-*Last updated: 2026-10-02*
+*Last updated: 2026-10-07*

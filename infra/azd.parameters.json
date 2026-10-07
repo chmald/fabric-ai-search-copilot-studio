@@ -1,0 +1,24 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environmentName": { "value": "${AZURE_ENV_NAME}" },
+    "location": { "value": "${AZURE_LOCATION=eastus2}" },
+    "resourceGroupName": { "value": "${AZURE_RESOURCE_GROUP=}" },
+    "principalId": { "value": "${AZURE_PRINCIPAL_ID=}" },
+    "principalType": { "value": "${AZURE_PRINCIPAL_TYPE=User}" },
+    "workloadName": { "value": "${WORKLOAD_NAME=rag}" },
+    "workloadEnv": { "value": "${WORKLOAD_ENV=dev}" },
+    "embeddingModelName": { "value": "${EMBEDDING_MODEL_NAME=text-embedding-3-large}" },
+    "embeddingModelVersion": { "value": "${EMBEDDING_MODEL_VERSION=}" },
+    "embeddingModelSku": { "value": "${EMBEDDING_MODEL_SKU=Standard}" },
+    "embeddingModelTpm": { "value": "${EMBEDDING_MODEL_TPM=10}" },
+    "chatModelName": { "value": "${CHAT_MODEL_NAME=}" },
+    "chatModelVersion": { "value": "${CHAT_MODEL_VERSION=}" },
+    "chatModelSku": { "value": "${CHAT_MODEL_SKU=GlobalStandard}" },
+    "chatModelTpm": { "value": "${CHAT_MODEL_TPM=10}" },
+    "searchSku": { "value": "${SEARCH_SKU=standard}" },
+    "deployWebApp": { "value": "${DEPLOY_WEB_APP=false}" },
+    "restoreFoundryFromSoftDelete": { "value": "${RESTORE_FOUNDRY_FROM_SOFT_DELETE=false}" }
+  }
+}

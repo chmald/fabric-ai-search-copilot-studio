@@ -19,10 +19,10 @@
        (-EnableObo) Also configure secretless On-Behalf-Of: an Entra app
        registration + federated identity credential + Container Apps authentication
        so the app calls the agent as the signed-in user (required for the Microsoft
-       Fabric data agent tool). See docs/08 and docs/09.
+       Fabric data agent tool). See docs/11 and docs/12.
 
   The agent's PROJECT endpoint and AGENT ID come from the Foundry agent you build in
-  docs/03d (a portal/preview step), so they are passed in here — they are not part of
+  docs/08 (a portal/preview step), so they are passed in here — they are not part of
   the Bicep output.
 
 .PARAMETER FoundryProjectEndpoint
@@ -30,7 +30,7 @@
   https://<resource>.services.ai.azure.com/api/projects/<project>
 
 .PARAMETER AgentId
-  Published agent identifier from docs/03d (e.g. "hr-knowledge-agent").
+  Published agent identifier from docs/08 (e.g. "kb-agent").
 
 .PARAMETER IdsFile
   Path to the Bicep output file (default demo-ids.local.json) used to resolve the
@@ -212,11 +212,11 @@ if ($EnableObo) {
         '--action','RequireAuthentication','--redirect-provider','AzureActiveDirectory') | Out-Null
 
     Write-Host ""
-    Write-Host "  MANUAL OBO STEPS — verify against docs/09 and current Microsoft Learn:" -ForegroundColor Magenta
+    Write-Host "  MANUAL OBO STEPS — verify against docs/12 and current Microsoft Learn:" -ForegroundColor Magenta
     Write-Host "   * Add a DELEGATED permission on app $appId for the Foundry data plane" -ForegroundColor Magenta
     Write-Host "     (Azure AI / Cognitive Services user_impersonation) and grant ADMIN CONSENT." -ForegroundColor Magenta
     Write-Host "   * Grant each end user a Foundry data-plane role (e.g. Azure AI User) and the" -ForegroundColor Magenta
-    Write-Host "     required Fabric Read on the data agent + sources (docs/03e, docs/08)." -ForegroundColor Magenta
+    Write-Host "     required Fabric Read on the data agent + sources (docs/09, docs/11)." -ForegroundColor Magenta
     Write-Host "   The exact downstream API app ID + scope vary by tenant/preview — do not guess." -ForegroundColor Magenta
 }
 
@@ -226,7 +226,7 @@ if (-not $WhatIf) {
     Write-Host ""
     Write-Host "Deployed." -ForegroundColor Green
     if ($fqdn) { Write-Host (" App URL: https://{0}" -f $fqdn) -ForegroundColor Green }
-    Write-Host " Validate per docs/09 § Validate (document Q, structured Q, two-user RLS in OBO mode)." -ForegroundColor Green
+    Write-Host " Validate per docs/12 § Validate (document Q, structured Q, two-user RLS in OBO mode)." -ForegroundColor Green
 } else {
     Write-Host ""
     Write-Host "-WhatIf: no changes made." -ForegroundColor Yellow

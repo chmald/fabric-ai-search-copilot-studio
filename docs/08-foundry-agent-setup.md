@@ -1,6 +1,6 @@
-[README](../README.md) › [docs index](./00-reproduce-this-demo.md) › 03d Foundry agent setup
+[README](../README.md) › [docs index](./00-reproduce-this-demo.md) › 08 Foundry agent setup
 
-# 03d — Microsoft Foundry agent setup (licensing-driven alternative to Copilot Studio)
+# 08 — Microsoft Foundry agent setup (licensing-driven alternative to Copilot Studio)
 
 <p>
 <img src="./assets/icons/foundry-agent-service.svg" width="40" alt="Foundry Agent Service"/>&nbsp;
@@ -13,7 +13,7 @@
 
 ![Version](./assets/badges/version.svg) ![GA](./assets/badges/ga.svg) ![Preview](./assets/badges/preview.svg) ![Optional](./assets/badges/optional.svg) ![Static-only](./assets/badges/static-only.svg)
 
-This document is an **alternative to [03c-copilot-studio-setup.md](./03c-copilot-studio-setup.md)**. It builds the same user-facing knowledge-base agent, but on the **Microsoft Foundry Agent Service** runtime instead of Copilot Studio, and surfaces it in **Microsoft Teams + Microsoft 365 Copilot** through the **custom engine agent** channel.
+This document is an **alternative to [07-copilot-studio-setup.md](./07-copilot-studio-setup.md)**. It builds the same user-facing knowledge-base agent, but on the **Microsoft Foundry Agent Service** runtime instead of Copilot Studio, and publishes it to **Microsoft Teams + Microsoft 365 Copilot** from the Foundry portal (Phase D6).
 
 ## At a glance
 
@@ -22,24 +22,24 @@ This document is an **alternative to [03c-copilot-studio-setup.md](./03c-copilot
 | <img src="./assets/icons/foundry-agent-service.svg" width="24" alt=""/> | **What you build** | Agent `agent-rag-kb` on the Foundry Agent Service, with an Azure AI Search tool and (optionally) a Microsoft Fabric tool |
 | <img src="./assets/icons/foundry-models.svg" width="24" alt=""/> | **Why this path** | Shifts agent cost from Copilot Studio message capacity to Azure consumption (see D0.1) |
 | <img src="./assets/icons/ai-search.svg" width="24" alt=""/> | **Azure AI Search tool** | ![GA](./assets/badges/ga.svg) Same `idx-rag-documents` index, managed identity |
-| <img src="./assets/icons/foundry-project.svg" width="24" alt=""/> | **Microsoft Fabric tool** | ![Preview](./assets/badges/preview.svg) Optional, on-behalf-of user identity only; see [03e](./03e-fabric-data-agent.md) |
-| <img src="./assets/icons/entra-id.svg" width="24" alt=""/> | **M365 / Teams publishing** | ![Preview](./assets/badges/preview.svg) Custom engine agent; re-verify Phase D6 against Microsoft Learn |
+| <img src="./assets/icons/foundry-project.svg" width="24" alt=""/> | **Microsoft Fabric tool** | ![Preview](./assets/badges/preview.svg) Optional, on-behalf-of user identity only; see [09](./09-fabric-data-agent.md) |
+| <img src="./assets/icons/entra-id.svg" width="24" alt=""/> | **M365 / Teams publishing** | ![GA](./assets/badges/ga.svg) Foundry portal **Publish to Microsoft Copilot and Teams** (Azure Bot Service); custom engine agent via the Agents Toolkit for custom code |
 | <img src="./assets/icons/gear.svg" width="24" alt=""/> | **Time** | 60–90 min first build; 20–30 min rebuild (plus 1–2 business days of Teams admin approval for org-wide publishing) |
 
 > [!IMPORTANT]
-> **Run *either* 03c *or* 03d — not both.** They are two implementations of **Layer 3 (the conversational layer)**. Everything underneath — the Fabric ingest pipeline ([03b](./03b-fabric-setup.md)) and the Azure platform layer (Blob + AI Search index + Foundry model gateway, from [03](./03-deployment-manual.md) or [04](./04-deployment-automated.md)) — is **identical and unchanged**. You only swap how users talk to the index.
+> **Run *either* 07 *or* 08 — not both.** They are two implementations of **Layer 3 (the conversational layer)**. Everything underneath — the Fabric ingest pipeline ([06](./06-fabric-setup.md)) and the Azure platform layer (Blob + AI Search index + Foundry model gateway, from [03b](./03b-manual-deployment.md) or [03](./03-deployment.md)) — is **identical and unchanged**. You only swap how users talk to the index.
 
 > [!NOTE]
-> **Why this path exists.** It exists for cases where Copilot Studio publishing surfaces an **additional-licensing requirement**: an agent that connects **Azure AI Search** *and* a **Fabric Data Agent** pulls those in as **premium / capacity-billed connectors**, which is licensed on top of the end users' Microsoft 365 Copilot entitlement (Copilot Studio message-capacity packs or per-user Copilot Studio licenses). Moving the agent runtime to Foundry shifts that cost to **Azure consumption** (pay-as-you-go tokens + tool calls) — which an existing Azure subscription already has a billing path for — while end users keep consuming through the M365 Copilot license they already own. See [07-copilot-studio-vs-foundry.md](./07-copilot-studio-vs-foundry.md) for the full trade-off analysis and decision matrix.
+> **Why this path exists.** It exists for cases where Copilot Studio publishing surfaces an **additional-licensing requirement**: an agent that connects **Azure AI Search** *and* a **Fabric Data Agent** pulls those in as **premium / capacity-billed connectors**, which is licensed on top of the end users' Microsoft 365 Copilot entitlement (Copilot Studio message-capacity packs or per-user Copilot Studio licenses). Moving the agent runtime to Foundry shifts that cost to **Azure consumption** (pay-as-you-go tokens + tool calls) — which an existing Azure subscription already has a billing path for — while end users keep consuming through the M365 Copilot license they already own. See [10-copilot-studio-vs-foundry.md](./10-copilot-studio-vs-foundry.md) for the full trade-off analysis and decision matrix.
 
 > [!WARNING]
-> **Preview boundary — read before committing to production.** Publishing a Foundry agent into **Microsoft 365 Copilot / Teams** (the "custom engine agent" / Microsoft 365 Agents SDK channel) is a **preview** capability. The Foundry agent runtime and the **Azure AI Search tool** are GA; the **Microsoft Fabric (Data Agent) tool is in preview**. The **M365/Teams publishing surface moves quickly** — re-verify the publishing steps (Phase D6) against current Microsoft Learn before you promise a production date. The Copilot Studio path (03c) remains the fully-GA option if you cannot take a preview dependency.
+> **Preview boundary — read before committing to production.** The Foundry agent runtime, the **Azure AI Search tool** and **publishing to Microsoft 365 Copilot / Teams from the Foundry portal** are generally available ([publish to Microsoft Copilot and Teams](https://learn.microsoft.com/azure/foundry/agents/how-to/publish-copilot) carries no preview label as of 2026-10-07). The **Microsoft Fabric (Data Agent) tool is still in preview** — it is the remaining preview dependency on this path. Earlier versions of this pattern treated M365/Teams publishing as preview; that was corrected in v1.7.
 
 > [!CAUTION]
-> **Targets the GA Microsoft Foundry Agent Service.** Build on the **generally available Microsoft Foundry Agent Service**, *not* the deprecated **Foundry Agent Service (classic)**. The classic Assistants-API runtime **sunsets 2026-08-26** — verify the timeline and migrate via [navigate from classic](https://learn.microsoft.com/azure/foundry/how-to/navigate-from-classic). Microsoft also renamed the Foundry RBAC roles — **Foundry User / Foundry Owner / Foundry Project Manager** were formerly *Azure AI User / Azure AI Owner / Azure AI Project Manager* (role IDs and permissions unchanged); this doc uses the current names.
+> **Targets the GA Microsoft Foundry Agent Service.** Build on the **generally available Microsoft Foundry Agent Service** (Responses API, conversations), *not* the deprecated **Foundry Agent Service (classic)** (threads/runs), which **retires 2027-03-31**. The OpenAI-compatible **Assistants API already sunset on 2026-08-26**. Migrate with the [migration guide](https://learn.microsoft.com/azure/foundry/agents/how-to/migrate) and [navigate from classic](https://learn.microsoft.com/azure/foundry/how-to/navigate-from-classic). Microsoft also renamed the Foundry RBAC roles — **Foundry User / Foundry Owner / Foundry Project Manager** were formerly *Azure AI User / Azure AI Owner / Azure AI Project Manager* (role IDs and permissions unchanged); this doc uses the current names.
 
 > [!TIP]
-> **Time budget.** First-time build: **60–90 minutes** hands-on (longer than 03c — there is more Azure-side wiring), plus the same **1–2 business days** of Teams admin approval for org-wide publishing. Subsequent rebuilds in the same project: **20–30 minutes**.
+> **Time budget.** First-time build: **60–90 minutes** hands-on (longer than 07 — there is more Azure-side wiring), plus the same **1–2 business days** of Teams admin approval for org-wide publishing. Subsequent rebuilds in the same project: **20–30 minutes**.
 
 ---
 
@@ -51,7 +51,7 @@ This document is an **alternative to [03c-copilot-studio-setup.md](./03c-copilot
 
 ```
 Microsoft Foundry project  (proj-rag-kb)
-└── Agent: agent-rag-kb   (model: gpt-4o chat deployment — REQUIRED on this path)
+└── Agent: agent-rag-kb   (model: chat deployment, e.g. gpt-5.5 — REQUIRED on this path)
     ├── Instructions / system prompt   (grounding + refusal rules)
     ├── Tools / knowledge
     │     ├── Azure AI Search tool  → idx-rag-documents
@@ -59,16 +59,16 @@ Microsoft Foundry project  (proj-rag-kb)
     │     └── Microsoft Fabric tool → Fabric Data Agent (structured HR data)
     │           (on-behalf-of caller identity → Fabric workspace + RLS honored)
     └── Channel
-          └── Microsoft 365 Copilot + Teams   (custom engine agent, PREVIEW;
-                                              Microsoft 365 Agents SDK / Toolkit wrapper,
-                                              Entra bot identity → agent endpoint)
+          └── Microsoft 365 Copilot + Teams   (Foundry portal publish, GA;
+                                              Azure Bot Service → agent's stable endpoint;
+                                              custom engine agent via Agents Toolkit optional)
 ```
 
 The agent uses the **Foundry Agent Service runtime** for orchestration: it owns query planning, tool selection (AI Search vs. Fabric Data Agent vs. both), grounding, and citation assembly. The chat-completion model deployment that was **opt-in** for the Copilot Studio path is **required** here — Foundry generates answers on a model *you* deploy and bill, not on the M365 Copilot host model.
 
-[![Foundry agent tool routing: user, custom engine agent channel, agent-rag-kb, Azure AI Search tool and Microsoft Fabric tool](./assets/03d-foundry-agent-setup-tool-routing.png)](./assets/03d-foundry-agent-setup-tool-routing.png)
+[![Foundry agent tool routing: user, Teams / M365 Copilot channel, agent-rag-kb, Azure AI Search tool and Microsoft Fabric tool](./assets/foundry-agent-tool-routing.png)](./assets/foundry-agent-tool-routing.png)
 
-<sub>Editable source: [`assets/03d-foundry-agent-setup-tool-routing.drawio`](./assets/03d-foundry-agent-setup-tool-routing.drawio) - regenerate with `python scripts/export_diagrams.py docs/assets`.</sub>
+<sub>Editable source: [`assets/foundry-agent-tool-routing.drawio`](./assets/foundry-agent-tool-routing.drawio) - regenerate with `python scripts/export_diagrams.py docs/assets`.</sub>
 
 ---
 
@@ -91,7 +91,7 @@ In Microsoft Foundry Agent Service you give an agent capabilities by adding **to
 | Invocation | the **model decides** per turn whether/which to call; steer with **instructions** and **`tool_choice`** | the runtime **always retrieves** on every turn |
 | Multiple sources | the model **routes** between AI Search and Fabric per question | one always-on source |
 | Best for | multi-source agents that must pick documents vs. data vs. both | a single, always-relevant corpus |
-| Here | Azure AI Search **tool** + Microsoft Fabric **tool** (this doc) | the Copilot Studio "knowledge source" model ([03c](./03c-copilot-studio-setup.md)) |
+| Here | Azure AI Search **tool** + Microsoft Fabric **tool** (this doc) | the Copilot Studio "knowledge source" model ([07](./07-copilot-studio-setup.md)) |
 
 **Why tools, not a knowledge base, for this agent:** with two sources — unstructured documents *and* structured data — you want the model to **route**: search the documents for wording, query the Fabric Data Agent for numbers, or call both for a cross-source question. Tool selection delivers that; an always-retrieve knowledge base does not. You steer the routing with the **agent instructions** in Phase D4, and can force a specific tool with **`tool_choice`**.
 
@@ -105,31 +105,31 @@ Confirm these before building. The first three differ materially from the Copilo
 
 ### D0.1 The licensing delta (why you're here)
 
-| Cost surface | Copilot Studio path (03c) | Foundry agent path (03d) |
+| Cost surface | Copilot Studio path (07) | Foundry agent path (08) |
 |---|---|---|
 | **Agent runtime** | Copilot Studio **message capacity** (consumption packs) or per-user Copilot Studio license — **on top of** M365 Copilot | **Azure consumption** — chat-model tokens + tool calls + AI Search query unit + Fabric capacity. Billed to the Azure subscription. |
 | **AI Search + Fabric Data Agent connectors** | Surfaced as **premium / capacity-billed connectors** in Power Platform | Native Foundry **tools** — no Power Platform connector licensing |
 | **End-user access** | Microsoft 365 Copilot license | Microsoft 365 Copilot license (**unchanged**) |
 | **Maker / builder** | Copilot Studio Maker license | **Foundry User** (or Project Manager) RBAC on the Foundry project |
 
-In effect, this replaces a **Power Platform message-pack line item** with **Azure pay-as-you-go**. For an organization already committed to Azure, that is usually the cheaper and more predictable path, and it removes the premium-connector constraint entirely. Quantify both for your scenario with [07 § Licensing deep-dive](./07-copilot-studio-vs-foundry.md#licensing-deep-dive) before deciding.
+In effect, this replaces a **Power Platform message-pack line item** with **Azure pay-as-you-go**. For an organization already committed to Azure, that is usually the cheaper and more predictable path, and it removes the premium-connector constraint entirely. Quantify both for your scenario with [10 § Licensing deep-dive](./10-copilot-studio-vs-foundry.md#licensing-deep-dive) before deciding.
 
 ### D0.2 Chat-model deployment is now REQUIRED
 
 The locked base pattern deploys **only an embedding model** and leaves the chat deployment opt-in (Copilot Studio answers on its own host model). **On the Foundry path you must deploy a chat model** — the agent generates answers on it.
 
-- Set `chatModelName` to `gpt-4o` (or `gpt-4o-mini` for cost-sensitive demos) in `infra/main.parameters.local.json` and redeploy, **or** add the deployment in the Foundry portal (**Models + endpoints → Deploy model**).
+- Set `chatModelName` to a current GA chat model — e.g. `gpt-5.5` (or `gpt-5.4-mini` for cost-sensitive demos) — in `infra/main.parameters.local.json` and redeploy (azd: `azd env set CHAT_MODEL_NAME gpt-5.5` then `azd provision`), **or** add the deployment in the Foundry portal (**Models + endpoints → Deploy model**). Check the [model retirement schedule](https://learn.microsoft.com/azure/foundry/openai/concepts/model-retirement-schedule) first — `gpt-4o` / `gpt-4o-mini` retire by 2027-04-14.
 - Confirm TPM quota for the chat model in your region (see [02-prerequisites.md § 13](./02-prerequisites.md#13--quotas-to-check-before-you-start)). A demo needs ~10K TPM; production sizing depends on concurrency.
 
 ### D0.3 A published Fabric Data Agent (for the structured-data tool)
 
 The **Azure AI Search tool** grounds on the unstructured document corpus you already indexed. The **Fabric Data Agent tool** adds a complementary capability — conversational Q&A over **structured** data (e.g. counts, amounts, dates pulled from a Lakehouse / Warehouse / semantic model).
 
-**Build and publish the Fabric Data Agent first** — the full step-by-step (load the structured sample tables → create → ground with instructions + example questions → publish, plus the on-behalf-of security model) is in **[03e-fabric-data-agent.md](./03e-fabric-data-agent.md)**. It uses the in-repo structured sample ([`samples/structured/`](../samples/structured/)), which corresponds to the uploaded document set so the two knowledge sources stay consistent. Phase D3 below connects the published agent.
+**Build and publish the Fabric Data Agent first** — the full step-by-step (load the structured sample tables → create → ground with instructions + example questions → publish, plus the on-behalf-of security model) is in **[09-fabric-data-agent.md](./09-fabric-data-agent.md)**. It uses the in-repo structured sample ([`samples/structured/`](../samples/structured/)), which corresponds to the uploaded document set so the two knowledge sources stay consistent. Phase D3 below connects the published agent.
 
 Tenant settings: the Fabric admin must enable **Copilot and Azure OpenAI** and **Data Agent** creation ([Fabric admin portal](https://learn.microsoft.com/fabric/admin/service-admin-portal-copilot)).
 
-> If your deployment only needs unstructured-document RAG, **skip the Fabric tool** (Phase D3) and 03e — the AI Search tool alone reproduces the 03c agent on the Foundry runtime, and you still get the licensing benefit. The Fabric Data Agent is an optional add-on, not a base-pattern requirement.
+> If your deployment only needs unstructured-document RAG, **skip the Fabric tool** (Phase D3) and 09 — the AI Search tool alone reproduces the 07 agent on the Foundry runtime, and you still get the licensing benefit. The Fabric Data Agent is an optional add-on, not a base-pattern requirement.
 
 ### D0.4 Builder + tenant prerequisites
 
@@ -138,7 +138,7 @@ Tenant settings: the Fabric admin must enable **Copilot and Azure OpenAI** and *
 | **Microsoft Foundry project** | A project exists in a Foundry resource (reuse the `aif-rag-<env>` account from the base deploy, or a project hub bound to it) | Hosts the agent, tools, and connections |
 | **Builder RBAC on the project** | **Foundry User** (build agents/connections; formerly *Azure AI User*) — or **Foundry Project Manager** for full project control | Create agent, add tools, create connections |
 | **Microsoft 365 Copilot license** (end users) | Assigned to the pilot audience | Required to consume the agent in Teams / M365 Copilot |
-| **Teams app upload / admin approval** | Same one-time approval as 03c | Custom engine agent is uploaded as a Teams app |
+| **Teams app admin approval** | Same one-time approval as 07 | The published agent appears as a Teams app for org-wide use |
 | **Azure consumption budget** | Subscription with PAYG enabled + a cost alert | Replaces Copilot Studio message packs |
 
 ---
@@ -148,11 +148,11 @@ Tenant settings: the Fabric admin must enable **Copilot and Azure OpenAI** and *
 | Step | | Action | Gate |
 |---|---|---|---|
 | **1** | <img src="./assets/icons/foundry-project.svg" width="28" alt=""> | Open the Foundry portal ([ai.azure.com](https://ai.azure.com)) and select or create a project bound to `aif-rag-<env>` | ☐ Project is on the same Foundry resource as the embedding deployment |
-| **2** | <img src="./assets/icons/foundry-models.svg" width="28" alt=""> | **Models + endpoints**: confirm `text-embedding-3-large`; deploy the chat model (`gpt-4o`) from D0.2 if missing | ☐ Both deployments listed |
+| **2** | <img src="./assets/icons/foundry-models.svg" width="28" alt=""> | **Models + endpoints**: confirm `text-embedding-3-large`; deploy the chat model (e.g. `gpt-5.5`) from D0.2 if missing | ☐ Both deployments listed |
 | **3** | <img src="./assets/icons/file.svg" width="28" alt=""> | Note the **project endpoint** and **project name** | ☐ Values recorded for Phase D6 |
 
 1. Open the **Microsoft Foundry portal** ([ai.azure.com](https://ai.azure.com)) and select (or create) a project bound to your `aif-rag-<env>` resource. Reusing the existing Foundry account keeps the embedding deployment, RBAC surface, and region aligned with the index.
-2. Under **Models + endpoints**, confirm the **embedding** deployment (`text-embedding-3-large`) exists and **deploy the chat model** (`gpt-4o`) from D0.2 if it is not already there.
+2. Under **Models + endpoints**, confirm the **embedding** deployment (`text-embedding-3-large`) exists and **deploy the chat model** (e.g. `gpt-5.5`) from D0.2 if it is not already there.
 3. Note the **project endpoint** and **project name** — Phase D6 needs them.
 
 Reference: [Microsoft Foundry Agent Service overview](https://learn.microsoft.com/azure/foundry/agents/overview).
@@ -189,7 +189,7 @@ Reference: [Azure AI Search tool (Microsoft Foundry Agent Service)](https://lear
 
 The Fabric Data Agent is the **second knowledge tool** — it grounds answers on **structured** data by translating the question to a query (NL2SQL / NL2DAX), rather than retrieving document chunks. It must be in the **same tenant** as the Foundry project, and it authenticates **only** with the **signed-in user's identity (On-Behalf-Of)** — **service principal auth is not supported.**
 
-1. **Get the data agent's IDs.** In Microsoft Fabric, open the data agent you published per [03e](./03e-fabric-data-agent.md). Copy the **`workspace_id`** and **`artifact_id`** from the URL — the path looks like `.../groups/<workspace_id>/aiskills/<artifact_id>...` (both are GUIDs).
+1. **Get the data agent's IDs.** In Microsoft Fabric, open the data agent you published per [09](./09-fabric-data-agent.md). Copy the **`workspace_id`** and **`artifact_id`** from the URL — the path looks like `.../groups/<workspace_id>/aiskills/<artifact_id>...` (both are GUIDs).
 2. **Create the project connection.** In the Foundry portal → **Management center → Connected resources → New connection → Microsoft Fabric** → enter the `workspace_id` and `artifact_id` → save → copy the **connection ID**.
 3. **Add the tool to the agent** (Phase D4) using that connection.
 4. **Identity & access (On-Behalf-Of).** At runtime the tool queries Fabric as the **signed-in end user**, so each user only sees data they're permitted to — workspace permissions + **row-/object-level security** are enforced per user. Every end user (not just the builder) needs **Read** access to the data agent **and** the minimum permission on each underlying source:
@@ -259,11 +259,11 @@ Replace `<ai_search_tool_name>` / `<fabric_tool_name>` with the names you give t
 
 Instructions guide the model but don't guarantee a call. To **force** (or disable) a specific tool — e.g. a test that must exercise the Fabric tool — set the run's **`tool_choice`** parameter to the tool type (for example `tool_choice={"type": "fabric_dataagent"}` or `{"type": "azure_ai_search"}`); leave it `auto` (the default) for normal routing. See [Controlling tool invocation](https://learn.microsoft.com/azure/foundry/agents/concepts/tool-catalog).
 
-### D4.3 Document-level security trimming (same nuance as 03c)
+### D4.3 Document-level security trimming (same nuance as 07)
 
 The AI Search index carries a `group_ids` security-trim field ([01 § Document-level access control](./01-architecture.md#document-level-chunk-level-access-control)). For per-user trimming the agent must inject the **caller's Entra group IDs** as an OData `$filter` on the AI Search tool:
 `group_ids/any(g: search.in(g, '<caller group IDs>'))`
-The custom engine agent channel supplies the caller identity; mapping that identity to group IDs and passing the filter is **deployment-specific wiring** — validate it end-to-end ([05 § G](./05-testing.md)) rather than assuming it is automatic. For structured data, trimming is enforced by Fabric RLS via the On-Behalf-Of identity (Phase D3) — a cleaner per-user story than the document side.
+The Teams / M365 Copilot channel supplies the caller identity; mapping that identity to group IDs and passing the filter is **deployment-specific wiring** — validate it end-to-end ([04 § G](./04-testing.md)) rather than assuming it is automatic. For structured data, trimming is enforced by Fabric RLS via the On-Behalf-Of identity (Phase D3) — a cleaner per-user story than the document side.
 
 ---
 
@@ -271,48 +271,48 @@ The custom engine agent channel supplies the caller identity; mapping that ident
 
 | Step | | Action | Gate |
 |---|---|---|---|
-| **1** | <img src="./assets/icons/foundry-agent-service.svg" width="28" alt=""> | Run the five question classes from 03c § C4 in the playground | ☐ Factual, paraphrased, multi-document, structured-data and out-of-corpus all behave |
+| **1** | <img src="./assets/icons/foundry-agent-service.svg" width="28" alt=""> | Run the five question classes from 07 § C4 in the playground | ☐ Factual, paraphrased, multi-document, structured-data and out-of-corpus all behave |
 | **2** | <img src="./assets/icons/blob-block.svg" width="28" alt=""> | Confirm citations resolve to Blob `raw/` files; Fabric answers cite the data agent | ☐ Citations resolve |
 | **3** | <img src="./assets/icons/users.svg" width="28" alt=""> | If security trimming is configured, test in-group and out-of-group users | ☐ Out-of-group user is trimmed |
 
 Details for each step:
 
-1. Open the agent in the **playground** and run the same question classes as 03c § C4: factual lookup, paraphrased, multi-document, **structured-data** (exercises the Fabric tool), and **out-of-corpus** (must refuse).
+1. Open the agent in the **playground** and run the same question classes as 07 § C4: factual lookup, paraphrased, multi-document, **structured-data** (exercises the Fabric tool), and **out-of-corpus** (must refuse).
 2. Confirm citations resolve to the Blob `raw/` source files and that Fabric answers cite the data agent.
 3. If you configured security trimming, test **in-group sees / out-of-group trimmed** against two test users before exposing the channel.
 
 ---
 
-## Phase D6 — Publish to Microsoft 365 Copilot + Teams (PREVIEW)
+## Phase D6 — Publish to Microsoft 365 Copilot + Teams
 
-![Preview](./assets/badges/preview.svg)
+![GA](./assets/badges/ga.svg) ![Static only](./assets/badges/static-only.svg)
+
+**Default route — publish from the Foundry portal** ([Learn](https://learn.microsoft.com/azure/foundry/agents/how-to/publish-copilot)). Foundry creates an **Azure Bot Service** resource for the agent's stable endpoint, so new agent versions roll out without re-publishing.
 
 | Step | | Action | Gate |
 |---|---|---|---|
-| **1** | <img src="./assets/icons/code.svg" width="28" alt=""> | Wrap the agent with the Microsoft 365 Agents Toolkit (project endpoint + agent ID from D1) | ☐ Bot + Teams manifest generated |
-| **2** | <img src="./assets/icons/app-registrations.svg" width="28" alt=""> | Grant the bot's Entra app registration access to the Foundry agent | ☐ Bot can call the agent |
-| **3** | <img src="./assets/icons/entra-id.svg" width="28" alt=""> | Configure SSO so the caller's token reaches the agent | ☐ OBO and trimming hold through the channel |
-| **4** | <img src="./assets/icons/users.svg" width="28" alt=""> | Sideload for the pilot (you / your team) | ☐ Works in Teams and M365 Copilot |
-| **5** | <img src="./assets/icons/enterprise-applications.svg" width="28" alt=""> | Org-wide publish via Teams admin center → Manage apps | ☐ Approved (1–2 business days) |
-
-Details for each step:
+| **1** | <img src="./assets/icons/entra-id.svg" width="28" alt=""> | Confirm roles: **Azure Bot Service Contributor** (or Contributor) on the resource group you publish into, plus **Foundry User** on the project | ☐ Roles assigned |
+| **2** | <img src="./assets/icons/foundry-agent-service.svg" width="28" alt=""> | Foundry portal → the tested agent version → **Publish → Microsoft 365 Copilot and Teams**; fill name, description and icon | ☐ Bot Service resource created |
+| **3** | <img src="./assets/icons/users.svg" width="28" alt=""> | Validate as yourself in Teams and Microsoft 365 Copilot | ☐ Answers with citations |
+| **4** | <img src="./assets/icons/entra-id.svg" width="28" alt=""> | Check the caller's identity reaches the tools (Fabric on-behalf-of, D3; security trimming, D4) | ☐ Two-user test passes ([04 § G](./04-testing.md)) |
+| **5** | <img src="./assets/icons/enterprise-applications.svg" width="28" alt=""> | Org-wide availability via Teams admin center → Manage apps | ☐ Approved (1–2 business days) |
 
 > [!WARNING]
-> **Re-verify every step here against current Microsoft Learn** — this is the most frequently updated area of the pattern.
+> **Data handling.** When you publish to Microsoft 365 and Teams, those services process and store the agent's metadata and the responses users receive, under Microsoft 365 / Teams terms and data-residency commitments — review that with the customer's compliance owner first. Projects with **public network access disabled** can't publish from the portal; use the REST API with the source-IP-filtered public route (see the Learn page).
 
-The Foundry agent is exposed to Teams / M365 Copilot as a **custom engine agent**: a thin Microsoft 365 Agents SDK app (a bot registration) that forwards user turns to your Foundry agent endpoint and streams responses back.
+**Alternative route — custom engine agent (Microsoft 365 Agents Toolkit).** Use it when you need custom code in the channel (your own bot logic, adaptive cards, extra SSO handling). The Foundry agent is exposed to Teams / M365 Copilot through a thin Microsoft 365 Agents SDK app (a bot registration) that forwards user turns to your Foundry agent endpoint and streams responses back:
 
 1. **Wrap the agent** with the **Microsoft 365 Agents Toolkit** (VS Code) — scaffold a custom engine agent that targets your Foundry **project endpoint + agent ID** from Phase D1. The toolkit generates the Teams app manifest and the bot.
 2. **Entra bot identity.** The generated bot has its own Entra app registration; grant it access to call the Foundry agent (the project connection / **Foundry User** on the project, or the API-key connection the toolkit configures). This bot identity is the trust bridge between Teams and Foundry.
 3. **Carry the user identity** so on-behalf-of (Phase D3) and security trimming (Phase D4) work — configure SSO on the bot so the caller's token, not just the bot's, reaches the agent.
 4. **Sideload for the pilot** (just you / your team) to validate in Teams and M365 Copilot.
-5. **Org-wide publish** goes through the **Teams admin center → Manage apps** approval — the same 1–2 business-day gate as 03c § C0.2. The agent appears in the Teams app store and the M365 Copilot agent list for licensed users.
+5. **Org-wide publish** goes through the **Teams admin center → Manage apps** approval — the same 1–2 business-day gate as 07 § C0.2. The agent appears in the Teams app store and the M365 Copilot agent list for licensed users.
 
-Reference: [Build agents with the Microsoft 365 Agents SDK](https://learn.microsoft.com/microsoft-365/agents-sdk/) · [Custom engine agents for Microsoft 365 Copilot](https://learn.microsoft.com/microsoft-365-copilot/extensibility/overview-custom-engine-agent) · [Agents Toolkit](https://learn.microsoft.com/microsoftteams/platform/toolkit/agents-toolkit-fundamentals).
+Reference: [Publish agents to Microsoft Copilot and Teams](https://learn.microsoft.com/azure/foundry/agents/how-to/publish-copilot) · [Build agents with the Microsoft 365 Agents SDK](https://learn.microsoft.com/microsoft-365/agents-sdk/) · [Custom engine agents for Microsoft 365 Copilot](https://learn.microsoft.com/microsoft-365-copilot/extensibility/overview-custom-engine-agent) · [Agents Toolkit](https://learn.microsoft.com/microsoftteams/platform/toolkit/agents-toolkit-fundamentals).
 
 ### Alternative front end — standalone web app
 
-The M365/Teams custom engine agent is one way to reach the agent; it is not the only one. For a **self-hosted, brandable web chat UI** (e.g. an internal portal) outside Teams/M365, this repo ships a minimal in-repo app ([`webapp/app/`](../webapp/app/)) that you deploy onto Azure Container Apps with the project's own flow — no external sample, no separate toolchain. Use **MI mode** (default) for an AI-Search-only agent, or **On-Behalf-Of (OBO)** mode, which is **required** for the Fabric data agent tool to pass the user's identity through. Full runbook: **[09-foundry-agent-webapp.md](./09-foundry-agent-webapp.md)**. The agent runtime and tools are unchanged; only the client differs.
+Publishing to M365/Teams is one way to reach the agent; it is not the only one. For a **self-hosted, brandable web chat UI** (e.g. an internal portal) outside Teams/M365, this repo ships a minimal in-repo app ([`webapp/app/`](../webapp/app/)) that you deploy onto Azure Container Apps with the project's own flow — no external sample, no separate toolchain. Use **MI mode** (default) for an AI-Search-only agent, or **On-Behalf-Of (OBO)** mode, which is **required** for the Fabric data agent tool to pass the user's identity through. Full runbook: **[12-foundry-agent-webapp.md](./12-foundry-agent-webapp.md)**. The agent runtime and tools are unchanged; only the client differs.
 
 ---
 
@@ -320,13 +320,13 @@ The M365/Teams custom engine agent is one way to reach the agent; it is not the 
 
 This is the **complete identity map** for the Foundry-agent path. Three identities matter: the **AI Search service MI** (unchanged from base), the **Foundry project MI** (new — for the AI Search tool), and the **caller's user identity** (flowed through for Fabric + security trimming). Builder and bot identities round it out.
 
-> For the **full cross-layer picture** (ingest → platform → agent) and **how per-user restrictions propagate** — AI Search filter injection vs. Fabric On-Behalf-Of RLS/OLS/Purview — see **[08-rbac-and-identity-passthrough.md](./08-rbac-and-identity-passthrough.md)**.
+> For the **full cross-layer picture** (ingest → platform → agent) and **how per-user restrictions propagate** — AI Search filter injection vs. Fabric On-Behalf-Of RLS/OLS/Purview — see **[11-rbac-and-identity-passthrough.md](./11-rbac-and-identity-passthrough.md)**.
 
 ### Machine-to-machine (runtime)
 
 | Principal | Role | Scope | Why | New? |
 |---|---|---|---|---|
-| **AI Search service MI** | **Cognitive Services OpenAI User** | Foundry resource | Integrated vectorizer embeds queries — the silent-failure trap if wrong ([06 § 4.1](./06-troubleshooting.md)) | Unchanged (base) |
+| **AI Search service MI** | **Cognitive Services OpenAI User** | Foundry resource | Integrated vectorizer embeds queries — the silent-failure trap if wrong ([05 § 4.1](./05-troubleshooting.md)) | Unchanged (base) |
 | **AI Search service MI** | **Storage Blob Data Reader** | Storage account | Indexer pulls chunk JSON | Unchanged (base) |
 | **Foundry resource MI** | **Storage Blob Data Reader** | Storage account | Document Intelligence fetches `raw/` via `urlSource` | Unchanged (base) |
 | **Foundry *project* MI** | **Search Index Data Contributor** + **Search Service Contributor** (or **Search Index Data Reader** for read-only) | AI Search service | **Agent's AI Search tool queries the index** | **New (D2)** |
@@ -376,26 +376,26 @@ This is the **complete identity map** for the Foundry-agent path. Three identiti
 - [ ] (If in scope) Fabric Data Agent published and connected with **on-behalf-of** identity (D3)
 - [ ] Out-of-corpus question is **refused** (prompt guardrail working) (D4/D5)
 - [ ] (If configured) security trimming: in-group sees / out-of-group trimmed, validated with two users (D5)
-- [ ] Custom engine agent sideloaded; reachable in Teams **and** M365 Copilot as a normal licensed user (D6)
+- [ ] Agent published (Foundry portal, or the custom engine agent route); reachable in Teams **and** M365 Copilot as a normal licensed user (D6)
 - [ ] Caller identity (SSO) reaches the agent so OBO + trimming hold through the channel (D6)
 - [ ] Org-wide publish approved in Teams admin center (D6)
 
 ---
 
-## When to fall back to Copilot Studio (03c)
+## When to fall back to Copilot Studio (07)
 
-Choose 03c instead of this path when **any** of these hold — full matrix in [07](./07-copilot-studio-vs-foundry.md#decision-matrix):
+Choose 07 instead of this path when **any** of these hold — full matrix in [10](./10-copilot-studio-vs-foundry.md#decision-matrix):
 
-| | Condition | Why 03c |
+| | Condition | Why 07 |
 |---|---|---|
-| <img src="./assets/icons/alerts.svg" width="24" alt=""/> | You **cannot take a preview dependency** for production | M365 publishing from Foundry is ![Preview](./assets/badges/preview.svg); 03c is the fully-GA option |
-| <img src="./assets/icons/users.svg" width="24" alt=""/> | **No maker/dev capacity** to operate Foundry + the Agents Toolkit wrapper | 03c is low-code |
+| <img src="./assets/icons/alerts.svg" width="24" alt=""/> | You **need structured-data Q&A but cannot take a preview dependency** | The Microsoft Fabric tool is ![Preview](./assets/badges/preview.svg); an AI Search-only Foundry agent or 07 avoids it |
+| <img src="./assets/icons/users.svg" width="24" alt=""/> | **No maker/dev capacity** to operate a Foundry project, chat deployment and tools | 07 is low-code |
 | <img src="./assets/icons/ai-search.svg" width="24" alt=""/> | **Unstructured-document RAG only**, small audience, Copilot Studio message capacity already licensed | The licensing driver doesn't apply |
 
 Details:
 
-- You **cannot take a preview dependency** for production (M365 publishing from Foundry is preview).
-- There is **no maker/dev capacity** to operate Microsoft Foundry + the Agents Toolkit wrapper.
+- You need structured-data Q&A but **cannot take a preview dependency** (the Microsoft Fabric tool is preview; M365/Teams publishing from Foundry is GA).
+- There is **no maker/dev capacity** to operate a Microsoft Foundry project, chat deployment and tools.
 - The agent is **unstructured-document RAG only**, the audience is small, and Copilot Studio message capacity is already licensed — the licensing driver doesn't apply.
 
 ---
@@ -407,11 +407,11 @@ Details:
 | <img src="./assets/icons/foundry-agent-service.svg" width="24" alt=""/> | Foundry Agent Service | [overview](https://learn.microsoft.com/azure/foundry/agents/overview) · [tool catalog](https://learn.microsoft.com/azure/foundry/agents/concepts/tool-catalog) · [RBAC in Microsoft Foundry](https://learn.microsoft.com/azure/foundry/concepts/rbac-foundry) |
 | <img src="./assets/icons/ai-search.svg" width="24" alt=""/> | Tools | [Azure AI Search tool](https://learn.microsoft.com/azure/foundry/agents/how-to/tools/ai-search) · [Microsoft Fabric tool](https://learn.microsoft.com/azure/foundry/agents/how-to/tools/fabric) ![Preview](./assets/badges/preview.svg) |
 | <img src="./assets/icons/sql-database.svg" width="24" alt=""/> | Fabric Data Agent | [concept](https://learn.microsoft.com/fabric/data-science/concept-data-agent) · [create](https://learn.microsoft.com/fabric/data-science/how-to-create-data-agent) |
-| <img src="./assets/icons/app-registrations.svg" width="24" alt=""/> | Publishing | [Custom engine agents for Microsoft 365 Copilot](https://learn.microsoft.com/microsoft-365-copilot/extensibility/overview-custom-engine-agent) · [Agents SDK](https://learn.microsoft.com/microsoft-365/agents-sdk/) · [Agents Toolkit](https://learn.microsoft.com/microsoftteams/platform/toolkit/agents-toolkit-fundamentals) |
-| <img src="./assets/icons/file.svg" width="24" alt=""/> | Companion decision guide | [07-copilot-studio-vs-foundry.md](./07-copilot-studio-vs-foundry.md) |
+| <img src="./assets/icons/app-registrations.svg" width="24" alt=""/> | Publishing | [Publish to Microsoft Copilot and Teams](https://learn.microsoft.com/azure/foundry/agents/how-to/publish-copilot) · [Custom engine agents for Microsoft 365 Copilot](https://learn.microsoft.com/microsoft-365-copilot/extensibility/overview-custom-engine-agent) · [Agents SDK](https://learn.microsoft.com/microsoft-365/agents-sdk/) · [Agents Toolkit](https://learn.microsoft.com/microsoftteams/platform/toolkit/agents-toolkit-fundamentals) |
+| <img src="./assets/icons/file.svg" width="24" alt=""/> | Companion decision guide | [10-copilot-studio-vs-foundry.md](./10-copilot-studio-vs-foundry.md) |
 
 ---
 
-Next: [03e - Fabric Data Agent](./03e-fabric-data-agent.md) →
+Next: [09 - Fabric Data Agent](./09-fabric-data-agent.md) →
 
-*Last updated: 2026-10-02*
+*Last updated: 2026-10-07*

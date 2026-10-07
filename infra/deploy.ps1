@@ -34,13 +34,23 @@
   Adds `restoreFoundryFromSoftDelete=true` to the Bicep parameters so the Foundry
   account is restored in place from soft-delete — preserves the system-assigned MI
   principal ID and any role assignments granted to it (notably the DI-caller SP's
-  Cognitive Services User grant from 03b-fabric-setup.md § F2.2).
+  Cognitive Services User grant from 06-fabric-setup.md § F2.2).
   CAUTION: do NOT set this switch on a healthy deploy or when no soft-deleted account
   exists — Azure returns `CanNotRestoreANonExistingResource` and the deploy fails.
-  See docs/06-troubleshooting.md § 0.5.
+  See docs/05-troubleshooting.md § 0.5.
+
+.PARAMETER TenantId
+  Optional. Entra tenant ID the deployment must target. With -SubscriptionId, the script
+  stops unless the active `az account show` context matches (multi-tenant guard).
+
+.PARAMETER SubscriptionId
+  Optional. Subscription ID the deployment must target (see -TenantId).
 
 .EXAMPLE
   pwsh ./infra/deploy.ps1 -WhatIf
+
+.EXAMPLE
+  pwsh ./infra/deploy.ps1 -TenantId <tenant-id> -SubscriptionId <subscription-id> -Verify
 
 .EXAMPLE
   pwsh ./infra/deploy.ps1 -ParameterFile infra/main.parameters.local.json -Verify
@@ -62,12 +72,17 @@ param(
     # to the Bicep parameters so the Foundry account is restored in place (preserves MI
     # principal ID + role assignments). Has no effect when no soft-deleted account exists —
     # in fact will FAIL with CanNotRestoreANonExistingResource if you set it gratuitously.
-    # See docs/06-troubleshooting.md § 0.5.
-    [switch]$RestoreFoundry
+    # See docs/05-troubleshooting.md § 0.5.
+    [switch]$RestoreFoundry,
+    # Optional tenant/subscription guard (recommended - see docs/03-deployment.md Phase 0).
+    # When both are set, the script stops unless `az account show` matches them.
+    [string]$TenantId,
+    [string]$SubscriptionId
 )
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
+. "$PSScriptRoot/hooks/common.ps1"   # shared with the azd hooks (ids writer, post-deploy, tenant guard)
 
 # --- Sanity checks --------------------------------------------------------------
 
@@ -88,6 +103,10 @@ Copy the template and fill in your values:
     Copy-Item infra/main.parameters.json $ParameterFile
     # then edit $ParameterFile (it is gitignored)
 "@
+}
+
+if ($TenantId -or $SubscriptionId) {
+    Assert-AzContextMatches -TenantId $TenantId -SubscriptionId $SubscriptionId
 }
 
 # --- Resolve region from the parameter file -------------------------------------
@@ -155,73 +174,18 @@ Write-Host "Deployment succeeded." -ForegroundColor Green
 
 # --- Merge outputs into demo-ids.local.json -------------------------------------
 #
-# demo-ids.local.json is a HYBRID file:
-#   * The Bicep deploymentSummary owns all Azure resource IDs / endpoints — these
-#     are AUTHORITATIVE and overwritten on every successful deploy.
-#   * Nested objects added by humans (e.g. `fabric`, `sp-rag-di-caller`, custom
-#     keys) are PRESERVED across deploys because they're populated during the
-#     manual Fabric / Copilot Studio setup phases and are not in scope for Bicep.
-#
-# We therefore MERGE rather than overwrite:
-#   1. Read the existing file if present (preserve all top-level keys it has).
-#   2. Overwrite every key the Bicep summary owns with the fresh value.
-#   3. Re-emit with a stable ordering: _meta header → Bicep-managed fields
-#      (alphabetical) → preserved manual keys (insertion order from existing file).
-#
-# Reference: docs/02-prerequisites.md § "demo-ids.local.json" and the
-# `_meta.description` field written below.
+# demo-ids.local.json is a HYBRID file: the Bicep deploymentSummary owns the flat Azure
+# keys (overwritten on every deploy); nested sections maintained by hand (corpus,
+# fabric, sp-rag-di-caller, copilotStudio) are preserved. The writer lives in
+# infra/hooks/common.ps1 and is shared with the azd postprovision hook, so both paths
+# produce the same file. Reference: docs/13-configuration-reference.md section 3.
 
 $summary = $deploy.properties.outputs.deploymentSummary.value
 $idsPath = "demo-ids.local.json"
-
-# Read existing file (best effort) so we can preserve manually-added sections.
-$existing = $null
-if (Test-Path $idsPath) {
-    try {
-        $existing = Get-Content $idsPath -Raw | ConvertFrom-Json -AsHashtable -Depth 20
-    } catch {
-        Write-Warning "Existing $idsPath could not be parsed as JSON; it will be replaced (manual sections will be lost)."
-        $existing = $null
-    }
-}
-
-# Flatten the Bicep summary (PSCustomObject) to a hashtable for predictable merging.
-$summaryHash = @{}
-foreach ($prop in $summary.PSObject.Properties) {
-    $summaryHash[$prop.Name] = $prop.Value
-}
-
-# Build the merged object with a stable ordering.
-$merged = [ordered]@{}
-$merged['_meta'] = [ordered]@{
-    description           = 'Per-deployment IDs for this pattern. Top-level Azure fields are auto-written by infra/deploy.ps1 from the Bicep deploymentSummary output and overwritten on every successful deploy. Nested objects (fabric, sp-rag-di-caller, ...) are manually maintained during the Fabric / Copilot Studio setup phases and are preserved across deploys. This file is gitignored — never commit a populated copy.'
-    azureFieldsSource     = 'infra/main.bicep deploymentSummary output (written by infra/deploy.ps1)'
-    manualSections        = @('fabric', 'sp-rag-di-caller')
-    lastDeployedAt        = (Get-Date -Format 'o')
-    lastDeploymentName    = $DeploymentName
-}
-foreach ($key in ($summaryHash.Keys | Sort-Object)) {
-    $merged[$key] = $summaryHash[$key]
-}
-if ($existing) {
-    foreach ($key in $existing.Keys) {
-        if ($key -eq '_meta') { continue }
-        if (-not $summaryHash.ContainsKey($key)) {
-            $merged[$key] = $existing[$key]
-        }
-    }
-}
-
-$merged | ConvertTo-Json -Depth 20 | Set-Content -Path $idsPath -Encoding UTF8
-Write-Host (" Outputs merged into: {0}" -f $idsPath) -ForegroundColor Green
-if ($existing) {
-    $preserved = @($existing.Keys | Where-Object { $_ -ne '_meta' -and -not $summaryHash.ContainsKey($_) })
-    if ($preserved.Count -gt 0) {
-        Write-Host ("   Preserved manual sections: {0}" -f ($preserved -join ', ')) -ForegroundColor DarkGray
-    }
-}
+$summaryHash = [ordered]@{}
+foreach ($prop in $summary.PSObject.Properties) { $summaryHash[$prop.Name] = $prop.Value }
+Write-DemoIdsFile -Path $idsPath -Summary $summaryHash -DeploymentName $DeploymentName -Source 'infra/main.bicep deploymentSummary output (written by infra/deploy.ps1)'
 Write-Host ""
-
 Write-Host "Resources deployed:" -ForegroundColor Cyan
 Write-Host (" Resource group  : {0}" -f $summary.resourceGroup)
 Write-Host (" Key Vault       : {0}" -f $summary.keyVault)
@@ -249,29 +213,18 @@ if ($SkipPostDeploy) {
 
 Write-Host "Running post-deploy AI Search configuration..." -ForegroundColor Yellow
 
-# Ensure Python deps are installed
-if (-not (Test-Path "scripts/.deps-installed")) {
-    Write-Host "Installing scripts/requirements.txt..." -ForegroundColor Yellow
-    pip install -r scripts/requirements.txt --quiet
-    New-Item -Path "scripts/.deps-installed" -ItemType File | Out-Null
+if ((Invoke-PostDeploySearch -IdsPath $idsPath) -ne 0) {
+    Write-Error "post_deploy_search.py failed. See output above; re-run after fixing (role propagation can take ~15 minutes)."
 }
 
-python scripts/post_deploy_search.py --ids $idsPath
-
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "post_deploy_search.py failed. See output above; re-run after fixing."
-}
-
-Write-Host ""
-Write-Host "Post-deploy configuration complete." -ForegroundColor Green
+Write-Host ""Write-Host "Post-deploy configuration complete." -ForegroundColor Green
 Write-Host ""
 
 # --- Verify ---------------------------------------------------------------------
 
 if ($Verify) {
     Write-Host "Running --verify smoke tests..." -ForegroundColor Yellow
-    python scripts/post_deploy_search.py --ids $idsPath --verify
-    if ($LASTEXITCODE -ne 0) {
+    if ((Invoke-PostDeploySearch -IdsPath $idsPath -Verify) -ne 0) {
         Write-Error "Verification failed."
     }
     Write-Host ""

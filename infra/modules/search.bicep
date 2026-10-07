@@ -1,8 +1,10 @@
 // =====================================================================================
-// modules/search.bicep — Azure AI Search Standard (semantic ranker enabled)
+// modules/search.bicep — Azure AI Search (Standard S1 default, Basic allowed; semantic ranker enabled)
 // =====================================================================================
 //
-// Standard (S1) or higher is REQUIRED — semantic ranker is not available on Free or Basic.
+// Basic or higher. Semantic ranker, integrated vectorization and managed identity all work on
+// Basic; S1 is the default for index-size / vector-quota headroom. Free is excluded because it
+// does not support managed identity (https://learn.microsoft.com/azure/search/search-sku-tier).
 // System-assigned managed identity is enabled so the indexer can authenticate to Blob
 // and the integrated vectorizer can authenticate to the Foundry OpenAI endpoint.
 //
@@ -24,8 +26,9 @@ param location string
 @description('Resource tags.')
 param tags object = {}
 
-@description('SKU. Standard (S1) MINIMUM for semantic ranker. Free/Basic are NOT supported by this pattern.')
+@description('SKU. Basic or higher (S1 default). Free is not supported by this pattern (no managed identity).')
 @allowed([
+  'basic'
   'standard'
   'standard2'
   'standard3'
@@ -50,7 +53,7 @@ param partitionCount int = 1
 ])
 param semanticSearch string = 'free'
 
-resource search 'Microsoft.Search/searchServices@2024-03-01-preview' = {
+resource search 'Microsoft.Search/searchServices@2025-05-01' = {
   name: name
   location: location
   tags: tags
@@ -63,7 +66,7 @@ resource search 'Microsoft.Search/searchServices@2024-03-01-preview' = {
   properties: {
     replicaCount: replicaCount
     partitionCount: partitionCount
-    hostingMode: 'default'
+    hostingMode: 'Default'
     publicNetworkAccess: 'enabled'
     semanticSearch: semanticSearch
     networkRuleSet: {
@@ -80,7 +83,7 @@ resource search 'Microsoft.Search/searchServices@2024-03-01-preview' = {
     // with a `WWW-Authenticate: Bearer ...` challenge — that is the default behaviour
     // when local auth is disabled and does not need to be opted in via `authOptions`.
     //
-    // Required roles for callers (granted in modules/rbac.bicep or 03-deployment-manual.md § 1.7):
+    // Required roles for callers (granted in modules/rbac.bicep or 03b-manual-deployment.md § 1.7):
     //   * Search Service Contributor   — create/manage indexes, datasources, indexers
     //   * Search Index Data Contributor — write documents to an index
     //   * Search Index Data Reader     — read/query documents

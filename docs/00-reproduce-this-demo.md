@@ -14,7 +14,7 @@
 ![Version](./assets/badges/version.svg) ![Default](./assets/badges/default.svg) ![Optional](./assets/badges/optional.svg) ![Static-only](./assets/badges/static-only.svg)
 
 > [!NOTE]
-> **Audience.** Someone who wants to clone this repo and stand up the full RAG knowledge-base demo against a fresh Azure subscription + Fabric tenant + Copilot Studio environment. Each Part below is a discrete checkpoint — finish A before starting B, etc. The deep-dive runbooks ([03-deployment-manual.md](03-deployment-manual.md), [03b-fabric-setup.md](03b-fabric-setup.md), [03c-copilot-studio-setup.md](03c-copilot-studio-setup.md), [04-deployment-automated.md](04-deployment-automated.md), [05-testing.md](05-testing.md), [06-troubleshooting.md](06-troubleshooting.md)) are linked from the specific steps that consume them rather than duplicated here.
+> **Audience.** Someone who wants to clone this repo and stand up the full RAG knowledge-base demo against a fresh Azure subscription + Fabric tenant + Copilot Studio environment. Each Part below is a discrete checkpoint — finish A before starting B, etc. The deep-dive runbooks ([03b-manual-deployment.md](03b-manual-deployment.md), [06-fabric-setup.md](06-fabric-setup.md), [07-copilot-studio-setup.md](07-copilot-studio-setup.md), [03-deployment.md](03-deployment.md), [04-testing.md](04-testing.md), [05-troubleshooting.md](05-troubleshooting.md)) are linked from the specific steps that consume them rather than duplicated here.
 
 > [!TIP]
 > **Time budget.** Time is dominated by waits on quota / model deployment propagation and Copilot Studio publishing approvals. See the table below.
@@ -94,7 +94,7 @@ The layout below lists the concrete resource names this demo creates (defaults f
 |---|---|---|
 | ☐ | <img src="./assets/icons/subscription.svg" width="24" alt=""/> **Azure subscription** | Contributor + User Access Administrator on the target RG (or subscription scope for greenfield) |
 | ☐ | <img src="./assets/icons/resource-group.svg" width="24" alt=""/> **Region chosen** | From [02-prerequisites.md § 11](./02-prerequisites.md) Tier-1 list — default: **East US 2** for US, **Sweden Central** for EU, **Australia East** / **Japan East** for APAC |
-| ☐ | <img src="./assets/icons/azure-openai.svg" width="24" alt=""/> **Azure OpenAI access approved** | In the subscription with TPM quota for `text-embedding-3-large` (10K TPM minimum for demo). `gpt-4o` quota is only required if you opt in to a chat deployment for deployment-specific extensions (the locked design doesn't consume one). |
+| ☐ | <img src="./assets/icons/azure-openai.svg" width="24" alt=""/> **Azure OpenAI access approved** | In the subscription with TPM quota for `text-embedding-3-large` (10K TPM minimum for demo). Chat-model quota (e.g. `gpt-5.5`, Global Standard) is only required if you opt in to a chat deployment for deployment-specific extensions (the locked design doesn't consume one). |
 | ☐ | <img src="./assets/icons/folder.svg" width="24" alt=""/> **Fabric capacity** | Allocated (F4+ for demo, F16+ for production) and a workspace where you have Admin or Member role |
 | ☐ | <img src="./assets/icons/users.svg" width="24" alt=""/> **Copilot Studio license** | For the building user — and channel-publishing pre-approvals **initiated** (Teams + M365 Copilot admin approvals take ~1-2 business days) |
 | ☐ | <img src="./assets/icons/powershell.svg" width="24" alt=""/> **Local tools** | Full table in [02-prerequisites.md § 0](./02-prerequisites.md#0--local-developer-tooling): **PowerShell 7+ (`pwsh`)**, **Azure CLI 2.60+** with the `bicep` extension installed (`az bicep install`), **Python 3.11+**, `git`. All shell snippets in the docs are PowerShell — see [README § Shell convention](../README.md#shell-convention). |
@@ -106,14 +106,14 @@ If any of these are missing, see [02-prerequisites.md](./02-prerequisites.md) fo
 
 ## Part A — Choose your deployment path
 
-Two paths produce the same end-state:
+Three entry points over **one** Bicep template produce the same end-state:
 
 | Path | When to use | Doc |
 |---|---|---|
-| **A1. Manual / portal + CLI** | Learning the architecture; one-off demo labs; first time you touch this pattern | [03-deployment-manual.md](./03-deployment-manual.md) |
-| **A2. Automated / Bicep** | Repeated deployments; CI/CD; multiple environments (dev/prod); production stand-up | [04-deployment-automated.md](./04-deployment-automated.md) |
+| **A1. Manual / portal + CLI** | Learning the architecture; one-off demo labs; first time you touch this pattern | [03b-manual-deployment.md](./03b-manual-deployment.md) |
+| **A2. Automated — `azd up`** ![azd up](./assets/badges/azd-up.svg) (fast path) or `infra/deploy.ps1` | Repeated deployments; CI/CD; multiple environments (dev/prod); production stand-up | [03-deployment.md](./03-deployment.md) |
 
-Both paths skip Fabric workspace creation and Layer-3 agent configuration in their respective deep-dives — each is **always manual** (no Bicep / IaC surface exists today) and each has its own dedicated document: Fabric in [03b-fabric-setup.md](./03b-fabric-setup.md), and the agent in [03c-copilot-studio-setup.md](./03c-copilot-studio-setup.md) (Copilot Studio) **or** [03d-foundry-agent-setup.md](./03d-foundry-agent-setup.md) (Microsoft Foundry). Both layers are identical regardless of which Azure path you chose in A1 / A2.
+Both paths skip Fabric workspace creation and Layer-3 agent configuration in their respective deep-dives — each is **always manual** (no Bicep / IaC surface exists today) and each has its own dedicated document: Fabric in [06-fabric-setup.md](./06-fabric-setup.md), and the agent in [07-copilot-studio-setup.md](./07-copilot-studio-setup.md) (Copilot Studio) **or** [08-foundry-agent-setup.md](./08-foundry-agent-setup.md) (Microsoft Foundry). Both layers are identical regardless of which Azure path you chose in A1 / A2.
 
 ---
 
@@ -124,25 +124,25 @@ Both paths skip Fabric workspace creation and Layer-3 agent configuration in the
 
 ### B1. (Path A1) Manual portal walkthrough
 
-Follow [03-deployment-manual.md](./03-deployment-manual.md) § Phase 1 (foundation), then jump to [03b-fabric-setup.md](./03b-fabric-setup.md) for Fabric (covered in Part C below), then return to [03-deployment-manual.md § Phase 4](./03-deployment-manual.md#phase-4--ai-search-index) for the AI Search index/datasource/indexer. This Path A1 leg provisions the Azure resources only: RG, Key Vault, Storage + 2 containers, Doc Intelligence, AI Foundry + 2 model deployments, AI Search Standard tier with semantic ranker, all RBAC role assignments, AI Search index + datasource + indexer with integrated vectorizer.
+Follow [03b-manual-deployment.md](./03b-manual-deployment.md) § Phase 1 (foundation), then jump to [06-fabric-setup.md](./06-fabric-setup.md) for Fabric (covered in Part C below), then return to [03b-manual-deployment.md § Phase 4](./03b-manual-deployment.md#phase-4--ai-search-index) for the AI Search index/datasource/indexer. This Path A1 leg provisions the Azure resources only: RG, Key Vault, Storage + 2 containers, Doc Intelligence, AI Foundry + 2 model deployments, AI Search Standard tier with semantic ranker, all RBAC role assignments, AI Search index + datasource + indexer with integrated vectorizer.
 
 Validation: end of Phase 4 — `Indexer last run = success, items processed = chunk JSON count`.
 
-### B2. (Path A2) Bicep + post-deploy script
+### B2. (Path A2) `azd up`, or Bicep + post-deploy script
 
-Follow [04-deployment-automated.md](./04-deployment-automated.md). This runs `pwsh ./infra/deploy.ps1` (or the equivalent `az deployment sub create`), which provisions everything in B1 except the AI Search index/datasource/indexer. Then `python scripts/post_deploy_search.py` creates the search-side resources via REST using the deployment outputs.
+Follow [03-deployment.md](./03-deployment.md). The fast path is **`azd up`** after authenticating both CLIs to the target tenant (03 § Fast path): its hooks guard the tenant/subscription, provision `infra/azd.bicep` → `infra/main.bicep`, write `demo-ids.local.json` and run `scripts/post_deploy_search.py`. The script path runs `pwsh ./infra/deploy.ps1 -TenantId <tenant-id> -SubscriptionId <subscription-id>` (or the equivalent `az deployment sub create`), which provisions everything in B1 except the AI Search index/datasource/indexer, then `python scripts/post_deploy_search.py` creates the search-side resources via REST using the deployment outputs. Every setting: [13-configuration-reference.md](./13-configuration-reference.md).
 
-Validation: `pwsh ./infra/deploy.ps1 -Verify` reports all resources Ready and the indexer succeeded.
+Validation: `python scripts/post_deploy_search.py --ids demo-ids.local.json --verify` (or `pwsh ./infra/deploy.ps1 -Verify`) reports the index, sample query and indexer as `[OK]`.
 
 ---
 
 ## Part C — Stand up the Fabric workspace (manual — both paths)
 
-Fabric is **always manual** (no Bicep / Terraform / IaC surface for workspaces, Lakehouses, shortcuts, or pipelines as of this pattern's publication). The full step-by-step is in its own document: **[03b-fabric-setup.md](./03b-fabric-setup.md)**.
+Fabric is **always manual** (no Bicep / Terraform / IaC surface for workspaces, Lakehouses, shortcuts, or pipelines as of this pattern's publication). The full step-by-step is in its own document: **[06-fabric-setup.md](./06-fabric-setup.md)**.
 
-What 03b covers end-to-end (Phases F0–F10):
+What 06 covers end-to-end (Phases F0–F10):
 
-| 03b Phase | What you build |
+| 06 Phase | What you build |
 |---|---|
 | F0 | Tenant + capacity prerequisites |
 | F1 | Workspace creation + capacity assignment |
@@ -158,9 +158,9 @@ What 03b covers end-to-end (Phases F0–F10):
 
 ### Part C validation
 
-- [ ] Workspace + Lakehouse + workspace identity created ([03b §§ F1–F3](./03b-fabric-setup.md))
-- [ ] OneLake shortcut populated with sample documents ([03b § F4](./03b-fabric-setup.md#phase-f4--attach-the-source-via-onelake-shortcut))
-- [ ] Pipeline succeeds end-to-end on sample docs ([03b § F9](./03b-fabric-setup.md#phase-f9--validate-end-to-end))
+- [ ] Workspace + Lakehouse + workspace identity created ([06 §§ F1–F3](./06-fabric-setup.md))
+- [ ] OneLake shortcut populated with sample documents ([06 § F4](./06-fabric-setup.md#phase-f4--attach-the-source-via-onelake-shortcut))
+- [ ] Pipeline succeeds end-to-end on sample docs ([06 § F9](./06-fabric-setup.md#phase-f9--validate-end-to-end))
 - [ ] Control table has rows with `ocr_status = succeeded` and `chunk_status = succeeded`
 - [ ] Blob `chunks/` container has JSON files; AI Search indexer picks them up within ~5 min
 
@@ -168,20 +168,20 @@ What 03b covers end-to-end (Phases F0–F10):
 
 ## Part D — Build the agent (manual — both paths)
 
-Layer 3 has **two interchangeable implementations** — build **one**. Neither is expressible in Bicep. Pick with [07-copilot-studio-vs-foundry.md](./07-copilot-studio-vs-foundry.md):
+Layer 3 has **two interchangeable implementations** — build **one**. Neither is expressible in Bicep. Pick with [10-copilot-studio-vs-foundry.md](./10-copilot-studio-vs-foundry.md):
 
 | Option | Runtime | Best for | Doc |
 |---|---|---|---|
-| <img src="./assets/icons/users.svg" width="24" alt=""/> **D-CS. Copilot Studio** ![Default](./assets/badges/default.svg) | Power Platform | Lowest-code, fully ![GA](./assets/badges/ga.svg), small audience or CS capacity already licensed | [03c-copilot-studio-setup.md](./03c-copilot-studio-setup.md) |
-| <img src="./assets/icons/foundry-agent-service.svg" width="24" alt=""/> **D-FA. Microsoft Foundry agent** ![Optional](./assets/badges/optional.svg) | Foundry Agent Service | **Licensing constraint** (AI Search + Fabric Data Agent premium connectors), structured-data RLS, richer orchestration — accepts ![Preview](./assets/badges/preview.svg) M365/Teams publishing | [03d-foundry-agent-setup.md](./03d-foundry-agent-setup.md) |
+| <img src="./assets/icons/users.svg" width="24" alt=""/> **D-CS. Copilot Studio** ![Default](./assets/badges/default.svg) | Power Platform | Lowest-code, fully ![GA](./assets/badges/ga.svg), small audience or CS capacity already licensed | [07-copilot-studio-setup.md](./07-copilot-studio-setup.md) |
+| <img src="./assets/icons/foundry-agent-service.svg" width="24" alt=""/> **D-FA. Microsoft Foundry agent** ![Optional](./assets/badges/optional.svg) | Foundry Agent Service | **Licensing constraint** (AI Search + Fabric Data Agent premium connectors), structured-data RLS, richer orchestration — GA publishing; the optional Fabric tool is ![Preview](./assets/badges/preview.svg) | [08-foundry-agent-setup.md](./08-foundry-agent-setup.md) |
 
 ### Option D-CS — Copilot Studio
 
-Copilot Studio agents are not expressible in Bicep (Power Platform, not Azure). The full step-by-step is in its own document: **[03c-copilot-studio-setup.md](./03c-copilot-studio-setup.md)**.
+Copilot Studio agents are not expressible in Bicep (Power Platform, not Azure). The full step-by-step is in its own document: **[07-copilot-studio-setup.md](./07-copilot-studio-setup.md)**.
 
-What 03c covers end-to-end (Phases C0–C6):
+What 07 covers end-to-end (Phases C0–C6):
 
-| 03c Phase | What you build |
+| 07 Phase | What you build |
 |---|---|
 | C0 | Tenant + licensing prerequisites, channel-publishing approvals |
 | C1 | Agent creation, instructions / system prompt |
@@ -193,27 +193,27 @@ What 03c covers end-to-end (Phases C0–C6):
 
 ### Option D-FA — Microsoft Foundry agent (alternative)
 
-Built on the Foundry Agent Service runtime, grounding on the **same** `idx-rag-documents` index plus an optional **Fabric Data Agent** for structured data (built per **[03e-fabric-data-agent.md](./03e-fabric-data-agent.md)**), published to Teams + M365 Copilot as a **custom engine agent (preview)**. Full step-by-step: **[03d-foundry-agent-setup.md](./03d-foundry-agent-setup.md)**.
+Built on the Foundry Agent Service runtime, grounding on the **same** `idx-rag-documents` index plus an optional **Fabric Data Agent** for structured data (built per **[09-fabric-data-agent.md](./09-fabric-data-agent.md)**), published to Teams + M365 Copilot from the Foundry portal (GA). Full step-by-step: **[08-foundry-agent-setup.md](./08-foundry-agent-setup.md)**.
 
-What 03d covers end-to-end (Phases D0–D6):
+What 08 covers end-to-end (Phases D0–D6):
 
-| 03d Phase | What you build |
+| 08 Phase | What you build |
 |---|---|
-| D0 | Prerequisites + the **licensing delta**; chat-model deployment becomes **required**; publish the Fabric Data Agent ([03e](./03e-fabric-data-agent.md)) |
-| D1 | Foundry project + chat (`gpt-4o`) deployment |
+| D0 | Prerequisites + the **licensing delta**; chat-model deployment becomes **required**; publish the Fabric Data Agent ([09](./09-fabric-data-agent.md)) |
+| D1 | Foundry project + chat deployment (e.g. `gpt-5.5`) |
 | D2 | AI Search tool connection — project MI granted **Search Index Data Reader** |
 | D3 | Fabric Data Agent tool — **on-behalf-of** caller identity (per-user RLS) |
 | D4 | Agent instructions, grounding guardrail, security trimming |
 | D5 | Test in the Foundry playground |
-| D6 | Publish to M365 Copilot + Teams via the M365 Agents Toolkit (![Preview](./assets/badges/preview.svg)), **or** deploy the in-repo standalone web app front end ([09](./09-foundry-agent-webapp.md); MI or OBO mode) |
+| D6 | Publish to M365 Copilot + Teams from the Foundry portal (![GA](./assets/badges/ga.svg); Agents Toolkit custom engine agent optional), **or** deploy the in-repo standalone web app front end ([12](./12-foundry-agent-webapp.md); MI or OBO mode) |
 
 ### Part D validation
 
-> Run the checklist for whichever option you built. The 03d-specific checklist is in [03d § Validation checklist](./03d-foundry-agent-setup.md#validation-checklist). The boxes below are written for the 03c (Copilot Studio) path.
+> Run the checklist for whichever option you built. The 03d-specific checklist is in [08 § Validation checklist](./08-foundry-agent-setup.md#validation-checklist). The boxes below are written for the 07 (Copilot Studio) path.
 
-- [ ] Knowledge source bound to `idx-rag-documents` via **Microsoft Entra ID Integrated** or **Service principal** (not Access Key) and showing **Status: Ready** ([03c § C2](./03c-copilot-studio-setup.md#phase-c2--bind-the-ai-search-knowledge-source))
-- [ ] Both **Allow the AI to use its own general knowledge** and **Allow ungrounded responses** are **Off** ([03c § C3](./03c-copilot-studio-setup.md#phase-c3--configure-grounding-behavior))
-- [ ] Test pane returns grounded answers with citations to Blob source files ([03c § C4](./03c-copilot-studio-setup.md#phase-c4--test-in-the-agent-canvas))
+- [ ] Knowledge source bound to `idx-rag-documents` via **Microsoft Entra ID Integrated** or **Service principal** (not Access Key) and showing **Status: Ready** ([07 § C2](./07-copilot-studio-setup.md#phase-c2--bind-the-ai-search-knowledge-source))
+- [ ] Both **Allow the AI to use its own general knowledge** and **Allow ungrounded responses** are **Off** ([07 § C3](./07-copilot-studio-setup.md#phase-c3--configure-grounding-behavior))
+- [ ] Test pane returns grounded answers with citations to Blob source files ([07 § C4](./07-copilot-studio-setup.md#phase-c4--test-in-the-agent-canvas))
 - [ ] Agent published; **Teams and Microsoft 365 Copilot** channel added with **Make agent available in Microsoft 365 Copilot** selected
 - [ ] Agent reachable in Teams chat AND in Microsoft 365 Copilot as a normal user (not just the builder)
 - [ ] End-to-end: question in Teams → answer with clickable citation → opens raw file in Blob
@@ -225,7 +225,7 @@ What 03d covers end-to-end (Phases D0–D6):
 > [!NOTE]
 > Run Part E only after Parts A–D validate green — retrieval metrics are meaningless against a partially populated index.
 
-Once Parts A–D validate green, follow [05-testing.md](./05-testing.md):
+Once Parts A–D validate green, follow [04-testing.md](./04-testing.md):
 
 ### E1. Run the index quality smoke tests (§ B)
 ### E2. Run the golden-set retrieval evaluation (§ C)
@@ -269,4 +269,4 @@ Once Parts A–D validate green, follow [05-testing.md](./05-testing.md):
 
 ---
 
-*Last updated: 2026-10-02*
+*Last updated: 2026-10-07*

@@ -1,6 +1,6 @@
-[README](../README.md) › [docs index](./00-reproduce-this-demo.md) › 03b Fabric setup
+[README](../README.md) › [docs index](./00-reproduce-this-demo.md) › 06 Fabric setup
 
-# 03b — Fabric setup (manual — both deployment paths)
+# 06 — Fabric setup (manual — both deployment paths)
 
 <p align="center">
   <img src="./assets/icons/storage.svg" width="40" alt="Lakehouse and OneLake storage">&nbsp;&nbsp;
@@ -13,7 +13,7 @@
 
 ![Version](./assets/badges/version.svg) ![Manual path](./assets/badges/manual-path.svg) ![Static only](./assets/badges/static-only.svg)
 
-The Fabric layer of this pattern is **always manual**. Neither the manual Azure path ([03-deployment-manual.md](./03-deployment-manual.md)) nor the Bicep-automated path ([04-deployment-automated.md](./04-deployment-automated.md)) can provision Fabric items today — Fabric workspaces, Lakehouses, OneLake shortcuts, and Data Pipelines have no Bicep/ARM resource provider as of this pattern's publication, and the [Fabric REST APIs](https://learn.microsoft.com/en-us/rest/api/fabric/articles/) for items are only partially covered for automation.
+The Fabric layer of this pattern is **always manual**. Neither the manual Azure path ([03b-manual-deployment.md](./03b-manual-deployment.md)) nor the Bicep-automated path ([03-deployment.md](./03-deployment.md)) can provision Fabric items today — Fabric workspaces, Lakehouses, OneLake shortcuts, and Data Pipelines have no Bicep/ARM resource provider as of this pattern's publication, and the [Fabric REST APIs](https://learn.microsoft.com/en-us/rest/api/fabric/articles/) for items are only partially covered for automation.
 
 ## At a glance
 
@@ -30,7 +30,7 @@ The Fabric layer of this pattern is **always manual**. Neither the manual Azure 
 <sub>Editable source: [`assets/fabric-setup-flow.drawio`](./assets/fabric-setup-flow.drawio) - regenerate with `python scripts/export_diagrams.py docs/assets`.</sub>
 
 > [!IMPORTANT]
-> **Run this doc after Azure platform layer is up.** You need the Azure resources from [03-deployment-manual.md § Phase 1](./03-deployment-manual.md#phase-1--foundation) (manual) **or** the deployment outputs from [04-deployment-automated.md § Step 3](./04-deployment-automated.md) (automated) before you can wire the Fabric pipeline to them. Specifically you need: the storage account name, the **Microsoft Foundry resource's Cognitive Services endpoint** (which serves the Document Intelligence `prebuilt-read` API — there is no separate FormRecognizer resource in this pattern), and a Key Vault that holds the DI-caller service principal's client secret (no DI / Foundry API keys are stored anywhere; all DI calls go through the SP via MSAL).
+> **Run this doc after Azure platform layer is up.** You need the Azure resources from [03b-manual-deployment.md § Phase 1](./03b-manual-deployment.md#phase-1--foundation) (manual) **or** the deployment outputs from [03-deployment.md § Step 3](./03-deployment.md) (automated) before you can wire the Fabric pipeline to them. Specifically you need: the storage account name, the **Microsoft Foundry resource's Cognitive Services endpoint** (which serves the Document Intelligence `prebuilt-read` API — there is no separate FormRecognizer resource in this pattern), and a Key Vault that holds the DI-caller service principal's client secret (no DI / Foundry API keys are stored anywhere; all DI calls go through the SP via MSAL).
 
 > [!TIP]
 > **Time budget.** First-time Fabric build: **2–3 hours** end-to-end. Subsequent rebuilds in the same tenant: **45–60 minutes** once the workspace identity, connections, and notebook artifacts can be reused.
@@ -315,7 +315,7 @@ Confirm `Files/source_docs/` now appears in the Lakehouse Explorer and you can b
 
 For a clean first build, place **5–10 representative documents** in the source location. Cover the file types, lengths, and document categories the production corpus will contain (PDFs, DOCX, scans, mixed-language, etc.). Sample diversity matters more than volume for the initial build.
 
-Use any document set with zero real data. The matching **structured** tables for the optional Fabric Data Agent ship in [`samples/structured/`](../samples/structured/) (see [03e](./03e-fabric-data-agent.md)); the document corpus is uploaded here separately to trigger the flow.
+Use any document set with zero real data. The matching **structured** tables for the optional Fabric Data Agent ship in [`samples/structured/`](../samples/structured/) (see [09](./09-fabric-data-agent.md)); the document corpus is uploaded here separately to trigger the flow.
 
 If the shortcut points at an already-populated source, skip this — work with whatever is there.
 
@@ -504,7 +504,7 @@ src = (
 # The pipeline Copy activity binds @item().source_path as a path RELATIVE to the
 # Lakehouse Files/ root, so we strip the prefix here. Without this strip, the
 # Copy activity ends up looking for <lakehouseId>/Files/abfss:/<lakehouseId>/...
-# which 404s with PathNotFound — see 06-troubleshooting.md § 3.5.
+# which 404s with PathNotFound — see 05-troubleshooting.md § 3.5.
 src = src.withColumn(
     "source_path",
     regexp_replace(col("source_path"), r"^.*/Files/", ""),
@@ -568,7 +568,7 @@ notebookutils.notebook.exit(exit_payload)
 
 > **`notebookutils.notebook.exit(value)`** returns a single string from a notebook activity (use `json.dumps(...)` for structured data). The legacy `mssparkutils` namespace still works but is being retired. See [NotebookUtils notebook run and orchestration](https://learn.microsoft.com/fabric/data-engineering/notebookutils/notebookutils-notebook-run#exit-a-notebook).
 >
-> **Retry behavior.** The lookup picks up brand-new files **and** any row in `control_table_files` where any per-stage status is `'failed'` (unless `tombstoned = true`). `mark_pending` uses `MERGE … WHEN MATCHED THEN UPDATE`, so retries flip the existing row through `pending` → `succeeded`/`failed` automatically. The exit payload reports `{"new_count": N, "retry_count": M, "total": N+M}`. Full operating playbook (manual retry, tombstoning a corrupt file, bulk reprocess): [06-troubleshooting.md § 3.11](./06-troubleshooting.md#311-failed-files-are-not-retried-on-the-next-pipeline-run). Background on the staging-table design: [Appendix A.3](#a3-staging-delta-table-for-the-foreach-handoff).
+> **Retry behavior.** The lookup picks up brand-new files **and** any row in `control_table_files` where any per-stage status is `'failed'` (unless `tombstoned = true`). `mark_pending` uses `MERGE … WHEN MATCHED THEN UPDATE`, so retries flip the existing row through `pending` → `succeeded`/`failed` automatically. The exit payload reports `{"new_count": N, "retry_count": M, "total": N+M}`. Full operating playbook (manual retry, tombstoning a corrupt file, bulk reprocess): [05-troubleshooting.md § 3.11](./05-troubleshooting.md#311-failed-files-are-not-retried-on-the-next-pipeline-run). Background on the staging-table design: [Appendix A.3](#a3-staging-delta-table-for-the-foreach-handoff).
 
 ### F7.2 `nb_ocr_chunk_upload`
 
@@ -610,7 +610,7 @@ di_sp_secret_name = "di-sp-secret"
 # Install required packages (cached in the session after first install)
 # pyjwt>=2.6.0 is pinned explicitly to satisfy Fabric's preinstalled fsspec-wrapper;
 # msal's loose pyjwt constraint otherwise resolves to an older version and produces
-# a pip dependency-conflict warning (see 06-troubleshooting.md § 3.10).
+# a pip dependency-conflict warning (see 05-troubleshooting.md § 3.10).
 %pip install azure-ai-documentintelligence==1.0.0 azure-storage-blob==12.21.0 azure-core==1.30.2 msal==1.30.0 "pyjwt>=2.6.0" tiktoken==0.7.0 --quiet
 ```
 
@@ -699,9 +699,10 @@ di_result = poller.result().as_dict()
 
 
 # ---------- 5. Page-aware chunker with token budget + overlap ---------------
+# Chunk budget: copy from demo-ids.local.json corpus.chunkSizeTokens / corpus.chunkOverlapTokens
 CHUNK_TOKENS   = 1000
 OVERLAP_TOKENS = 200
-ENCODING       = tiktoken.encoding_for_model("gpt-4o")
+ENCODING       = tiktoken.get_encoding("o200k_base")  # tokenizer only - independent of any chat model
 
 def chunk_pages(pages, max_tok=CHUNK_TOKENS, overlap=OVERLAP_TOKENS):
     chunks = []
@@ -770,7 +771,7 @@ notebookutils.notebook.exit(json.dumps({"chunk_count": len(chunks)}))
 
 </details>
 
-> **`urlSource` access requires the Foundry resource's managed identity** (Document Intelligence runs inside the Foundry account in this pattern) to have **Storage Blob Data Reader** on the storage account (shared-key access is disabled). The Bicep `rbac.bicep` module grants this automatically; manual deployments wire it in [03-deployment-manual.md § 1.7 step 3](./03-deployment-manual.md#17-rbac-wiring). If you see `InvalidContent: Could not download the file` at runtime, see [06-troubleshooting.md § 3.9](./06-troubleshooting.md#39-document-intelligence-invalidcontent-could-not-download-the-file).
+> **`urlSource` access requires the Foundry resource's managed identity** (Document Intelligence runs inside the Foundry account in this pattern) to have **Storage Blob Data Reader** on the storage account (shared-key access is disabled). The Bicep `rbac.bicep` module grants this automatically; manual deployments wire it in [03b-manual-deployment.md § 1.7 step 3](./03b-manual-deployment.md#17-rbac-wiring). If you see `InvalidContent: Could not download the file` at runtime, see [05-troubleshooting.md § 3.9](./05-troubleshooting.md#39-document-intelligence-invalidcontent-could-not-download-the-file).
 >
 > Rationale for the MSAL + SP auth model (rather than using the workspace identity directly): [Appendix A.2](#a2-msal--service-principal-for-document-intelligence).
 
@@ -989,7 +990,7 @@ Inside the ForEach, **Add activity → Copy data**.
 
 Reference: [Configure Lakehouse in a copy activity](https://learn.microsoft.com/fabric/data-factory/connector-lakehouse-copy-activity).
 
-> **If you see `PathNotFound`** with a path that contains `Files/abfss:/...`, the lookup notebook is writing absolute URIs to `_tmp_new_files` instead of relative paths. The `regexp_replace(...)` line in [F7.1](#f71-nb_lookup_new_files) is the fix — see also [06-troubleshooting.md § 3.5](./06-troubleshooting.md#35-copy-activity-fails-with-pathnotfound-and-an-abfss-uri-in-the-path).
+> **If you see `PathNotFound`** with a path that contains `Files/abfss:/...`, the lookup notebook is writing absolute URIs to `_tmp_new_files` instead of relative paths. The `regexp_replace(...)` line in [F7.1](#f71-nb_lookup_new_files) is the fix — see also [05-troubleshooting.md § 3.5](./05-troubleshooting.md#35-copy-activity-fails-with-pathnotfound-and-an-abfss-uri-in-the-path).
 
 ### F8.6 Activity [2b] — Update control table (pending)
 
@@ -1091,11 +1092,11 @@ Re-run the pipeline with no source changes. Expected:
 - Pipeline succeeds in seconds
 - Zero new rows in `control_table_files`, zero new blob writes
 
-If the second run re-processes files, your `file_id` hash isn't stable. See [06-troubleshooting.md § 3.4](./06-troubleshooting.md#34-pipeline-runs-duplicate-files).
+If the second run re-processes files, your `file_id` hash isn't stable. See [05-troubleshooting.md § 3.4](./05-troubleshooting.md#34-pipeline-runs-duplicate-files).
 
 ### F9.4 Hand off to AI Search
 
-The AI Search indexer (Bicep- or manually-created, see [03-deployment-manual.md § Phase 4](./03-deployment-manual.md#phase-4--ai-search-index) or [04-deployment-automated.md § Step 4](./04-deployment-automated.md)) polls `chunks/` every 5 minutes. Within ~5 min of pipeline completion, the chunks should appear in the search index. Confirm:
+The AI Search indexer (Bicep- or manually-created, see [03b-manual-deployment.md § Phase 4](./03b-manual-deployment.md#phase-4--ai-search-index) or [03-deployment.md § Step 4](./03-deployment.md)) polls `chunks/` every 5 minutes. Within ~5 min of pipeline completion, the chunks should appear in the search index. Confirm:
 
 ```http
 GET https://<search-svc>.search.windows.net/indexers/ixr-chunks/status?api-version=2024-07-01
@@ -1155,37 +1156,37 @@ Full checklist:
 - [ ] AI Search indexer picks up new chunks within 5 min
 - [ ] Re-running the pipeline is a no-op (idempotency proved — ForEach iterates zero times)
 
-When all boxes are checked → continue to [03c-copilot-studio-setup.md](./03c-copilot-studio-setup.md) to build the Copilot Studio agent on top of the populated AI Search index.
+When all boxes are checked → continue to [07-copilot-studio-setup.md](./07-copilot-studio-setup.md) to build the Copilot Studio agent on top of the populated AI Search index.
 
 ---
 
 ## Troubleshooting pointers
 
-Common Fabric-layer issues are catalogued in [06-troubleshooting.md](./06-troubleshooting.md). Quick triage by layer:
+Common Fabric-layer issues are catalogued in [05-troubleshooting.md](./05-troubleshooting.md). Quick triage by layer:
 
 | | Layer | Start here |
 |---|---|---|
-| <img src="./assets/icons/folder.svg" width="24" alt=""/> | **Shortcut / source** | [§ 2 OneLake and source attachment](./06-troubleshooting.md#2--onelake--source-attachment) |
-| <img src="./assets/icons/data-factory.svg" width="24" alt=""/> | **Pipeline activities** | [§ 3.5](./06-troubleshooting.md#35-copy-activity-fails-with-pathnotfound-and-an-abfss-uri-in-the-path), [§ 3.6](./06-troubleshooting.md#36-lookup-activity-returns-zero-rows-after-a-spark-write), [§ 3.4](./06-troubleshooting.md#34-pipeline-runs-duplicate-files) |
-| <img src="./assets/icons/code.svg" width="24" alt=""/> | **Notebooks** | [§ 3.7](./06-troubleshooting.md#37-nb_ocr_chunk_upload-cant-authenticate-to-document-intelligence) – [§ 3.11](./06-troubleshooting.md#311-failed-files-are-not-retried-on-the-next-pipeline-run) |
-| <img src="./assets/icons/managed-identity.svg" width="24" alt=""/> | **RBAC** | [§ 1.1 propagation lag](./06-troubleshooting.md#11-rbac-propagation-lag) |
+| <img src="./assets/icons/folder.svg" width="24" alt=""/> | **Shortcut / source** | [§ 2 OneLake and source attachment](./05-troubleshooting.md#2--onelake--source-attachment) |
+| <img src="./assets/icons/data-factory.svg" width="24" alt=""/> | **Pipeline activities** | [§ 3.5](./05-troubleshooting.md#35-copy-activity-fails-with-pathnotfound-and-an-abfss-uri-in-the-path), [§ 3.6](./05-troubleshooting.md#36-lookup-activity-returns-zero-rows-after-a-spark-write), [§ 3.4](./05-troubleshooting.md#34-pipeline-runs-duplicate-files) |
+| <img src="./assets/icons/code.svg" width="24" alt=""/> | **Notebooks** | [§ 3.7](./05-troubleshooting.md#37-nb_ocr_chunk_upload-cant-authenticate-to-document-intelligence) – [§ 3.11](./05-troubleshooting.md#311-failed-files-are-not-retried-on-the-next-pipeline-run) |
+| <img src="./assets/icons/managed-identity.svg" width="24" alt=""/> | **RBAC** | [§ 1.1 propagation lag](./05-troubleshooting.md#11-rbac-propagation-lag) |
 
 Detailed symptom list:
 
-- **OneLake shortcut shows no files / can't be read** → [§ 2](./06-troubleshooting.md#2--onelake--source-attachment)
-- **`copy_raw_to_blob` fails with `PathNotFound` and an `abfss:/...` URI in the path** → [§ 3.5](./06-troubleshooting.md#35-copy-activity-fails-with-pathnotfound-and-an-abfss-uri-in-the-path) — `nb_lookup_new_files` is writing absolute abfss URIs instead of paths relative to `Files/`
-- **Lookup activity returns zero rows on first run** even though `nb_lookup_new_files` wrote N rows → [§ 3.6](./06-troubleshooting.md#36-lookup-activity-returns-zero-rows-after-a-spark-write) — SQL analytics endpoint sync lag; add a Refresh SQL Endpoint activity ([F8.2](#f82-activity-15--refresh-sql-endpoint))
-- **`nb_ocr_chunk_upload` fails with `ImportError: cannot import name 'DefaultAzureCredential'` or auth errors against DI** → [§ 3.7](./06-troubleshooting.md#37-nb_ocr_chunk_upload-cant-authenticate-to-document-intelligence) — Fabric notebooks don't support `DefaultAzureCredential`; use the MSAL+SP pattern in [F7.2](#f72-nb_ocr_chunk_upload)
-- **`nb_ocr_chunk_upload` fails with `MagicUsageError: %pip magic command is disabled`** → [§ 3.8](./06-troubleshooting.md#38-pip-install-fails-with-magicusageerror-pip-magic-command-is-disabled) — pipeline runs block `%pip`; either add `_inlineInstallationEnabled = true` to the activity ([F8.7](#f87-activity-2c--ocr--chunk--upload-notebook)) or attach a Fabric Environment
-- **`nb_ocr_chunk_upload` fails with `InvalidContent: Could not download the file from the given URL`** → [§ 3.9](./06-troubleshooting.md#39-document-intelligence-invalidcontent-could-not-download-the-file) — the **Foundry resource's MI** is missing **Storage Blob Data Reader** on the storage account (DI runs inside the Foundry account; it tries to fetch `urlSource` and storage rejects it because shared-key is disabled)
-- **`nb_ocr_chunk_upload` pip warning `fsspec-wrapper requires PyJWT>=2.6.0, but you have pyjwt 2.4.0`** → [§ 3.10](./06-troubleshooting.md#310-pyjwt-dependency-conflict-warning) — msal pulls an older PyJWT than Fabric's preinstalled fsspec-wrapper accepts; pin `pyjwt>=2.6.0` in the install line
-- **Failed files in `control_table_files` are not retried — lookup reports `new_count: 0`** → [§ 3.11](./06-troubleshooting.md#311-failed-files-are-not-retried-on-the-next-pipeline-run) — `nb_lookup_new_files` needs the brand-new + failed union (see [F7.1](#f71-nb_lookup_new_files)); the pattern also covers manual retry and tombstoning
-- **`nb_ocr_chunk_upload` import errors on `%pip install`** → [§ 3.2](./06-troubleshooting.md#32-chunking-notebook-fails) — the install cell didn't run or session is stale
-- **Control table never updates** → [§ 3.3](./06-troubleshooting.md#33-control-table-stuck)
-- **`mark_pending` / `mark_succeeded` fails with `PySparkValueError: CANNOT_DETERMINE_TYPE`** → [§ 3.3.1](./06-troubleshooting.md#331-nb_update_control_table-fails-with-pysparkvalueerror-cannot_determine_type) — `nb_update_control_table` is letting PySpark infer the schema from a mostly-None row; pull the schema from the table instead
-- **Same files re-processed every run** → [§ 3.4](./06-troubleshooting.md#34-pipeline-runs-duplicate-files)
-- **Fabric capacity cost spike** → [§ 6.1](./06-troubleshooting.md#61-fabric-capacity-cost-spike) (consider enabling High concurrency mode for the pipeline; see [F10](#phase-f10--schedule-the-pipeline))
-- **Workspace identity Blob writes 403** → [§ 1.1 RBAC propagation lag](./06-troubleshooting.md#11-rbac-propagation-lag)
+- **OneLake shortcut shows no files / can't be read** → [§ 2](./05-troubleshooting.md#2--onelake--source-attachment)
+- **`copy_raw_to_blob` fails with `PathNotFound` and an `abfss:/...` URI in the path** → [§ 3.5](./05-troubleshooting.md#35-copy-activity-fails-with-pathnotfound-and-an-abfss-uri-in-the-path) — `nb_lookup_new_files` is writing absolute abfss URIs instead of paths relative to `Files/`
+- **Lookup activity returns zero rows on first run** even though `nb_lookup_new_files` wrote N rows → [§ 3.6](./05-troubleshooting.md#36-lookup-activity-returns-zero-rows-after-a-spark-write) — SQL analytics endpoint sync lag; add a Refresh SQL Endpoint activity ([F8.2](#f82-activity-15--refresh-sql-endpoint))
+- **`nb_ocr_chunk_upload` fails with `ImportError: cannot import name 'DefaultAzureCredential'` or auth errors against DI** → [§ 3.7](./05-troubleshooting.md#37-nb_ocr_chunk_upload-cant-authenticate-to-document-intelligence) — Fabric notebooks don't support `DefaultAzureCredential`; use the MSAL+SP pattern in [F7.2](#f72-nb_ocr_chunk_upload)
+- **`nb_ocr_chunk_upload` fails with `MagicUsageError: %pip magic command is disabled`** → [§ 3.8](./05-troubleshooting.md#38-pip-install-fails-with-magicusageerror-pip-magic-command-is-disabled) — pipeline runs block `%pip`; either add `_inlineInstallationEnabled = true` to the activity ([F8.7](#f87-activity-2c--ocr--chunk--upload-notebook)) or attach a Fabric Environment
+- **`nb_ocr_chunk_upload` fails with `InvalidContent: Could not download the file from the given URL`** → [§ 3.9](./05-troubleshooting.md#39-document-intelligence-invalidcontent-could-not-download-the-file) — the **Foundry resource's MI** is missing **Storage Blob Data Reader** on the storage account (DI runs inside the Foundry account; it tries to fetch `urlSource` and storage rejects it because shared-key is disabled)
+- **`nb_ocr_chunk_upload` pip warning `fsspec-wrapper requires PyJWT>=2.6.0, but you have pyjwt 2.4.0`** → [§ 3.10](./05-troubleshooting.md#310-pyjwt-dependency-conflict-warning) — msal pulls an older PyJWT than Fabric's preinstalled fsspec-wrapper accepts; pin `pyjwt>=2.6.0` in the install line
+- **Failed files in `control_table_files` are not retried — lookup reports `new_count: 0`** → [§ 3.11](./05-troubleshooting.md#311-failed-files-are-not-retried-on-the-next-pipeline-run) — `nb_lookup_new_files` needs the brand-new + failed union (see [F7.1](#f71-nb_lookup_new_files)); the pattern also covers manual retry and tombstoning
+- **`nb_ocr_chunk_upload` import errors on `%pip install`** → [§ 3.2](./05-troubleshooting.md#32-chunking-notebook-fails) — the install cell didn't run or session is stale
+- **Control table never updates** → [§ 3.3](./05-troubleshooting.md#33-control-table-stuck)
+- **`mark_pending` / `mark_succeeded` fails with `PySparkValueError: CANNOT_DETERMINE_TYPE`** → [§ 3.3.1](./05-troubleshooting.md#331-nb_update_control_table-fails-with-pysparkvalueerror-cannot_determine_type) — `nb_update_control_table` is letting PySpark infer the schema from a mostly-None row; pull the schema from the table instead
+- **Same files re-processed every run** → [§ 3.4](./05-troubleshooting.md#34-pipeline-runs-duplicate-files)
+- **Fabric capacity cost spike** → [§ 6.1](./05-troubleshooting.md#61-fabric-capacity-cost-spike) (consider enabling High concurrency mode for the pipeline; see [F10](#phase-f10--schedule-the-pipeline))
+- **Workspace identity Blob writes 403** → [§ 1.1 RBAC propagation lag](./05-troubleshooting.md#11-rbac-propagation-lag)
 - **"Activity of type 'Until' is not supported inside a 'ForEach' activity"** → this pattern deliberately uses no `Until` activity at all. If you've added one and hit this error, fold the polled operation into a Fabric notebook instead (as `nb_ocr_chunk_upload` does for Document Intelligence). Reference: [ForEach activity limitations](https://learn.microsoft.com/azure/data-factory/control-flow-for-each-activity#limitations-and-workarounds).
 
 ---
@@ -1232,7 +1233,7 @@ The natural shape would be: notebook returns the new-file list inline → ForEac
 - The Lookup activity natively returns the row array as `@activity('...').output.value`, which the ForEach's `Items` expression consumes directly.
 - The notebook can still return a small JSON summary via `notebookutils.notebook.exit(...)` for logging / monitoring.
 
-The one operational caveat is SQL-endpoint sync lag (Delta writes via Spark take seconds-to-minutes to surface in the SQL endpoint), which is why the pipeline has a **Refresh SQL Endpoint** activity between the notebook and the Lookup ([F8.2](#f82-activity-15--refresh-sql-endpoint)). See [06-troubleshooting.md § 3.6](./06-troubleshooting.md#36-lookup-activity-returns-zero-rows-after-a-spark-write).
+The one operational caveat is SQL-endpoint sync lag (Delta writes via Spark take seconds-to-minutes to surface in the SQL endpoint), which is why the pipeline has a **Refresh SQL Endpoint** activity between the notebook and the Lookup ([F8.2](#f82-activity-15--refresh-sql-endpoint)). See [05-troubleshooting.md § 3.6](./05-troubleshooting.md#36-lookup-activity-returns-zero-rows-after-a-spark-write).
 
 ### A.4 Retry model for failed files
 
@@ -1240,13 +1241,13 @@ The one operational caveat is SQL-endpoint sync lag (Delta writes via Spark take
 
 The retry path piggybacks on the existing `MERGE … WHEN MATCHED THEN UPDATE` in `mark_pending` / `mark_succeeded` ([F7.3](#f73-nb_update_control_table)) — a retry simply overwrites the failed row through `pending` → `succeeded`/`failed` on the next run. No schema migration, no separate "retry queue" table. Permanent skips use the `tombstoned` boolean.
 
-Full operating playbook (manual one-off retry, bulk re-process after a fix, tombstoning corrupt files): [06-troubleshooting.md § 3.11](./06-troubleshooting.md#311-failed-files-are-not-retried-on-the-next-pipeline-run).
+Full operating playbook (manual one-off retry, bulk re-process after a fix, tombstoning corrupt files): [05-troubleshooting.md § 3.11](./05-troubleshooting.md#311-failed-files-are-not-retried-on-the-next-pipeline-run).
 
 ### A.5 Document Intelligence reaches Blob via the Foundry resource's MI
 
 DI's `urlSource` parameter tells the service to **fetch the blob server-side** from the URL the notebook passes. Because the storage account has `allowSharedKeyAccess=false` and this pattern does not use SAS tokens, that fetch has to authenticate with a managed identity. In this pattern Document Intelligence is served by the **Microsoft Foundry resource** (`kind=AIServices`), so the identity used by DI is the **Foundry resource's system-assigned MI** — not a separate DI MI — and there is no key or token in the URL to fall back to.
 
-The Bicep `rbac.bicep` module grants the **Foundry MI** **Storage Blob Data Reader** on the storage account automatically; manual deployments wire it in [03-deployment-manual.md § 1.7 step 3](./03-deployment-manual.md#17-rbac-wiring). Without this role, DI returns `InvalidContent: Could not download the file from the given URL` — see [06-troubleshooting.md § 3.9](./06-troubleshooting.md#39-document-intelligence-invalidcontent-could-not-download-the-file).
+The Bicep `rbac.bicep` module grants the **Foundry MI** **Storage Blob Data Reader** on the storage account automatically; manual deployments wire it in [03b-manual-deployment.md § 1.7 step 3](./03b-manual-deployment.md#17-rbac-wiring). Without this role, DI returns `InvalidContent: Could not download the file from the given URL` — see [05-troubleshooting.md § 3.9](./05-troubleshooting.md#39-document-intelligence-invalidcontent-could-not-download-the-file).
 
 If the storage account firewall is locked down (private endpoints or `defaultAction: Deny`), the role grant alone isn't enough — the Foundry resource also needs a trusted-services bypass or a shared private endpoint. See [Managed identities for Document Intelligence — Private storage account access](https://learn.microsoft.com/azure/ai-services/document-intelligence/authentication/managed-identities#private-storage-account-access).
 
@@ -1313,6 +1314,6 @@ Full list:
 
 ---
 
-Next: [03c - Copilot Studio agent setup](./03c-copilot-studio-setup.md) →
+Next: [07 - Copilot Studio agent setup](./07-copilot-studio-setup.md) →
 
-*Last updated: 2026-10-02*
+*Last updated: 2026-10-07*

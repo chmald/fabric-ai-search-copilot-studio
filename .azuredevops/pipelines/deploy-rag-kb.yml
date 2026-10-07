@@ -103,7 +103,7 @@ stages:
             displayName: 'Install dependencies'
 
           - script: |
-              pytest scripts/tests/ -q --tb=short
+              pytest tests/ -q --tb=short
             displayName: 'Run smoke tests'
 
   # ===================================================================================

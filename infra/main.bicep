@@ -9,7 +9,7 @@
 //   * Microsoft Foundry resource (kind=AIServices) — multi-service Cognitive Services
 //     account that provides:
 //        - Azure OpenAI embedding deployment (text-embedding-3-large) — required
-//        - Azure OpenAI chat deployment (gpt-4o) — OPTIONAL (only provisioned when
+//        - Azure OpenAI chat deployment — OPTIONAL (only provisioned when
 //          chatModelName param is non-empty; the locked design — Copilot Studio +
 //          AI Search hybrid index + integrated vectorizer — does NOT consume a chat
 //          completion model. Copilot Studio uses its own host model.)
@@ -17,7 +17,7 @@
 //     A separate Microsoft.CognitiveServices/accounts of kind=FormRecognizer is NOT
 //     provisioned — Foundry's AIServices kind exposes the DI API surface natively
 //     via the same `*.cognitiveservices.azure.com` endpoint.
-//   * Azure AI Search Standard S1 (semantic ranker enabled, system-assigned MI)
+//   * Azure AI Search (Standard S1 by default; Basic allowed; semantic ranker enabled, system-assigned MI)
 //   * RBAC role assignments:
 //        - AI Search MI -> Cognitive Services OpenAI User on Foundry (integrated vectorizer)
 //        - AI Search MI -> Storage Blob Data Reader on Storage (indexer pulls chunks/)
@@ -44,7 +44,9 @@
 //   * Fabric workspace + Lakehouse + Data Pipeline
 //   * Copilot Studio agent
 //
-// Usage:
+// Usage (three entry points over this same template):
+//   azd up                      (infra/azd.bicep wraps this file - docs/03-deployment.md, Fast path)
+//   pwsh ./infra/deploy.ps1     (script path)
 //   az deployment sub create \
 //     --location <region> \
 //     --template-file infra/main.bicep \
@@ -77,27 +79,44 @@ param embeddingModelName string = 'text-embedding-3-large'
 @description('OpenAI embedding model version. Leave blank to let Azure pick latest.')
 param embeddingModelVersion string = ''
 
+@description('Deployment SKU for the embedding model (Standard = regional, GlobalStandard = global routing). Match it to where your quota lives.')
+@allowed([
+  'Standard'
+  'GlobalStandard'
+  'DataZoneStandard'
+])
+param embeddingModelSku string = 'Standard'
+
 @description('OpenAI embedding deployment TPM capacity in units of 1000 (e.g. 10 = 10K TPM).')
 @minValue(1)
 @maxValue(2000)
 param embeddingModelTpm int = 10
 
-@description('OpenAI chat model. Default is EMPTY (no chat deployment is provisioned) because the locked design — Copilot Studio + AI Search hybrid index + integrated vectorizer — does NOT consume a chat completion model. Copilot Studio uses its own host model for generative answers. Set this to `gpt-4o` (or `gpt-4o-mini` for cost-down) only when an engagement explicitly needs a chat endpoint: custom app code calling completions, Foundry agent runtime, or a Copilot Studio bring-your-own-model configuration.')
+@description('OpenAI chat model. Default is EMPTY (no chat deployment is provisioned) because the locked design — Copilot Studio + AI Search hybrid index + integrated vectorizer — does NOT consume a chat completion model. Copilot Studio uses its own host model for generative answers. Set this to a current GA chat model (for example `gpt-5.5`, or `gpt-5.4-mini` for cost-down — check the model retirement schedule first) only when an engagement explicitly needs a chat endpoint: custom app code calling completions, Foundry agent runtime, or a Copilot Studio bring-your-own-model configuration.')
 param chatModelName string = ''
 
 @description('OpenAI chat model version. Leave blank to let Azure pick latest. Ignored when chatModelName is empty.')
 param chatModelVersion string = ''
+
+@description('Deployment SKU for the optional chat model. Current GA chat models (gpt-5.x) are deployed as GlobalStandard; use Standard / DataZoneStandard only when your model + region support it. Ignored when chatModelName is empty.')
+@allowed([
+  'Standard'
+  'GlobalStandard'
+  'DataZoneStandard'
+])
+param chatModelSku string = 'GlobalStandard'
 
 @description('OpenAI chat deployment TPM capacity in units of 1000 (e.g. 10 = 10K TPM). Ignored when chatModelName is empty.')
 @minValue(1)
 @maxValue(2000)
 param chatModelTpm int = 10
 
-@description('Set to true ONLY when redeploying after a `FlagMustBeSetForRestore` failure (Azure soft-delete recovery). When true, the Foundry account is restored in place from soft-delete, preserving the system-assigned MI principal ID and any role assignments granted to it. CAUTION: setting this to true on a fresh deploy (no soft-deleted account to restore) fails with `CanNotRestoreANonExistingResource`. Default false. See docs/06-troubleshooting.md § 0.5.')
+@description('Set to true ONLY when redeploying after a `FlagMustBeSetForRestore` failure (Azure soft-delete recovery). When true, the Foundry account is restored in place from soft-delete, preserving the system-assigned MI principal ID and any role assignments granted to it. CAUTION: setting this to true on a fresh deploy (no soft-deleted account to restore) fails with `CanNotRestoreANonExistingResource`. Default false. See docs/05-troubleshooting.md § 0.5.')
 param restoreFoundryFromSoftDelete bool = false
 
-@description('AI Search SKU. Standard (S1) or higher REQUIRED for semantic ranker — do not select Free or Basic.')
+@description('AI Search SKU. Default Standard (S1) for index-size and vector-quota headroom. Basic is a valid cost-down choice for demos: semantic ranker, integrated vectorization and managed identity all work on Basic (semantic ranker is billed by usage after the free monthly allowance). Free is not offered here because it does not support managed identity.')
 @allowed([
+  'basic'
   'standard'
   'standard2'
   'standard3'
@@ -114,8 +133,11 @@ param deployerPrincipalId string = ''
 ])
 param deployerPrincipalType string = 'User'
 
-@description('Set to true to also provision the OPTIONAL web-app hosting platform (Container Apps environment, Log Analytics, an Azure Container Registry, and a user-assigned managed identity) for the standalone chat front end in webapp/app. The container image is built and deployed afterwards by scripts/deploy-webapp.ps1. Default false — the base pattern (Copilot Studio path) does not need it; enable it for the Foundry-agent web-app front end (docs/09).')
+@description('Set to true to also provision the OPTIONAL web-app hosting platform (Container Apps environment, Log Analytics, an Azure Container Registry, and a user-assigned managed identity) for the standalone chat front end in webapp/app. The container image is built and deployed afterwards by scripts/deploy-webapp.ps1. Default false — the base pattern (Copilot Studio path) does not need it; enable it for the Foundry-agent web-app front end (docs/12).')
 param deployWebApp bool = false
+
+@description('Optional: existing or desired resource group name. Leave empty to use the naming convention rg-<workloadName>-<env>-<region>. Set by azd from AZURE_RESOURCE_GROUP.')
+param resourceGroupName string = ''
 
 @description('Tags applied to all resources for cost allocation + governance.')
 param tags object = {
@@ -129,7 +151,7 @@ var locationShort = toLower(replace(replace(location, ' ', ''), '-', ''))
 var nameSuffix    = '${workloadName}-${env}-${locationShort}'
 var stgName       = toLower(replace('st${workloadName}${env}${locationShort}', '-', ''))
 
-var rgName         = 'rg-${nameSuffix}'
+var rgName         = empty(resourceGroupName) ? 'rg-${nameSuffix}' : resourceGroupName
 var kvName         = take('kv-${nameSuffix}', 24)
 var aifName        = 'aif-${nameSuffix}'
 var searchName     = 'srch-${nameSuffix}'
@@ -189,9 +211,11 @@ module foundry 'modules/aifoundry.bicep' = {
     embeddingModelName: embeddingModelName
     embeddingModelVersion: embeddingModelVersion
     embeddingModelTpm: embeddingModelTpm
+    embeddingModelSku: embeddingModelSku
     chatModelName: chatModelName
     chatModelVersion: chatModelVersion
     chatModelTpm: chatModelTpm
+    chatModelSku: chatModelSku
     restoreFromSoftDelete: restoreFoundryFromSoftDelete
   }
 }
@@ -222,7 +246,7 @@ module rbac 'modules/rbac.bicep' = {
   }
 }
 
-// Optional: web-app hosting platform for the Foundry-agent chat front end (docs/09).
+// Optional: web-app hosting platform for the Foundry-agent chat front end (docs/12).
 // The container image is built + deployed by scripts/deploy-webapp.ps1 after this run.
 module webapp 'modules/containerapp.bicep' = if (deployWebApp) {
   scope: rg

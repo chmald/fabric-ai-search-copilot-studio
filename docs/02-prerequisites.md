@@ -52,7 +52,8 @@ Install these on the workstation you'll use to drive the build before working th
 | [PowerShell 7+ (`pwsh`)](https://learn.microsoft.com/powershell/scripting/install/installing-powershell) | 7.4+ | Running every shell snippet in `docs/*.md` and `infra/deploy.ps1` (cross-platform: Windows, macOS, Linux) |
 | [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli) | 2.60+ | All `az ...` commands; `az login` for interactive auth |
 | [Bicep](https://learn.microsoft.com/azure/azure-resource-manager/bicep/install) (CLI extension) | latest | `az bicep build` + `az deployment sub create`. Install once: `az bicep install` |
-| [Python](https://www.python.org/downloads/) | 3.11+ | `scripts/post_deploy_search.py` and `scripts/tests/*` |
+| [Azure Developer CLI (`azd`)](https://learn.microsoft.com/azure/developer/azure-developer-cli/install-azd) | 1.10+ | Optional — the one-command `azd up` fast path ([03](./03-deployment.md)) |
+| [Python](https://www.python.org/downloads/) | 3.11+ | `scripts/post_deploy_search.py` and `tests/*` (`python -m pytest`) |
 | [Git](https://git-scm.com/downloads) | any recent | Clone / commit |
 
 Verify your environment in one shot:
@@ -60,6 +61,7 @@ Verify your environment in one shot:
 ```pwsh
 $PSVersionTable.PSVersion          # PowerShell version (>= 7.4)
 az --version                       # Azure CLI version (>= 2.60); Bicep CLI shown in same output
+azd version                        # Azure Developer CLI (fast path only)
 python --version                   # Python version (>= 3.11)
 az bicep install                   # idempotent; ensures Bicep CLI is present
 ```
@@ -86,7 +88,7 @@ Several integration points require **role assignments**, not just resource creat
 Contributor-only is **not enough**; you will hit "Authorization failed" errors when wiring up identities.
 
 > [!WARNING]
-> Confirm both roles on the **intended** subscription before you start — the ambient `az` account can silently point at a different tenant/subscription. See the tenant-explicit auth check in [03-deployment-manual.md](./03-deployment-manual.md).
+> Confirm both roles on the **intended** subscription before you start — the ambient `az` account can silently point at a different tenant/subscription. See the tenant-explicit auth check in [03b-manual-deployment.md](./03b-manual-deployment.md).
 
 ---
 
@@ -120,7 +122,7 @@ az provider register --namespace Microsoft.CognitiveServices --wait
 - **Microsoft Foundry resource** (Azure CLI / ARM kind: `AIServices`) in the target subscription + region. This is the **strategic model-gateway resource** that supersedes the legacy standalone Azure OpenAI resource for new deployments. A single Foundry resource hosts all OpenAI models you deploy and also exposes the broader Foundry model catalog (Cohere, Llama, Phi, Mistral, etc.) under one endpoint.
 - **Two OpenAI model deployments** inside the Foundry resource:
   - **Embedding** — recommended: `text-embedding-3-large` (3072 dim). Acceptable fallback: `text-embedding-3-small` (1536 dim) for cost-sensitive demos.
-  - **Chat completion** — **optional**. The locked design does NOT consume a chat completion model (Copilot Studio uses its own host model for generative answers). Only deploy one when a deployment explicitly needs a chat endpoint: custom app code, Foundry agent runtime, or Copilot Studio bring-your-own-model. When you opt in, the recommended model is `gpt-4o` (cost-down: `gpt-4o-mini`). Set `chatModelName` in [infra/main.parameters.local.json](../infra/main.parameters.json) to opt in.
+  - **Chat completion** — **optional**. The locked design does NOT consume a chat completion model (Copilot Studio uses its own host model for generative answers). Only deploy one when a deployment explicitly needs a chat endpoint: custom app code, Foundry agent runtime, or Copilot Studio bring-your-own-model. When you opt in, use a current GA model — e.g. `gpt-5.5` (cost-down: `gpt-5.4-mini`), deployed as Global Standard; `gpt-4o` / `gpt-4o-mini` retire by 2027-04-14 ([retirement schedule](https://learn.microsoft.com/azure/foundry/openai/concepts/model-retirement-schedule)). Set `chatModelName` in [infra/main.parameters.local.json](../infra/main.parameters.json) (azd: `CHAT_MODEL_NAME`) to opt in.
 
 > **Why Foundry resource over the legacy AOAI resource?** The Microsoft Foundry resource is Microsoft's strategic direction for all new AI model deployments. It exposes the same OpenAI-compatible endpoint (`https://<resource>.openai.azure.com/`) so all existing tooling — including the AI Search integrated `azureOpenAI` vectorizer — works unchanged, while giving you a single resource for all model families (current + future) and a single capacity / billing / content-safety plane.
 
@@ -155,23 +157,28 @@ Choose a region with **both** model deployments available and with availability 
 
 ### Required
 
-- **AI Search service** at **Standard (S1) or higher** tier
+- **AI Search service** at **Basic or higher** tier — **Standard (S1) is the default** (`searchSku` / `SEARCH_SKU`)
 - Semantic ranker enabled (one toggle per service)
-- Managed identity (system-assigned) enabled
+- Managed identity (system-assigned) enabled — requires Basic or higher
 
-### Why Standard minimum
+### Choosing the tier
 
-| Tier | Semantic ranker | Storage | Recommendation |
-|---|---|---|---|
-| Free | ❌ | 50 MB | Demo only — cannot run this pattern |
-| Basic | ❌ | 2 GB | Cannot run this pattern |
-| **Standard S1** | ✅ | 25 GB / partition | **Minimum for this pattern** |
-| Standard S2 / S3 | ✅ | Higher | Production scale |
-| L1 / L2 | ✅ | Multi-TB | Multi-million doc corpora |
+Semantic ranker, integrated vectorization and managed identity all work on **Basic and above** ([semantic ranker](https://learn.microsoft.com/azure/search/semantic-search-overview), [managed identity prerequisites](https://learn.microsoft.com/azure/search/search-how-to-managed-identities)). Free is excluded only because it has no managed identity, and every connection in this pattern is keyless. Storage per partition depends on the service creation date and region; the figures below are for services created after May 2024 in the higher-capacity regions ([limits](https://learn.microsoft.com/azure/search/search-limits-quotas-capacity)).
+
+| Tier | Semantic ranker | Managed identity | Storage / partition | Recommendation |
+|---|---|---|---|---|
+| Free | ✅ (usage-limited) | ❌ | 50 MB | Cannot run this pattern (keyless connections need managed identity) |
+| Basic | ✅ | ✅ | 15 GB | **Cost-down option** for demos and small pilots |
+| **Standard S1** | ✅ | ✅ | 160 GB | **Default** — headroom for index size, vector quota and partitions |
+| Standard S2 / S3 | ✅ | ✅ | 512 GB / 1 TB | Production scale |
+| L1 / L2 | ✅ | ✅ | 2–4 TB | Multi-million doc corpora |
+
+> [!NOTE]
+> **Corrected 2026-10-07.** Earlier versions said semantic ranker needs Standard (S1) or higher. It doesn't — Basic is a valid, cheaper floor for a demo. S1 stays the default for capacity, not for a feature gate.
 
 ### Semantic ranker pricing model
 
-Standard tier includes a **free semantic-ranker quota** (currently 1,000 queries / month at time of writing — confirm current quota in Microsoft Learn). Beyond that, semantic queries are metered (~$1 / 1,000 queries). For demos and pilots, free quota is usually sufficient.
+Semantic ranker has a **free plan** (default) with a monthly request allowance and a **standard plan** that bills per 1,000 requests after the allowance is used ([billing](https://learn.microsoft.com/azure/search/semantic-how-to-enable-disable)). Queries with an empty search string (`search=*`) aren't charged. For demos and pilots the free allowance is usually sufficient — confirm the current allowance and price on the pricing page.
 
 ### Capacity guidance
 
@@ -230,17 +237,17 @@ If you have shared Fabric capacity, confirm there is headroom; ingestion pipelin
 
 Initiate these admin asks **before** you start building so they're cleared by the time you're ready to publish.
 
-### Alternative — Microsoft Foundry agent path (03d)
+### Alternative — Microsoft Foundry agent path (08)
 
-If you are building the agent on **Microsoft Foundry Agent Service** instead of Copilot Studio (see [03d](./03d-foundry-agent-setup.md) and the decision guide [07](./07-copilot-studio-vs-foundry.md)), the Layer-3 prerequisites change:
+If you are building the agent on **Microsoft Foundry Agent Service** instead of Copilot Studio (see [08](./08-foundry-agent-setup.md) and the decision guide [10](./10-copilot-studio-vs-foundry.md)), the Layer-3 prerequisites change:
 
-| Requirement | Copilot Studio path (03c) | Foundry agent path (03d) |
+| Requirement | Copilot Studio path (07) | Foundry agent path (08) |
 |---|---|---|
 | **Builder license/RBAC** | Copilot Studio Maker | **Azure AI Developer** (or Project Manager) on a Foundry project |
-| **Chat-model deployment** | Not required (host model answers) | **Required** — deploy `gpt-4o` (or `gpt-4o-mini`) on the `aif-rag-<env>` resource; confirm TPM quota |
+| **Chat-model deployment** | Not required (host model answers) | **Required** — deploy a current GA chat model (e.g. `gpt-5.5`, or `gpt-5.4-mini`) on the `aif-rag-<env>` resource; confirm TPM quota |
 | **Fabric Data Agent** | Optional connector (premium) | A **published Fabric Data Agent** in the workspace (for structured-data Q&A); Fabric admin enables Copilot/Azure OpenAI + Data Agents |
 | **Runtime billing** | Copilot Studio **message capacity** / per-user license | **Azure consumption** (tokens + tool calls + search QU + Fabric capacity) |
-| **Channel** | Native combined Teams + M365 Copilot (![GA](./assets/badges/ga.svg)) | **Custom engine agent** via M365 Agents SDK/Toolkit (![Preview](./assets/badges/preview.svg)) |
+| **Channel** | Native combined Teams + M365 Copilot (![GA](./assets/badges/ga.svg)) | Foundry portal publish to Teams + M365 Copilot via Azure Bot Service (![GA](./assets/badges/ga.svg)); publisher needs **Azure Bot Service Contributor** on the resource group |
 | **End-user license** | Microsoft 365 Copilot | Microsoft 365 Copilot (**unchanged**) |
 | **Teams admin approval** | One-time per environment | One-time per app (same gate) |
 
@@ -298,17 +305,17 @@ The end-user license is identical on both paths; the difference is **where the r
 
 These are the role assignments required by the pattern's Entra-only auth posture. List them out in advance so you can request them in batch if Owner approvals are required.
 
-> The full cross-layer identity map (ingest → platform → agent) plus the identity-passthrough / per-user-restriction model is consolidated in [08-rbac-and-identity-passthrough.md](./08-rbac-and-identity-passthrough.md).
+> The full cross-layer identity map (ingest → platform → agent) plus the identity-passthrough / per-user-restriction model is consolidated in [11-rbac-and-identity-passthrough.md](./11-rbac-and-identity-passthrough.md).
 
-### Machine-to-machine (assigned in Bicep `modules/rbac.bicep` or in [03-deployment-manual.md § 1.7](./03-deployment-manual.md#17-rbac-wiring))
+### Machine-to-machine (assigned in Bicep `modules/rbac.bicep` or in [03b-manual-deployment.md § 1.7](./03b-manual-deployment.md#17-rbac-wiring))
 
 | Principal | Role | Scope | Why |
 |---|---|---|---|
-| AI Search service managed identity | **Cognitive Services OpenAI User** | Foundry resource | Integrated vectorizer authenticates to the embedding deployment with a bearer token — **critical**. Must be the OpenAI-specific role, **not** plain `Cognitive Services User` (silent-failure trap — see [06-troubleshooting.md § 4.1](./06-troubleshooting.md)). |
+| AI Search service managed identity | **Cognitive Services OpenAI User** | Foundry resource | Integrated vectorizer authenticates to the embedding deployment with a bearer token — **critical**. Must be the OpenAI-specific role, **not** plain `Cognitive Services User` (silent-failure trap — see [05-troubleshooting.md § 4.1](./05-troubleshooting.md)). |
 | AI Search service managed identity | **Storage Blob Data Reader** | Storage account (or `chunks/` container) | Indexer pulls chunk JSON — **critical** |
 | Foundry resource managed identity | **Storage Blob Data Reader** | Storage account (or `raw/` container) | Document Intelligence (served from the Foundry account) fetches `urlSource` files via its own MI — required because shared-key access on Storage is disabled |
-| Fabric workspace identity | **Storage Blob Data Contributor** | Storage account | Copy / chunk-upload activities write to `raw/` + `chunks/`. Assigned manually in [03b-fabric-setup.md § F2.1](./03b-fabric-setup.md#f21-grant-the-workspace-identity-the-required-roles) once the workspace identity exists |
-| DI-caller service principal (`sp-rag-di-caller`) | **Cognitive Services User** | Foundry resource | Fabric notebook calls Document Intelligence via MSAL with this SP's secret — see [03b-fabric-setup.md § F2.2](./03b-fabric-setup.md#f22-create-a-di-caller-service-principal-for-msal-from-the-notebook) |
+| Fabric workspace identity | **Storage Blob Data Contributor** | Storage account | Copy / chunk-upload activities write to `raw/` + `chunks/`. Assigned manually in [06-fabric-setup.md § F2.1](./06-fabric-setup.md#f21-grant-the-workspace-identity-the-required-roles) once the workspace identity exists |
+| DI-caller service principal (`sp-rag-di-caller`) | **Cognitive Services User** | Foundry resource | Fabric notebook calls Document Intelligence via MSAL with this SP's secret — see [06-fabric-setup.md § F2.2](./06-fabric-setup.md#f22-create-a-di-caller-service-principal-for-msal-from-the-notebook) |
 
 ### Builder / deployer (assigned to the user or service principal running deploys)
 
@@ -322,7 +329,7 @@ These are the role assignments required by the pattern's Entra-only auth posture
 
 > When using the automated path, set the `deployerPrincipalId` parameter in `infra/main.parameters.local.json` to your object ID; Bicep then assigns the two Search roles for you. The remaining builder roles still need to be granted manually (typically once per environment, not per deploy).
 
-### Foundry agent path (03d) — additional assignments
+### Foundry agent path (08) — additional assignments
 
 Only needed if you build Layer 3 on **Microsoft Foundry Agent Service** instead of Copilot Studio. These are **incremental** to the machine-to-machine grants above (which stay in place — the index, indexer, and vectorizer are unchanged).
 
@@ -332,15 +339,16 @@ Only needed if you build Layer 3 on **Microsoft Foundry Agent Service** instead 
 | **Foundry project MI / caller** | **Cognitive Services OpenAI User** | Foundry resource | Agent generates answers on the chat deployment | New |
 | **Caller user identity (on-behalf-of)** | **Viewer** (+ read/build on the model/Lakehouse) | Fabric workspace | Fabric Data Agent answers within the **user's** RLS/OLS scope (per-user HR-data trimming) | New |
 | Building user / deploy SP | **Azure AI Developer** (or **Project Manager**) | Foundry project | Create the agent, tools, connections, deployments | New |
-| Custom-engine-agent **bot** (Entra app) | **Azure AI User** (or the toolkit-configured project connection) | Foundry project / agent | Teams bot forwards user turns to the agent endpoint | New |
+| Publisher (portal publish) | **Azure Bot Service Contributor** (or Contributor) + **Foundry User** | Resource group / Foundry project | Creates the Azure Bot Service resource and channels for the published agent | New |
+| Custom-engine-agent **bot** (optional Toolkit route) | **Foundry User** (formerly Azure AI User) or the toolkit-configured project connection | Foundry project / agent | Teams bot forwards user turns to the agent endpoint | New |
 
-> **Two-line summary of the RBAC delta:** grant the **Foundry project managed identity `Search Index Data Reader`** on the search service (so the agent can query the index), and flow the **caller's user identity (on-behalf-of)** into the Fabric Data Agent (so HR row-level security is enforced per user). Everything else is already in place from the base deploy or is a standard Foundry builder/bot grant. Full detail: [03d § RBAC summary](./03d-foundry-agent-setup.md#rbac-summary--high-level).
+> **Two-line summary of the RBAC delta:** grant the **Foundry project managed identity `Search Index Data Reader`** on the search service (so the agent can query the index), and flow the **caller's user identity (on-behalf-of)** into the Fabric Data Agent (so HR row-level security is enforced per user). Everything else is already in place from the base deploy or is a standard Foundry builder/bot grant. Full detail: [08 § RBAC summary](./08-foundry-agent-setup.md#rbac-summary--high-level).
 
 ---
 
 ## 11 — Regional alignment
 
-This pattern has a strong **co-location** requirement: AI Search, the Foundry resource (which hosts your OpenAI embedding model and the Document Intelligence OCR endpoint), Blob Storage, Key Vault, and your Fabric capacity should all live in the **same Azure region** wherever possible. The dominant constraint is **OpenAI model availability** — `text-embedding-3-large` (and `gpt-4o` if you opt in to a chat deployment) is not in every region, and these are the only services in the stack whose regional rollout lags meaningfully behind general Azure availability.
+This pattern has a strong **co-location** requirement: AI Search, the Foundry resource (which hosts your OpenAI embedding model and the Document Intelligence OCR endpoint), Blob Storage, Key Vault, and your Fabric capacity should all live in the **same Azure region** wherever possible. The dominant constraint is **OpenAI model availability** — `text-embedding-3-large` (and your chat model if you opt in to a regional Standard chat deployment) is not in every region, and these are the only services in the stack whose regional rollout lags meaningfully behind general Azure availability.
 
 Copilot Studio's environment region is independent and can differ from the Azure region; choose it based on your data-residency policy.
 
@@ -371,7 +379,7 @@ Choose from Tier 2 when data-residency, latency to your users, or existing Azure
 | North Europe (Dublin) | EMEA | Ireland residency; chat models reliable, embedding model availability mixed |
 | France Central | EMEA | France residency |
 | UK South | EMEA | UK residency; OpenAI availability has improved but still verify per-model |
-| Switzerland North | EMEA | Switzerland residency; verify embedding availability per quota (and gpt-4o if opting in to a chat deployment) |
+| Switzerland North | EMEA | Switzerland residency; verify embedding availability per quota (and your chat model if you opt in to a regional Standard chat deployment) |
 | Korea Central | APAC | Korea residency |
 
 ### Tier-3 regions (workarounds required)
@@ -382,7 +390,7 @@ Other regions (UAE North, South Africa North, Brazil South, Central India, etc.)
 
 > ✅ available · ⚠️ available but rollout often lags / quota-limited · ❌ not available at the time of this matrix's authoring
 
-| Region | AI Search S1+ | Foundry resource | text-embedding-3-large | gpt-4o (opt-in) | Doc Intel prebuilt-read | Fabric F-SKU |
+| Region | AI Search (Basic+) | Foundry resource | text-embedding-3-large | gpt-4o regional (legacy snapshot) | Doc Intel prebuilt-read | Fabric F-SKU |
 |---|---|---|---|---|---|---|
 | East US 2 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | East US | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -410,6 +418,9 @@ Other regions (UAE North, South Africa North, Brazil South, Central India, etc.)
 
 **Universally available (any Azure region)** — not in matrix because they don't constrain region choice: Blob Storage, Key Vault.
 
+> [!NOTE]
+> **Chat-model column.** The optional chat deployment now defaults to **Global Standard** (`CHAT_MODEL_SKU`), which doesn't depend on a per-region model rollout. The `gpt-4o` column is kept only as the publication-time snapshot for **regional Standard** deployments — `gpt-4o` is deprecated/legacy and retires between 2026-12-09 and 2027-04-14 ([retirement schedule](https://learn.microsoft.com/azure/foundry/openai/concepts/model-retirement-schedule)), so pick a current model (e.g. `gpt-5.5`) and verify it with the command below.
+
 ### Why these regions are the recommendation
 
 1. **Model availability is the only hard constraint.** AI Search, Blob, Key Vault, and Fabric are widely available; pick a region for them and they will work. OpenAI deployments (in the Foundry resource that also serves Document Intelligence) are the bottleneck.
@@ -426,10 +437,10 @@ The matrix above is a **publication-time snapshot**. Region × model availabilit
 # 1. List OpenAI models available in your target region
 az cognitiveservices model list `
   --location <region> `
-  --query "[?contains(model.name, 'text-embedding-3-large') || contains(model.name, 'gpt-4o')].{model:model.name, version:model.version}" `
+  --query "[?contains(model.name, 'text-embedding-3-large') || contains(model.name, 'gpt-5.5')].{model:model.name, version:model.version}" `
   -o table
 
-# 2. Check Azure AI Search SKU availability in your target region (Standard S1+ required for semantic ranker)
+# 2. Check Azure AI Search SKU availability in your target region (Basic+; S1 is the default)
 az search service list-skus --location <region> -o table
 
 # 3. Check Fabric capacity availability (region list updates as Fabric expands)
@@ -483,7 +494,7 @@ Indicative monthly costs for a **demo / pilot** scale (single region, ~10K docs 
 |---|---|---|
 | <img src="./assets/icons/ai-search.svg" width="24" alt=""/> AI Search Standard S1 | ~$250 | One replica, one partition |
 | <img src="./assets/icons/foundry-models.svg" width="24" alt=""/> Foundry — OpenAI embedding (text-embedding-3-large) | ~$10–$50 | One-time bulk embed + low ongoing |
-| <img src="./assets/icons/azure-openai.svg" width="24" alt=""/> Foundry — OpenAI chat (gpt-4o) | $0 by default; ~$50–$200 if opted in | Optional. The locked design does not deploy a chat model. Scales with query volume when enabled. |
+| <img src="./assets/icons/azure-openai.svg" width="24" alt=""/> Foundry — OpenAI chat (opt-in, e.g. gpt-5.5) | $0 by default; ~$50–$200 if opted in | Optional. The locked design does not deploy a chat model. Scales with query volume when enabled. |
 | <img src="./assets/icons/document-intelligence.svg" width="24" alt=""/> Document Intelligence (prebuilt-read) | ~$15–$30 | $1.50 / 1K pages |
 | <img src="./assets/icons/blob-block.svg" width="24" alt=""/> Blob Storage (Hot, ~50 GB) | ~$2 | |
 | <img src="./assets/icons/key-vault.svg" width="24" alt=""/> Key Vault | ~$1 | |
@@ -497,7 +508,7 @@ Indicative monthly costs for a **demo / pilot** scale (single region, ~10K docs 
 
 ## 15 — Pre-flight checklist
 
-Confirm all of these before moving to your chosen deployment path — [03-deployment-manual.md](./03-deployment-manual.md) (portal / CLI walkthrough) or [04-deployment-automated.md](./04-deployment-automated.md) (Bicep + script):
+Confirm all of these before moving to your chosen deployment path — [03b-manual-deployment.md](./03b-manual-deployment.md) (portal / CLI walkthrough) or [03-deployment.md](./03-deployment.md) (Bicep + script):
 
 > [!TIP]
 > Tick every box below before you provision anything — a missed approval (Foundry quota, channel publishing) costs far more time than the check.
@@ -512,10 +523,10 @@ Confirm all of these before moving to your chosen deployment path — [03-deploy
 - [ ] Naming convention agreed
 - [ ] Document source identified + access path (SharePoint shortcut, file share, etc.) planned
 
-Once all boxes are checked → proceed to [03-deployment-manual.md](./03-deployment-manual.md) for the portal walkthrough OR [04-deployment-automated.md](./04-deployment-automated.md) for the Bicep + script-driven path.
+Once all boxes are checked → proceed to [03b-manual-deployment.md](./03b-manual-deployment.md) for the portal walkthrough OR [03-deployment.md](./03-deployment.md) for the Bicep + script-driven path.
 
-**Next:** [03 — Manual deployment](./03-deployment-manual.md)
+**Next:** [03 — Deployment](./03-deployment.md)
 
 ---
 
-*Last updated: 2026-10-02*
+*Last updated: 2026-10-07*

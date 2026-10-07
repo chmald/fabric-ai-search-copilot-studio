@@ -1,19 +1,38 @@
 {
+  "_template": true,
+  "_note": "Committed TEMPLATE - human reference and local dry-runs only. Pipelines never read it at runtime (they use ADO variable groups / Key Vault). The populated copy is demo-ids.local.json (gitignored): infra/deploy.ps1 or the azd postprovision hook writes the flat Azure keys, and seeds the `corpus` block below on first write. Every key is documented in docs/13-configuration-reference.md section 3.",
   "_meta": {
-    "description": "Template for demo-ids.local.json — the per-deployment ID file this pattern produces. The live file is HYBRID: Azure resource fields (flat top-level keys) are auto-written by infra/deploy.ps1 from the Bicep deploymentSummary and overwritten on every successful deploy; nested objects (fabric, sp-rag-di-caller, copilotStudio) are populated manually during the Fabric and Copilot Studio setup phases and preserved across deploys (deploy.ps1 merges rather than overwrites). The live file is gitignored — never commit a populated copy.",
-    "azureFieldsSource": "infra/main.bicep deploymentSummary output (written by infra/deploy.ps1)",
-    "manualSections": ["fabric", "sp-rag-di-caller", "copilotStudio"],
+    "description": "Template for demo-ids.local.json — the per-deployment ID file this pattern produces. The live file is HYBRID: Azure resource fields (flat top-level keys) are auto-written by infra/deploy.ps1 or the azd postprovision hook from the Bicep deploymentSummary and overwritten on every successful deploy; nested objects (corpus, fabric, sp-rag-di-caller, copilotStudio) are maintained by hand and preserved across deploys (the writer merges rather than overwrites). The live file is gitignored — never commit a populated copy.",
+    "azureFieldsSource": "infra/main.bicep deploymentSummary output (written by infra/deploy.ps1 or infra/hooks/postprovision.ps1)",
+    "manualSections": ["corpus", "fabric", "sp-rag-di-caller", "copilotStudio"],
     "consumedBy": [
-      "scripts/post_deploy_search.py (reads top-level Azure fields: foundryOpenAIEndpoint, embeddingDeployment, embeddingModel, searchService, searchEndpoint, searchIndexName, searchDataSourceName, searchIndexerName, storageAccount, chunksContainer, resourceGroup, subscriptionId)",
-      "Fabric pipeline pl_ingest_docs (operator copies fabric.* and sp-rag-di-caller.* into pipeline parameters at build time — see docs/03b-fabric-setup.md § F8.0)"
+      "scripts/post_deploy_search.py (reads top-level Azure fields: foundryOpenAIEndpoint, embeddingDeployment, embeddingModel, searchService, searchEndpoint, searchIndexName, searchDataSourceName, searchIndexerName, storageAccount, chunksContainer, resourceGroup, subscriptionId; and the corpus block)",
+      "Fabric pipeline pl_ingest_docs (operator copies fabric.*, sp-rag-di-caller.* and corpus chunking values into pipeline / notebook parameters at build time — see docs/06-fabric-setup.md § F8.0)",
+      "Agent setup (operator copies corpus.agentName / knowledgeSourceName / knowledgeSourceDescription into Copilot Studio or the Foundry agent — docs/07, docs/08)"
     ]
   },
 
+  "corpus": {
+    "_note": "THE ONLY corpus/workload-specific surface. Retargeting the pattern at a new document domain = editing this block (plus your own documents) - no code changes. Values override the Bicep/script defaults; delete a key to fall back to its default. Docs: docs/01-architecture.md 'Adapting this pattern to another domain' and docs/13-configuration-reference.md section 3.2.",
+    "displayName": "Document knowledge base",
+    "searchIndexName": "idx-rag-documents",
+    "searchSkillsetName": "skill-rag-embeddings",
+    "contentAnalyzer": "en.microsoft",
+    "embeddingDimensions": null,
+    "indexerSchedule": "PT5M",
+    "searchApiVersion": "2024-07-01",
+    "acceptedFileTypes": [".pdf", ".docx", ".jpg", ".jpeg", ".png", ".tiff", ".bmp"],
+    "chunkSizeTokens": 1000,
+    "chunkOverlapTokens": 200,
+    "agentName": "agent-rag-kb",
+    "knowledgeSourceName": "Document knowledge base",
+    "knowledgeSourceDescription": "Searches the organization's indexed document collection (policies, procedures, reference material) and returns cited passages. Use it for any question answered by an internal document."
+  },
   "_azure_fields_BELOW_ARE_AUTO_WRITTEN_BY_DEPLOY_PS1": "----- Bicep-managed (auto, alphabetical) -----",
 
   "blobEndpoint": "https://stragdemo<env><region>.blob.core.windows.net/",
-  "chatDeployment": "chat",
-  "chatModel": "gpt-4o",
+  "chatDeployment": "<chat - only when a chat model is opted in>",
+  "chatModel": "<empty unless CHAT_MODEL_NAME / chatModelName opted in>",
   "chunksContainer": "chunks",
   "documentIntelligenceEndpoint": "https://aif-rag-demo-<env>-<region>.cognitiveservices.azure.com/",
   "embeddingDeployment": "embedding",
@@ -40,7 +59,7 @@
   "_manual_sections_BELOW_ARE_PRESERVED_BY_DEPLOY_PS1": "----- Manually maintained (preserved across deploys) -----",
 
   "fabric": {
-    "_note": "Populated manually during docs/03b-fabric-setup.md. The Fabric REST API has no Bicep/ARM surface for workspaces, lakehouses, or pipelines, so these IDs are recorded here as a reference for human re-use and for binding into pipeline parameters.",
+    "_note": "Populated manually during docs/06-fabric-setup.md. The Fabric REST API has no Bicep/ARM surface for workspaces, lakehouses, or pipelines, so these IDs are recorded here as a reference for human re-use and for binding into pipeline parameters.",
     "tenantSetting_serviceTagsForFabricAdmin": "Enabled",
     "capacityId": "<fabric-capacity-guid>",
     "capacityName": "fabric<workload>",
@@ -54,7 +73,7 @@
   },
 
   "sp-rag-di-caller": {
-    "_note": "Populated manually after running `az ad sp create-for-rbac --name sp-rag-di-caller` (see docs/03b-fabric-setup.md § F2.2). The SP is used by the Fabric OCR notebook to acquire a bearer token for Document Intelligence (served by the Foundry resource). NOTE: The `password` field below is the SP's client secret — it is ALSO stored in Key Vault as `di-sp-secret` (which is the canonical home; the Fabric notebook reads it from there at runtime). The copy here is kept temporarily for diagnostic convenience and SHOULD BE REMOVED once Key Vault retrieval is validated end-to-end.",
+    "_note": "Populated manually after running `az ad sp create-for-rbac --name sp-rag-di-caller` (see docs/06-fabric-setup.md § F2.2). The SP is used by the Fabric OCR notebook to acquire a bearer token for Document Intelligence (served by the Foundry resource). NOTE: The `password` field below is the SP's client secret — it is ALSO stored in Key Vault as `di-sp-secret` (which is the canonical home; the Fabric notebook reads it from there at runtime). The copy here is kept temporarily for diagnostic convenience and SHOULD BE REMOVED once Key Vault retrieval is validated end-to-end.",
     "appId": "<sp-client-id-guid>",
     "displayName": "sp-rag-di-caller",
     "password": "<sp-client-secret — also stored in Key Vault as `di-sp-secret`>",
@@ -62,7 +81,7 @@
   },
 
   "copilotStudio": {
-    "_note": "Populated manually during docs/03c-copilot-studio-setup.md. Copilot Studio is Power Platform (not Azure) and has no Bicep / Terraform surface.",
+    "_note": "Populated manually during docs/07-copilot-studio-setup.md. Copilot Studio is Power Platform (not Azure) and has no Bicep / Terraform surface.",
     "environmentRegion": "<region — independent from Azure region>",
     "agentName": "agent-rag-kb",
     "knowledgeSource": "idx-rag-documents (Azure AI Search)",

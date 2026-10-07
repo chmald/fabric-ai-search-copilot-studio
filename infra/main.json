@@ -4,8 +4,8 @@
   "metadata": {
     "_generator": {
       "name": "bicep",
-      "version": "0.43.8.12551",
-      "templateHash": "12474974872624480992"
+      "version": "0.48.1.52935",
+      "templateHash": "12417221430326406289"
     }
   },
   "parameters": {
@@ -50,6 +50,18 @@
         "description": "OpenAI embedding model version. Leave blank to let Azure pick latest."
       }
     },
+    "embeddingModelSku": {
+      "type": "string",
+      "defaultValue": "Standard",
+      "allowedValues": [
+        "Standard",
+        "GlobalStandard",
+        "DataZoneStandard"
+      ],
+      "metadata": {
+        "description": "Deployment SKU for the embedding model (Standard = regional, GlobalStandard = global routing). Match it to where your quota lives."
+      }
+    },
     "embeddingModelTpm": {
       "type": "int",
       "defaultValue": 10,
@@ -63,7 +75,7 @@
       "type": "string",
       "defaultValue": "",
       "metadata": {
-        "description": "OpenAI chat model. Default is EMPTY (no chat deployment is provisioned) because the locked design — Copilot Studio + AI Search hybrid index + integrated vectorizer — does NOT consume a chat completion model. Copilot Studio uses its own host model for generative answers. Set this to `gpt-4o` (or `gpt-4o-mini` for cost-down) only when an engagement explicitly needs a chat endpoint: custom app code calling completions, Foundry agent runtime, or a Copilot Studio bring-your-own-model configuration."
+        "description": "OpenAI chat model. Default is EMPTY (no chat deployment is provisioned) because the locked design — Copilot Studio + AI Search hybrid index + integrated vectorizer — does NOT consume a chat completion model. Copilot Studio uses its own host model for generative answers. Set this to a current GA chat model (for example `gpt-5.5`, or `gpt-5.4-mini` for cost-down — check the model retirement schedule first) only when an engagement explicitly needs a chat endpoint: custom app code calling completions, Foundry agent runtime, or a Copilot Studio bring-your-own-model configuration."
       }
     },
     "chatModelVersion": {
@@ -71,6 +83,18 @@
       "defaultValue": "",
       "metadata": {
         "description": "OpenAI chat model version. Leave blank to let Azure pick latest. Ignored when chatModelName is empty."
+      }
+    },
+    "chatModelSku": {
+      "type": "string",
+      "defaultValue": "GlobalStandard",
+      "allowedValues": [
+        "Standard",
+        "GlobalStandard",
+        "DataZoneStandard"
+      ],
+      "metadata": {
+        "description": "Deployment SKU for the optional chat model. Current GA chat models (gpt-5.x) are deployed as GlobalStandard; use Standard / DataZoneStandard only when your model + region support it. Ignored when chatModelName is empty."
       }
     },
     "chatModelTpm": {
@@ -86,19 +110,20 @@
       "type": "bool",
       "defaultValue": false,
       "metadata": {
-        "description": "Set to true ONLY when redeploying after a `FlagMustBeSetForRestore` failure (Azure soft-delete recovery). When true, the Foundry account is restored in place from soft-delete, preserving the system-assigned MI principal ID and any role assignments granted to it. CAUTION: setting this to true on a fresh deploy (no soft-deleted account to restore) fails with `CanNotRestoreANonExistingResource`. Default false. See docs/06-troubleshooting.md § 0.5."
+        "description": "Set to true ONLY when redeploying after a `FlagMustBeSetForRestore` failure (Azure soft-delete recovery). When true, the Foundry account is restored in place from soft-delete, preserving the system-assigned MI principal ID and any role assignments granted to it. CAUTION: setting this to true on a fresh deploy (no soft-deleted account to restore) fails with `CanNotRestoreANonExistingResource`. Default false. See docs/05-troubleshooting.md § 0.5."
       }
     },
     "searchSku": {
       "type": "string",
       "defaultValue": "standard",
       "allowedValues": [
+        "basic",
         "standard",
         "standard2",
         "standard3"
       ],
       "metadata": {
-        "description": "AI Search SKU. Standard (S1) or higher REQUIRED for semantic ranker — do not select Free or Basic."
+        "description": "AI Search SKU. Default Standard (S1) for index-size and vector-quota headroom. Basic is a valid cost-down choice for demos: semantic ranker, integrated vectorization and managed identity all work on Basic (semantic ranker is billed by usage after the free monthly allowance). Free is not offered here because it does not support managed identity."
       }
     },
     "deployerPrincipalId": {
@@ -123,7 +148,14 @@
       "type": "bool",
       "defaultValue": false,
       "metadata": {
-        "description": "Set to true to also provision the OPTIONAL web-app hosting platform (Container Apps environment, Log Analytics, an Azure Container Registry, and a user-assigned managed identity) for the standalone chat front end in webapp/app. The container image is built and deployed afterwards by scripts/deploy-webapp.ps1. Default false — the base pattern (Copilot Studio path) does not need it; enable it for the Foundry-agent web-app front end (docs/09)."
+        "description": "Set to true to also provision the OPTIONAL web-app hosting platform (Container Apps environment, Log Analytics, an Azure Container Registry, and a user-assigned managed identity) for the standalone chat front end in webapp/app. The container image is built and deployed afterwards by scripts/deploy-webapp.ps1. Default false — the base pattern (Copilot Studio path) does not need it; enable it for the Foundry-agent web-app front end (docs/12)."
+      }
+    },
+    "resourceGroupName": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Optional: existing or desired resource group name. Leave empty to use the naming convention rg-<workloadName>-<env>-<region>. Set by azd from AZURE_RESOURCE_GROUP."
       }
     },
     "tags": {
@@ -141,7 +173,7 @@
     "locationShort": "[toLower(replace(replace(parameters('location'), ' ', ''), '-', ''))]",
     "nameSuffix": "[format('{0}-{1}-{2}', parameters('workloadName'), parameters('env'), variables('locationShort'))]",
     "stgName": "[toLower(replace(format('st{0}{1}{2}', parameters('workloadName'), parameters('env'), variables('locationShort')), '-', ''))]",
-    "rgName": "[format('rg-{0}', variables('nameSuffix'))]",
+    "rgName": "[if(empty(parameters('resourceGroupName')), format('rg-{0}', variables('nameSuffix')), parameters('resourceGroupName'))]",
     "kvName": "[take(format('kv-{0}', variables('nameSuffix')), 24)]",
     "aifName": "[format('aif-{0}', variables('nameSuffix'))]",
     "searchName": "[format('srch-{0}', variables('nameSuffix'))]",
@@ -186,8 +218,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.43.8.12551",
-              "templateHash": "8376035515929416800"
+              "version": "0.48.1.52935",
+              "templateHash": "5619972000788245598"
             }
           },
           "parameters": {
@@ -307,8 +339,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.43.8.12551",
-              "templateHash": "9913500501469892672"
+              "version": "0.48.1.52935",
+              "templateHash": "1372214934695674988"
             }
           },
           "parameters": {
@@ -456,6 +488,9 @@
           "embeddingModelTpm": {
             "value": "[parameters('embeddingModelTpm')]"
           },
+          "embeddingModelSku": {
+            "value": "[parameters('embeddingModelSku')]"
+          },
           "chatModelName": {
             "value": "[parameters('chatModelName')]"
           },
@@ -464,6 +499,9 @@
           },
           "chatModelTpm": {
             "value": "[parameters('chatModelTpm')]"
+          },
+          "chatModelSku": {
+            "value": "[parameters('chatModelSku')]"
           },
           "restoreFromSoftDelete": {
             "value": "[parameters('restoreFoundryFromSoftDelete')]"
@@ -475,8 +513,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.43.8.12551",
-              "templateHash": "1627793001201825828"
+              "version": "0.48.1.52935",
+              "templateHash": "11961083409042944649"
             }
           },
           "parameters": {
@@ -513,6 +551,13 @@
                 "description": "Embedding model version. Leave blank to let Azure pick latest GA."
               }
             },
+            "embeddingModelSku": {
+              "type": "string",
+              "defaultValue": "Standard",
+              "metadata": {
+                "description": "Embedding deployment SKU (Standard | GlobalStandard | DataZoneStandard)."
+              }
+            },
             "embeddingModelTpm": {
               "type": "int",
               "defaultValue": 10,
@@ -535,6 +580,13 @@
                 "description": "Chat model version. Leave blank to let Azure pick latest GA. Ignored when chatModelName is empty."
               }
             },
+            "chatModelSku": {
+              "type": "string",
+              "defaultValue": "GlobalStandard",
+              "metadata": {
+                "description": "Chat deployment SKU (Standard | GlobalStandard | DataZoneStandard). Ignored when chatModelName is empty."
+              }
+            },
             "chatModelTpm": {
               "type": "int",
               "defaultValue": 10,
@@ -547,7 +599,7 @@
               "type": "bool",
               "defaultValue": false,
               "metadata": {
-                "description": "Set to true ONLY when an existing Foundry account with the same name is in Azure soft-delete state and you want Bicep to restore it in place (preserves the system-assigned MI principal ID and any role assignments granted to it). Default false. CAUTION: when this is true and there is no soft-deleted account to restore, the deploy fails with `CanNotRestoreANonExistingResource`. Set this to true only after a deploy fails with `FlagMustBeSetForRestore`. See docs/06-troubleshooting.md § 0.5."
+                "description": "Set to true ONLY when an existing Foundry account with the same name is in Azure soft-delete state and you want Bicep to restore it in place (preserves the system-assigned MI principal ID and any role assignments granted to it). Default false. CAUTION: when this is true and there is no soft-deleted account to restore, the deploy fails with `CanNotRestoreANonExistingResource`. Set this to true only after a deploy fails with `FlagMustBeSetForRestore`. See docs/05-troubleshooting.md § 0.5."
               }
             }
           },
@@ -572,7 +624,7 @@
               "apiVersion": "2024-10-01",
               "name": "[format('{0}/{1}', parameters('name'), 'embedding')]",
               "sku": {
-                "name": "Standard",
+                "name": "[parameters('embeddingModelSku')]",
                 "capacity": "[parameters('embeddingModelTpm')]"
               },
               "properties": {
@@ -594,7 +646,7 @@
               "apiVersion": "2024-10-01",
               "name": "[format('{0}/{1}', parameters('name'), 'chat')]",
               "sku": {
-                "name": "Standard",
+                "name": "[parameters('chatModelSku')]",
                 "capacity": "[parameters('chatModelTpm')]"
               },
               "properties": {
@@ -678,8 +730,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.43.8.12551",
-              "templateHash": "7050220694575744579"
+              "version": "0.48.1.52935",
+              "templateHash": "7860805697165930544"
             }
           },
           "parameters": {
@@ -708,12 +760,13 @@
               "type": "string",
               "defaultValue": "standard",
               "allowedValues": [
+                "basic",
                 "standard",
                 "standard2",
                 "standard3"
               ],
               "metadata": {
-                "description": "SKU. Standard (S1) MINIMUM for semantic ranker. Free/Basic are NOT supported by this pattern."
+                "description": "SKU. Basic or higher (S1 default). Free is not supported by this pattern (no managed identity)."
               }
             },
             "replicaCount": {
@@ -750,7 +803,7 @@
           "resources": [
             {
               "type": "Microsoft.Search/searchServices",
-              "apiVersion": "2024-03-01-preview",
+              "apiVersion": "2025-05-01",
               "name": "[parameters('name')]",
               "location": "[parameters('location')]",
               "tags": "[parameters('tags')]",
@@ -763,7 +816,7 @@
               "properties": {
                 "replicaCount": "[parameters('replicaCount')]",
                 "partitionCount": "[parameters('partitionCount')]",
-                "hostingMode": "default",
+                "hostingMode": "Default",
                 "publicNetworkAccess": "enabled",
                 "semanticSearch": "[parameters('semanticSearch')]",
                 "networkRuleSet": {
@@ -791,7 +844,7 @@
             },
             "systemAssignedPrincipalId": {
               "type": "string",
-              "value": "[reference(resourceId('Microsoft.Search/searchServices', parameters('name')), '2024-03-01-preview', 'full').identity.principalId]"
+              "value": "[reference(resourceId('Microsoft.Search/searchServices', parameters('name')), '2025-05-01', 'full').identity.principalId]"
             }
           }
         }
@@ -842,8 +895,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.43.8.12551",
-              "templateHash": "2021624981710032166"
+              "version": "0.48.1.52935",
+              "templateHash": "1713914954882156896"
             }
           },
           "parameters": {
@@ -1058,8 +1111,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.43.8.12551",
-              "templateHash": "15112810839722674154"
+              "version": "0.48.1.52935",
+              "templateHash": "14827423120839793074"
             }
           },
           "parameters": {

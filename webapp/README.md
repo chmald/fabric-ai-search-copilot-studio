@@ -1,7 +1,7 @@
 # `webapp/` — Foundry agent chat front end (in-repo)
 
 A small, self-hosted chat web app for the Foundry agent built in
-[docs/03d](../docs/03d-foundry-agent-setup.md). It deploys with this repo's own flow —
+[docs/08](../docs/08-foundry-agent-setup.md). It deploys with this repo's own flow —
 Bicep for the platform, PowerShell for the build/deploy — and supports per-user identity
 passthrough (OBO) so the **Microsoft Fabric data agent tool** enforces row-/object-level
 security per user.
@@ -28,12 +28,12 @@ deployed by [`scripts/deploy-webapp.ps1`](../scripts/deploy-webapp.ps1):
 # 1. Provision the platform with the base deploy (set deployWebApp = true in your params)
 pwsh ./infra/deploy.ps1 -ParameterFile infra/main.parameters.local.json
 
-# 2. Build + deploy the app against your 03d agent
+# 2. Build + deploy the app against your 08 agent
 pwsh ./scripts/deploy-webapp.ps1 -FoundryProjectEndpoint $endpoint -AgentId $agentId            # MI mode
 pwsh ./scripts/deploy-webapp.ps1 -FoundryProjectEndpoint $endpoint -AgentId $agentId -EnableObo # Fabric tool
 ```
 
-Full runbook, RBAC, and validation: **[docs/09-foundry-agent-webapp.md](../docs/09-foundry-agent-webapp.md)**.
+Full runbook, RBAC, and validation: **[docs/12-foundry-agent-webapp.md](../docs/12-foundry-agent-webapp.md)**.
 
 ## Run locally (optional)
 

@@ -1,6 +1,6 @@
-[README](../README.md) › [docs index](./00-reproduce-this-demo.md) › 04 Automated deployment
+[README](../README.md) › [docs index](./00-reproduce-this-demo.md) › 03 Deployment
 
-# 04 — Deployment (Automated / Bicep + scripts)
+# 03 — Deployment (azd up, or Bicep + scripts)
 
 <p align="center">
   <img src="./assets/icons/resource-group.svg" width="40" alt="Resource group">&nbsp;&nbsp;
@@ -11,31 +11,99 @@
   <img src="./assets/icons/azure-devops.svg" width="40" alt="Azure DevOps">
 </p>
 
-![Version](./assets/badges/version.svg) ![Static only](./assets/badges/static-only.svg)
+![Version](./assets/badges/version.svg) ![azd up](./assets/badges/azd-up.svg) ![Static only](./assets/badges/static-only.svg)
 
-The automated deployment path. Provisions the Azure platform layer via Bicep, then configures the AI Search index/datasource/indexer via a post-deploy Python script (because AI Search index / indexer resources are not cleanly expressible in Bicep / ARM today).
+The automated deployment path for the Azure platform layer. **`azd up` is the fast path**: one command provisions the Bicep, writes `demo-ids.local.json` and configures the AI Search index, data source, skillset and indexer. The same Bicep also runs from `infra/deploy.ps1` (script path, below) and by hand ([03b](./03b-manual-deployment.md)). The AI Search index/indexer objects are configured by a post-deploy Python script because ARM / Bicep can't express them cleanly. Fabric and Copilot Studio stay manual in every path.
 
 ## At a glance
 
 | | Item | Detail |
 |---|---|---|
-| <img src="./assets/icons/code.svg" width="24" alt=""/> | **Mechanism** | `infra/deploy.ps1` / `az deployment sub create` + `scripts/post_deploy_search.py` |
-| <img src="./assets/icons/subscription.svg" width="24" alt=""/> | **Scope** | Subscription (creates the resource group) |
+| <img src="./assets/icons/azure-devops.svg" width="24" alt=""/> | **Fast path** | `azd up` — `azure.yaml` → `infra/azd.bicep` → the shared `infra/main.bicep`, with tenant-guard and post-deploy hooks |
+| <img src="./assets/icons/code.svg" width="24" alt=""/> | **Script path** | `infra/deploy.ps1` / `az deployment sub create` + `scripts/post_deploy_search.py` |
+| <img src="./assets/icons/subscription.svg" width="24" alt=""/> | **Scope** | Subscription (creates or reuses the resource group) |
 | <img src="./assets/icons/gear.svg" width="24" alt=""/> | **Runtime** | 8–15 min deploy + 30–60 s search config |
-| <img src="./assets/icons/folder.svg" width="24" alt=""/> | **Not covered** | Fabric workspace ([03b](./03b-fabric-setup.md)) and Copilot Studio ([03c](./03c-copilot-studio-setup.md)) |
+| <img src="./assets/icons/file.svg" width="24" alt=""/> | **Every setting** | [13-configuration-reference.md](./13-configuration-reference.md) |
+| <img src="./assets/icons/folder.svg" width="24" alt=""/> | **Not covered** | Fabric workspace ([06](./06-fabric-setup.md)) and Copilot Studio ([07](./07-copilot-studio-setup.md)) |
 
 [![Automated deployment flow: parameters, what-if, Bicep deploy, AI Search post-deploy script, verify, then manual Fabric and Copilot Studio steps](./assets/automated-deployment-flow.png)](./assets/automated-deployment-flow.png)
 
 <sub>Editable source: [`assets/automated-deployment-flow.drawio`](./assets/automated-deployment-flow.drawio) - regenerate with `python scripts/export_diagrams.py docs/assets`.</sub>
 
 > [!NOTE]
-> **Two paths exist; this is the automated one.** For the manual portal / CLI walkthrough, see [03-deployment-manual.md](./03-deployment-manual.md). The two paths produce the same end-state.
+> **Three entry points, one template.** `azd up` (fast path) and `infra/deploy.ps1` (script path) both deploy `infra/main.bicep`; the manual portal / CLI walkthrough is [03b-manual-deployment.md](./03b-manual-deployment.md). All three produce the same end-state.
+
+---
+
+## Fast path — azd up
+
+[![azd up flow: authenticate az and azd to the target tenant, set the azd environment, preprovision guards, provision infra/azd.bicep over the shared main.bicep, postprovision writes demo-ids.local.json and configures AI Search, then the manual Fabric and agent steps](./assets/azd-deployment-flow.png)](./assets/azd-deployment-flow.png)
+
+<sub>Editable source: [`assets/azd-deployment-flow.drawio`](./assets/azd-deployment-flow.drawio) - regenerate with `python scripts/export_diagrams.py docs/assets`.</sub>
+
+> [!WARNING]
+> **Authenticate both CLIs to the right tenant first.** azd and az keep **separate** logins, and the hooks and `post_deploy_search.py` use az. A bare `azd up` targets whatever tenant azd last used. The `preprovision` hook refuses to continue unless `az account show` matches `AZURE_TENANT_ID` / `AZURE_SUBSCRIPTION_ID`.
+
+| Step | | Action | Gate |
+|---|---|---|---|
+| **0** | <img src="./assets/icons/entra-id.svg" width="28" alt=""> | `azd auth login --tenant-id <tenant-id>` **and** `az login --tenant <tenant-id>` + `az account set --subscription <subscription-id>` | ☐ `az account show` shows the target tenant + subscription |
+| **1** | <img src="./assets/icons/gear.svg" width="28" alt=""> | `azd env new <env>` and `azd env set` the tenant, subscription and region (plus any [13](./13-configuration-reference.md) knobs) | ☐ `azd env get-values` shows them |
+| **2** | <img src="./assets/icons/code.svg" width="28" alt=""> | `azd provision --preview` | ☐ Plan shows 1 RG + the module deployments, no errors |
+| **3** | <img src="./assets/icons/azure-devops.svg" width="28" alt=""> | `azd up` ![azd up](./assets/badges/azd-up.svg) | ☐ Hooks pass; `demo-ids.local.json` written; AI Search configured |
+| **4** | <img src="./assets/icons/ai-search.svg" width="28" alt=""> | `python scripts/post_deploy_search.py --ids demo-ids.local.json --verify` | ☐ All checks `[OK]` |
+
+```pwsh
+azd auth login --tenant-id <tenant-id>              # azd's own login
+az login --tenant <tenant-id>                       # the hooks + scripts use az
+az account set --subscription <subscription-id>
+az account show --query "{tenant:tenantId, subscription:id}" -o table
+
+azd env new rag-dev                                 # short, lowercase; <= 20 characters
+azd env set AZURE_TENANT_ID <tenant-id>
+azd env set AZURE_SUBSCRIPTION_ID <subscription-id>
+azd env set AZURE_LOCATION eastus2
+# optional knobs, e.g.: azd env set SEARCH_SKU basic ; azd env set CHAT_MODEL_NAME gpt-5.5
+azd env get-values
+
+azd provision --preview
+azd up
+```
+
+| Hook / step | What azd runs | Same as on the script path |
+|---|---|---|
+| `preprovision` (`infra/hooks/preprovision.ps1`) | Validates `AZURE_ENV_NAME`, `WORKLOAD_NAME` / `WORKLOAD_ENV` (storage-name length) and the SKU values; **stops unless the az context matches the tenant + subscription**; restores a soft-deleted Foundry account / recovers a soft-deleted Key Vault of the same name (or purges them when `PURGE_SOFT_DELETED=true`) | Phase 0 + the `-RestoreFoundry` switch |
+| provision | `infra/azd.bicep` (subscription scope) → the shared `infra/main.bicep`, with `AZURE_PRINCIPAL_ID` as the deployer so the search + Key Vault roles are granted | Step 3 |
+| `postprovision` (`infra/hooks/postprovision.ps1`) | Writes `demo-ids.local.json` from the outputs (merging, never dropping hand-added sections; seeds the `corpus` block) and runs `post_deploy_search.py` unless `CONFIGURE_SEARCH=false` | Steps 3–4 |
+
+Shared logic (ids writer, tenant guard, soft-delete guard, post-deploy call) lives in `infra/hooks/common.ps1`, which `infra/deploy.ps1` dot-sources too, so the paths can't drift. Every variable, default and output: [13-configuration-reference.md](./13-configuration-reference.md).
+
+> [!TIP]
+> If `postprovision` reports that AI Search configuration failed on a first run, the new role assignments are usually still propagating. Wait a few minutes and run `azd hooks run postprovision` — it is idempotent. Tear down with `azd down --purge` (see [Tearing down](#tearing-down)).
+
+After `azd up`, continue with [Step 6 — Finish the manual steps](#step-6--finish-the-manual-steps). The rest of this page is the **script path**.
+
+---
+
+## Phase 0 — Authenticate to the right tenant (script path)
+
+| Step | | Action | Gate |
+|---|---|---|---|
+| **0** | <img src="./assets/icons/entra-id.svg" width="28" alt=""> | `az login --tenant <tenant-id>` + `az account set --subscription <subscription-id>` | ☐ `az account show` matches the target |
+
+```pwsh
+az login --tenant <tenant-id>
+az account set --subscription <subscription-id>
+az account show --query "{tenant:tenantId, subscription:id, user:user.name}" -o table
+```
+
+> [!WARNING]
+> Never run the script path on a bare `az login`. Pass `-TenantId <tenant-id> -SubscriptionId <subscription-id>` to `infra/deploy.ps1` and it stops when the active context drifts.
 
 > [!IMPORTANT]
 > **What this path DOES NOT cover.** Fabric workspace creation and Copilot Studio agent configuration are not in Bicep — they are portal-driven low-code components and each has its own dedicated runbook:
 >
-> - **Fabric** (workspace, identity, Lakehouse, OneLake shortcut, control table, connections, pipeline) → [03b-fabric-setup.md](./03b-fabric-setup.md)
-> - **Copilot Studio** (agent, AI Search knowledge source binding, channel publishing) → [03c-copilot-studio-setup.md](./03c-copilot-studio-setup.md)
+> - **Fabric** (workspace, identity, Lakehouse, OneLake shortcut, control table, connections, pipeline) → [06-fabric-setup.md](./06-fabric-setup.md)
+> - **Copilot Studio** (agent, AI Search knowledge source binding, channel publishing) → [07-copilot-studio-setup.md](./07-copilot-studio-setup.md)
 >
 > Both are identical regardless of which Azure path (manual or this one) you took.
 
@@ -48,10 +116,10 @@ The automated deployment path. Provisions the Azure platform layer via Bicep, th
 | <img src="./assets/icons/resource-group.svg" width="24" alt=""/> | Resource group | `main.bicep` (subscription scope) | Container for everything else |
 | <img src="./assets/icons/key-vault.svg" width="24" alt=""/> | Key Vault | `modules/keyvault.bicep` | RBAC-mode; for any non-managed-identity secrets |
 | <img src="./assets/icons/storage.svg" width="24" alt=""/> | Storage account + `raw/` + `chunks/` containers | `modules/storage.bicep` | Permanent canonical store |
-| <img src="./assets/icons/foundry-models.svg" width="24" alt=""/> | Microsoft Foundry resource | `modules/aifoundry.bicep` | Multi-service Cognitive Services account (`kind=AIServices`). Always deploys the `text-embedding-3-large` deployment (required by the AI Search vectorizer). The `gpt-4o` chat deployment is **opt-in**: set `chatModelName` in `main.parameters.local.json` to `gpt-4o` (or `gpt-4o-mini`) to provision it; leave it empty (the default) to skip — the locked design does not consume a chat completion model. The same Foundry account also serves Document Intelligence (`prebuilt-read` OCR) — no separate FormRecognizer resource is provisioned. |
-| <img src="./assets/icons/ai-search.svg" width="24" alt=""/> | AI Search Standard S1 | `modules/search.bicep` | Hybrid + semantic ranker enabled, system-assigned MI |
-| <img src="./assets/icons/container-apps.svg" width="24" alt=""/> | Web app platform (**optional**) | `modules/containerapp.bicep` | Container Apps environment + ACR + Log Analytics + user-assigned managed identity for the standalone chat front end ([09](./09-foundry-agent-webapp.md)). Only when `deployWebApp=true` (default false); the image is built + deployed separately by `scripts/deploy-webapp.ps1`. |
-| <img src="./assets/icons/managed-identity.svg" width="24" alt=""/> | RBAC role assignments | `modules/rbac.bicep` | Search MI → `Cognitive Services OpenAI User` on Foundry; Search MI → `Storage Blob Data Reader` on Storage; Foundry MI → `Storage Blob Data Reader` on Storage (so DI can fetch `raw/<file>` via `urlSource`); when `deployerPrincipalId` is set, also grants the deployer **Search Service Contributor** + **Search Index Data Contributor** on AI Search (for `post_deploy_search.py`) **and Key Vault Secrets Officer on Key Vault** (so you can write the DI-caller SP secret in [03b § F2.2 step 3](./03b-fabric-setup.md#f22-create-a-di-caller-service-principal-for-msal-from-the-notebook) without a manual `az role assignment create`) |
+| <img src="./assets/icons/foundry-models.svg" width="24" alt=""/> | Microsoft Foundry resource | `modules/aifoundry.bicep` | Multi-service Cognitive Services account (`kind=AIServices`). Always deploys the `text-embedding-3-large` deployment (required by the AI Search vectorizer). The chat deployment is **opt-in** ![Opt-in](./assets/badges/opt-in.svg): set `chatModelName` (azd: `CHAT_MODEL_NAME`) to a current GA chat model such as `gpt-5.5` (or `gpt-5.4-mini`) to provision it; leave it empty (the default) to skip — the locked design does not consume a chat completion model. The same Foundry account also serves Document Intelligence (`prebuilt-read` OCR) — no separate FormRecognizer resource is provisioned. |
+| <img src="./assets/icons/ai-search.svg" width="24" alt=""/> | AI Search (Standard S1 default, Basic allowed) | `modules/search.bicep` | Hybrid + semantic ranker enabled, system-assigned MI |
+| <img src="./assets/icons/container-apps.svg" width="24" alt=""/> | Web app platform (**optional**) | `modules/containerapp.bicep` | Container Apps environment + ACR + Log Analytics + user-assigned managed identity for the standalone chat front end ([12](./12-foundry-agent-webapp.md)). Only when `deployWebApp=true` (default false); the image is built + deployed separately by `scripts/deploy-webapp.ps1`. |
+| <img src="./assets/icons/managed-identity.svg" width="24" alt=""/> | RBAC role assignments | `modules/rbac.bicep` | Search MI → `Cognitive Services OpenAI User` on Foundry; Search MI → `Storage Blob Data Reader` on Storage; Foundry MI → `Storage Blob Data Reader` on Storage (so DI can fetch `raw/<file>` via `urlSource`); when `deployerPrincipalId` is set, also grants the deployer **Search Service Contributor** + **Search Index Data Contributor** on AI Search (for `post_deploy_search.py`) **and Key Vault Secrets Officer on Key Vault** (so you can write the DI-caller SP secret in [06 § F2.2 step 3](./06-fabric-setup.md#f22-create-a-di-caller-service-principal-for-msal-from-the-notebook) without a manual `az role assignment create`) |
 
 **What is NOT deployed by Bicep** (configured by the post-deploy script):
 
@@ -61,8 +129,8 @@ The automated deployment path. Provisions the Azure platform layer via Bicep, th
 
 **What is NOT deployed by either** (manual portal steps):
 
-- **Fabric workspace + Lakehouse + OneLake shortcut + control table + connections + Data Pipeline** — see [03b-fabric-setup.md](./03b-fabric-setup.md) (always manual)
-- **Copilot Studio agent + knowledge source binding + channel publishing** — see [03c-copilot-studio-setup.md](./03c-copilot-studio-setup.md)
+- **Fabric workspace + Lakehouse + OneLake shortcut + control table + connections + Data Pipeline** — see [06-fabric-setup.md](./06-fabric-setup.md) (always manual)
+- **Copilot Studio agent + knowledge source binding + channel publishing** — see [07-copilot-studio-setup.md](./07-copilot-studio-setup.md)
 
 ---
 
@@ -72,7 +140,8 @@ The automated deployment path. Provisions the Azure platform layer via Bicep, th
 |---|---|---|
 | <img src="./assets/icons/file.svg" width="24" alt=""/> | All boxes in [02-prerequisites.md § Pre-flight checklist](./02-prerequisites.md#15--pre-flight-checklist) confirmed | ☐ Pre-flight complete |
 | <img src="./assets/icons/powershell.svg" width="24" alt=""/> | Local developer tooling per [02-prerequisites.md § 0](./02-prerequisites.md#0--local-developer-tooling): **PowerShell 7+ (`pwsh`)**, **Azure CLI 2.60+** with the Bicep extension (`az bicep install`), **Python 3.11+** with `pip` | ☐ Tools installed |
-| <img src="./assets/icons/entra-id.svg" width="24" alt=""/> | `az login` succeeded with an identity that has **Contributor + User Access Administrator** at the **subscription** scope (the deployment targets subscription scope and creates the RG) | ☐ Roles confirmed |
+| <img src="./assets/icons/entra-id.svg" width="24" alt=""/> | Phase 0 completed with an identity that has **Contributor + User Access Administrator** (or **Owner**) at the **subscription** scope (the deployment targets subscription scope, creates the RG and assigns roles) | ☐ Roles confirmed |
+| <img src="./assets/icons/azure-devops.svg" width="24" alt=""/> | Fast path only: **Azure Developer CLI** (`azd`) 1.10+ | ☐ `azd version` |
 
 > [!TIP]
 > All shell snippets below are PowerShell (`pwsh`). The deployment wrapper is `infra/deploy.ps1`. See [README § Shell convention](../README.md#shell-convention) for the project-wide convention.
@@ -158,6 +227,7 @@ Either invoke the wrapper:
 
 ```pwsh
 pwsh ./infra/deploy.ps1 `
+  -TenantId <tenant-id> -SubscriptionId <subscription-id> `
   -ParameterFile infra/main.parameters.local.json `
   -DeploymentName rag-kb-bicep-$(Get-Date -Format yyyyMMdd-HHmm)
 ```
@@ -174,7 +244,7 @@ az deployment sub create `
 
 Typical runtime: **8–15 minutes** dominated by AI Search service provisioning and AOAI model deployment propagation.
 
-After the deployment completes, capture the outputs to your local IDs file:
+`infra/deploy.ps1` writes the outputs to `demo-ids.local.json` for you (merging, so hand-maintained sections such as `corpus` and `fabric` survive a redeploy). If you ran `az deployment sub create` directly, capture them yourself — this overwrites the file, so re-add any manual sections afterwards:
 
 ```pwsh
 az deployment sub show `
@@ -259,7 +329,7 @@ Expected:
 [OK] Indexer 'ixr-chunks' status: success  (or transientFailure on first run with empty container — normal)
 ```
 
-If any check fails, see [06-troubleshooting.md § 4](./06-troubleshooting.md) for the AI Search-specific diagnosis flow.
+If any check fails, see [05-troubleshooting.md § 4](./05-troubleshooting.md) for the AI Search-specific diagnosis flow.
 
 ---
 
@@ -267,21 +337,30 @@ If any check fails, see [06-troubleshooting.md § 4](./06-troubleshooting.md) fo
 
 | | Remaining runbook | Covers | Gate |
 |---|---|---|---|
-| <img src="./assets/icons/storage.svg" width="24" alt=""/> | [03b-fabric-setup.md](./03b-fabric-setup.md) | Workspace, identity, Lakehouse, OneLake shortcut, control table, connections, ingest pipeline | ☐ Complete |
-| <img src="./assets/icons/users.svg" width="24" alt=""/> | [03c-copilot-studio-setup.md](./03c-copilot-studio-setup.md) | Agent creation, AI Search knowledge source, generative answers, Teams + M365 Copilot publishing | ☐ Complete |
+| <img src="./assets/icons/storage.svg" width="24" alt=""/> | [06-fabric-setup.md](./06-fabric-setup.md) | Workspace, identity, Lakehouse, OneLake shortcut, control table, connections, ingest pipeline | ☐ Complete |
+| <img src="./assets/icons/users.svg" width="24" alt=""/> | [07-copilot-studio-setup.md](./07-copilot-studio-setup.md) | Agent creation, AI Search knowledge source, generative answers, Teams + M365 Copilot publishing | ☐ Complete |
 
 Bicep + script have provisioned the entire Azure platform layer. Now finish:
 
-- **Fabric setup** — [03b-fabric-setup.md](./03b-fabric-setup.md) (workspace, identity, Lakehouse, OneLake shortcut, control table, connections, ingest pipeline)
-- **Copilot Studio agent** — [03c-copilot-studio-setup.md](./03c-copilot-studio-setup.md) (agent creation, AI Search knowledge source, generative answers, Teams + M365 Copilot publishing)
+- **Fabric setup** — [06-fabric-setup.md](./06-fabric-setup.md) (workspace, identity, Lakehouse, OneLake shortcut, control table, connections, ingest pipeline)
+- **Copilot Studio agent** — [07-copilot-studio-setup.md](./07-copilot-studio-setup.md) (agent creation, AI Search knowledge source, generative answers, Teams + M365 Copilot publishing)
 
-Once both are complete, jump to [05-testing.md](./05-testing.md).
+Once both are complete, jump to [04-testing.md](./04-testing.md).
 
 ---
 
 ## Tearing down
 
-To remove everything Bicep created:
+**azd path:**
+
+```pwsh
+azd down --purge      # deletes the resource group; --purge also purges the soft-deleted Foundry account + Key Vault
+```
+
+> [!CAUTION]
+> `--purge` is irreversible and removes anything granted to the Foundry managed identity by hand (the DI-caller SP role from [06 § F2.2](./06-fabric-setup.md#f22-create-a-di-caller-service-principal-for-msal-from-the-notebook)). Without `--purge`, the next `azd up` restores the soft-deleted account in place.
+
+**Script path** — remove everything Bicep created:
 
 ```pwsh
 az group delete --name $(az deployment sub show --name <your-deployment> --query "properties.outputs.deploymentSummary.value.resourceGroup" -o tsv) --yes
@@ -315,7 +394,8 @@ See [00-reproduce-this-demo.md § Part F](./00-reproduce-this-demo.md) for ADO w
 
 | Scenario | Recommended path |
 |---|---|
-| First time touching this pattern | Manual ([03-deployment-manual.md](./03-deployment-manual.md)) — better learning |
+| Fastest repeatable stand-up | **`azd up`** (fast path) — one command, guarded tenant, AI Search configured |
+| First time touching this pattern | Manual ([03b-manual-deployment.md](./03b-manual-deployment.md)) — better learning |
 | Demo / one-off lab | Manual — easier to talk through component-by-component |
 | Stand up dev + prod environments | Automated — Bicep is faster + ensures parity |
 | You want the IaC | Automated — the Bicep + ADO pipeline are ready to use |
@@ -324,6 +404,6 @@ See [00-reproduce-this-demo.md § Part F](./00-reproduce-this-demo.md) for ADO w
 
 ---
 
-Next: [05 - Testing](./05-testing.md) →
+Next: [03b - Manual deployment](./03b-manual-deployment.md) →
 
-*Last updated: 2026-10-02*
+*Last updated: 2026-10-07*

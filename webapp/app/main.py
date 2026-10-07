@@ -2,7 +2,7 @@
 main.py — minimal chat front end for a Microsoft Foundry agent.
 
 A single-file FastAPI app that relays user messages to a published Foundry
-agent (built per docs/03d) and streams the reply back to a small static UI.
+agent (built per docs/08) and streams the reply back to a small static UI.
 It is intentionally tiny: no database, no session store, no SDK beyond the
 Foundry projects client and azure-identity.
 
@@ -24,14 +24,14 @@ Two identity modes (selected by the ENABLE_OBO env var)
     security, Purview, and DLP per user. The client assertion for the
     confidential-client exchange is the managed identity's own token for the
     token-exchange audience (a federated identity credential), so no client
-    secret is stored. See docs/08 and docs/09 for the identity model.
+    secret is stored. See docs/11 and docs/12 for the identity model.
 
 ------------------------------------------------------------------------------
 Configuration (environment variables)
 ------------------------------------------------------------------------------
     FOUNDRY_PROJECT_ENDPOINT  Foundry project endpoint, e.g.
                               https://<resource>.services.ai.azure.com/api/projects/<project>
-    AGENT_ID                  Published agent identifier (e.g. "hr-knowledge-agent")
+    AGENT_ID                  Published agent identifier (e.g. "kb-agent")
     AZURE_CLIENT_ID           Client ID of the user-assigned managed identity
                               assigned to the Container App (used in both modes:
                               MI mode calls the agent with it; OBO mode uses it
@@ -167,9 +167,9 @@ def _last_assistant_text(messages) -> str:
     return ""
 
 
-# NOTE: uses the azure-ai-projects v1.x agents surface (threads/messages/runs), which is
-# documented to sunset 2026-08-26 with the classic Assistants API. Migrate to the v2.x
-# Responses API (openai.responses.create / conversations) before then — see
+# NOTE: uses the azure-ai-projects v1.x agents surface (threads/messages/runs), i.e. Foundry
+# Agent Service (classic), which retires 2027-03-31. GA agents need azure-ai-projects>=2.3
+# (responses.create / conversations) - see
 # https://learn.microsoft.com/azure/foundry/agents/how-to/migrate
 def _ask_agent(credential, message: str, thread_id: Optional[str]) -> tuple[str, str]:
     """Send one message to the agent and return (reply_text, thread_id)."""

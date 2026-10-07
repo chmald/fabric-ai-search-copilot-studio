@@ -1,8 +1,8 @@
 # Structured sample data — Fabric Data Agent
 
-This folder holds the **structured data** for the optional **Microsoft Fabric Data Agent** integration on the [Microsoft Foundry agent path (03d)](../docs/03d-foundry-agent-setup.md). Load these tables into a Fabric Lakehouse and point a Data Agent at them — full steps in [docs/03e-fabric-data-agent.md](../docs/03e-fabric-data-agent.md).
+This folder holds the **structured data** for the optional **Microsoft Fabric Data Agent** integration on the [Microsoft Foundry agent path (08)](../docs/08-foundry-agent-setup.md). Load these tables into a Fabric Lakehouse and point a Data Agent at them — full steps in [docs/09-fabric-data-agent.md](../docs/09-fabric-data-agent.md).
 
-> **The document corpus is *not* in this repo — by design.** The unstructured sample files (offer letters, NDAs, severance, contractor agreements) are **standalone**: you upload your own document set into the ingestion source to trigger the Fabric → Blob → AI Search flow ([03b § F4](../docs/03b-fabric-setup.md)). This repo ships only the **structured** companion data, which is all the Fabric Data Agent integration needs.
+> **The document corpus is *not* in this repo — by design.** The unstructured sample files (offer letters, NDAs, severance, contractor agreements) are **standalone**: you upload your own document set into the ingestion source to trigger the Fabric → Blob → AI Search flow ([06 § F4](../docs/06-fabric-setup.md)). This repo ships only the **structured** companion data, which is all the Fabric Data Agent integration needs.
 
 > **100% synthetic.** Every name, employer, and figure below is fictitious. The rows correspond to a standard synthetic HR document set via the `source_pdf` / `source_document` key — so when that document set is uploaded to the ingestion flow, the AI Search (document) answers and the Fabric Data Agent (structured) answers line up for the same person. **Never replace these with real HR data in a committed file.**
 
@@ -36,7 +36,7 @@ samples/
 2. Create + ground + publish a Fabric Data Agent over them.
 3. Connect the published Data Agent to the Foundry agent as its Microsoft Fabric knowledge tool.
 
-All three steps are in **[docs/03e-fabric-data-agent.md](../docs/03e-fabric-data-agent.md)**.
+All three steps are in **[docs/09-fabric-data-agent.md](../docs/09-fabric-data-agent.md)**.
 
 ---
 

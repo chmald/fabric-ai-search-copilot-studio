@@ -1,6 +1,6 @@
-[README](../README.md) › [docs index](./00-reproduce-this-demo.md) › 03e Fabric Data Agent
+[README](../README.md) › [docs index](./00-reproduce-this-demo.md) › 09 Fabric Data Agent
 
-# 03e — Fabric Data Agent over the structured sample data
+# 09 — Fabric Data Agent over the structured sample data
 
 <p align="center">
   <img src="./assets/icons/storage.svg" width="40" alt="Lakehouse tables">&nbsp;&nbsp;
@@ -20,17 +20,17 @@ This document builds the **structured-data knowledge source** for the agent: a *
 |---|---|---|
 | <img src="./assets/icons/storage.svg" width="24" alt=""/> | **Data** | `employees.csv` (15 rows) + `agreements.csv` (30 rows) loaded as Lakehouse Delta tables |
 | <img src="./assets/icons/sql-database.svg" width="24" alt=""/> | **Fabric Data Agent** `data-agent-hr` | ![GA](./assets/badges/ga.svg) NL-to-query over the two tables |
-| <img src="./assets/icons/foundry-agent-service.svg" width="24" alt=""/> | **Consumer** | Foundry Microsoft Fabric tool (03d Phase D3) ![Preview](./assets/badges/preview.svg) |
+| <img src="./assets/icons/foundry-agent-service.svg" width="24" alt=""/> | **Consumer** | Foundry Microsoft Fabric tool (08 Phase D3) ![Preview](./assets/badges/preview.svg) |
 | <img src="./assets/icons/entra-id.svg" width="24" alt=""/> | **Identity** | On-behalf-of caller identity; RLS honored per user |
 
 > [!IMPORTANT]
-> **Optional — Foundry path only.** Only the [Microsoft Foundry agent path (03d)](./03d-foundry-agent-setup.md) wires a Fabric Data Agent (as its **Microsoft Fabric knowledge tool**, Phase D3). Skip this doc if your deployment is unstructured-document-only. *(Copilot Studio can also consume a Fabric Data Agent, but that connector is exactly the premium / message-capacity-billed path 03d exists to avoid — so the Fabric Data Agent is documented on the Foundry path.)*
+> **Optional — Foundry path only.** Only the [Microsoft Foundry agent path (08)](./08-foundry-agent-setup.md) wires a Fabric Data Agent (as its **Microsoft Fabric knowledge tool**, Phase D3). Skip this doc if your deployment is unstructured-document-only. *(Copilot Studio can also consume a Fabric Data Agent, but that connector is exactly the premium / message-capacity-billed path 08 exists to avoid — so the Fabric Data Agent is documented on the Foundry path.)*
 
 > [!NOTE]
-> **Run order.** Build this **after** the Fabric workspace exists ([03b](./03b-fabric-setup.md)) and **before** [03d Phase D3](./03d-foundry-agent-setup.md#phase-d3--add-the-microsoft-fabric-data-agent-tool-structured-data). It reuses the same workspace and capacity — no new Azure resources.
+> **Run order.** Build this **after** the Fabric workspace exists ([06](./06-fabric-setup.md)) and **before** [08 Phase D3](./08-foundry-agent-setup.md#phase-d3--add-the-microsoft-fabric-data-agent-tool-structured-data). It reuses the same workspace and capacity — no new Azure resources.
 
 > [!WARNING]
-> **Preview boundary.** The **Fabric Data Agent** (this Fabric feature) is **generally available**; the **Foundry Microsoft Fabric tool** that consumes it (03d Phase D3) is in **preview**. Tenant settings gate the feature and screens move — re-verify against [Fabric Data Agent docs](https://learn.microsoft.com/fabric/data-science/concept-data-agent) at build time.
+> **Preview boundary.** The **Fabric Data Agent** (this Fabric feature) is **generally available**; the **Foundry Microsoft Fabric tool** that consumes it (08 Phase D3) is in **preview**. Tenant settings gate the feature and screens move — re-verify against [Fabric Data Agent docs](https://learn.microsoft.com/fabric/data-science/concept-data-agent) at build time.
 
 ---
 
@@ -54,12 +54,12 @@ samples/structured/                         (in this repo)
                                    └── PUBLISHED
                                           │
                                           ▼  consumed as a knowledge tool by
-                              Foundry agent  (03d Phase D3 — on-behalf-of identity)
+                              Foundry agent  (08 Phase D3 — on-behalf-of identity)
 ```
 
 </details>
 
-The CSVs in [`samples/structured/`](../samples/structured/) correspond to a standard synthetic HR document set via the `source_pdf` key (see [samples/README.md](../samples/README.md)) — so once that document set is uploaded to the ingestion flow, a document answer and a data answer about the same person agree. The document corpus itself is uploaded separately ([03b § F4](./03b-fabric-setup.md)); only the structured data ships in this repo.
+The CSVs in [`samples/structured/`](../samples/structured/) correspond to a standard synthetic HR document set via the `source_pdf` key (see [samples/README.md](../samples/README.md)) — so once that document set is uploaded to the ingestion flow, a document answer and a data answer about the same person agree. The document corpus itself is uploaded separately ([06 § F4](./06-fabric-setup.md)); only the structured data ships in this repo.
 
 ---
 
@@ -67,11 +67,11 @@ The CSVs in [`samples/structured/`](../samples/structured/) correspond to a stan
 
 | Requirement | Detail |
 |---|---|
-| **Fabric workspace + capacity** | Reuse `ws-rag-<env>` from [03b § F1](./03b-fabric-setup.md). F2 (F-SKU) or a Power BI Premium capacity. |
+| **Fabric workspace + capacity** | Reuse `ws-rag-<env>` from [06 § F1](./06-fabric-setup.md). F2 (F-SKU) or a Power BI Premium capacity. |
 | **Tenant settings** (Fabric admin) | **Copilot and Azure OpenAI** enabled, and **Data Agent** creation enabled for your group ([admin portal](https://learn.microsoft.com/fabric/admin/service-admin-portal-copilot)). |
 | **Structured CSVs** | `samples/structured/employees.csv` (15 rows) + `agreements.csv` (30 rows) — ship in this repo. |
 | **Builder role** | **Member** or **Contributor** on the workspace (to create + publish the Data Agent). |
-| **End-user role** (for 03d on-behalf-of) | **Read** access to the data agent + **Read** on the Lakehouse item/tables. The Foundry Fabric tool uses **user identity (OBO) only — service principal is not supported**, so each end user needs these grants for per-user RLS. |
+| **End-user role** (for 08 on-behalf-of) | **Read** access to the data agent + **Read** on the Lakehouse item/tables. The Foundry Fabric tool uses **user identity (OBO) only — service principal is not supported**, so each end user needs these grants for per-user RLS. |
 
 ---
 
@@ -86,7 +86,7 @@ The CSVs in [`samples/structured/`](../samples/structured/) correspond to a stan
 
 Details for each step:
 
-1. Open the Lakehouse `lh_rag_<env>` from [03b § F3](./03b-fabric-setup.md) (or create a Warehouse if you prefer T-SQL).
+1. Open the Lakehouse `lh_rag_<env>` from [06 § F3](./06-fabric-setup.md) (or create a Warehouse if you prefer T-SQL).
 2. Upload `employees.csv` and `agreements.csv` into the Lakehouse **Files** area (drag-drop, or `Get data → Upload files`) — e.g. into a `Files/structured/` folder.
 3. Convert them to **Delta tables**. Low-code: right-click each CSV → **Load to Tables → New table**. Or run a one-cell notebook against the Lakehouse:
 
@@ -167,7 +167,7 @@ Open the Data Agent's chat pane and run the example questions from G3. Confirm:
 - it filters on `amount_basis` when averaging pay (doesn't blend hourly + annual);
 - it returns `document_id` / `source_pdf` for record-level questions.
 
-Iterate on the instructions/notes until the example questions pass cleanly — this is the structured analogue of the AI Search golden-set evaluation in [05-testing.md](./05-testing.md).
+Iterate on the instructions/notes until the example questions pass cleanly — this is the structured analogue of the AI Search golden-set evaluation in [04-testing.md](./04-testing.md).
 
 ---
 
@@ -176,21 +176,21 @@ Iterate on the instructions/notes until the example questions pass cleanly — t
 | Step | | Action | Gate |
 |---|---|---|---|
 | **1** | <img src="./assets/icons/sql-database.svg" width="28" alt=""> | **Publish** the Data Agent | ☐ Published version exists |
-| **2** | <img src="./assets/icons/file.svg" width="28" alt=""> | Record workspace name/ID and Data Agent name/ID | ☐ Values saved for 03d D3 |
+| **2** | <img src="./assets/icons/file.svg" width="28" alt=""> | Record workspace name/ID and Data Agent name/ID | ☐ Values saved for 08 D3 |
 
 Details for each step:
 
 1. **Publish** the Data Agent (publish action in the Data Agent toolbar). Publishing produces the consumable version the Foundry agent connects to.
-2. Note the **workspace name/ID** and the **Data Agent name/ID** (and published endpoint/URL if shown) — [03d Phase D3](./03d-foundry-agent-setup.md#phase-d3--add-the-microsoft-fabric-data-agent-tool-structured-data) needs them to create the Microsoft Fabric tool connection.
+2. Note the **workspace name/ID** and the **Data Agent name/ID** (and published endpoint/URL if shown) — [08 Phase D3](./08-foundry-agent-setup.md#phase-d3--add-the-microsoft-fabric-data-agent-tool-structured-data) needs them to create the Microsoft Fabric tool connection.
 
 ---
 
-## Identity & RBAC (how this ties to 03d)
+## Identity & RBAC (how this ties to 08)
 
 > [!NOTE]
-> The consolidated cross-layer RBAC map and the full identity-passthrough model (how OBO enforces RLS/OLS/Purview restrictions per user) are in **[08-rbac-and-identity-passthrough.md](./08-rbac-and-identity-passthrough.md)**.
+> The consolidated cross-layer RBAC map and the full identity-passthrough model (how OBO enforces RLS/OLS/Purview restrictions per user) are in **[11-rbac-and-identity-passthrough.md](./11-rbac-and-identity-passthrough.md)**.
 
-A Fabric Data Agent **honors the permissions of the identity that calls it** — it never widens access to the underlying tables. Choose the calling identity deliberately in [03d Phase D3](./03d-foundry-agent-setup.md#phase-d3--add-the-microsoft-fabric-data-agent-tool-structured-data):
+A Fabric Data Agent **honors the permissions of the identity that calls it** — it never widens access to the underlying tables. Choose the calling identity deliberately in [08 Phase D3](./08-foundry-agent-setup.md#phase-d3--add-the-microsoft-fabric-data-agent-tool-structured-data):
 
 | Calling identity | What the Data Agent can see | Use for |
 |---|---|---|
@@ -198,19 +198,19 @@ A Fabric Data Agent **honors the permissions of the identity that calls it** —
 | **Fixed service identity** | One identity's scope for every caller | Non-sensitive, uniformly-shareable reference data |
 
 > [!CAUTION]
-> **The Foundry Microsoft Fabric tool supports On-Behalf-Of (user identity) only — service principal authentication is not supported.** The fixed-identity option applies to other consumption paths, not the 03d Foundry integration.
+> **The Foundry Microsoft Fabric tool supports On-Behalf-Of (user identity) only — service principal authentication is not supported.** The fixed-identity option applies to other consumption paths, not the 08 Foundry integration.
 
 | Principal | Role / grant | Scope | Why |
 |---|---|---|---|
 | Builder | **Member** / **Contributor** | Workspace | Create + publish the Data Agent |
 | End user (OBO) | **Read** on data agent + **Read** on Lakehouse tables | Workspace / Lakehouse | Data Agent answers within the user's RLS scope (user identity only) |
-| Foundry agent connection | per [03d D3](./03d-foundry-agent-setup.md#phase-d3--add-the-microsoft-fabric-data-agent-tool-structured-data) | — | Carries the caller identity into Fabric |
+| Foundry agent connection | per [08 D3](./08-foundry-agent-setup.md#phase-d3--add-the-microsoft-fabric-data-agent-tool-structured-data) | — | Carries the caller identity into Fabric |
 
 Reference: [Fabric Data Agent end-to-end (incl. security)](https://learn.microsoft.com/fabric/data-science/data-agent-end-to-end-tutorial) · [Microsoft Fabric tool](https://learn.microsoft.com/azure/foundry/agents/how-to/tools/fabric) ![Preview](./assets/badges/preview.svg).
 
 ### (Optional) Demonstrate per-user trimming
 
-To show on-behalf-of security end-to-end, add **row-level security** on the `employees` table by `region` (e.g. a US-only role and an EU-only role) in a Warehouse or semantic model, assign two test users, then ask the same "list all employees" question as each — each sees only their region. This is the structured-data counterpart to the AI Search `group_ids` trimming in [05-testing.md § G](./05-testing.md).
+To show on-behalf-of security end-to-end, add **row-level security** on the `employees` table by `region` (e.g. a US-only role and an EU-only role) in a Warehouse or semantic model, assign two test users, then ask the same "list all employees" question as each — each sees only their region. This is the structured-data counterpart to the AI Search `group_ids` trimming in [04-testing.md § G](./04-testing.md).
 
 ---
 
@@ -222,14 +222,14 @@ To show on-behalf-of security end-to-end, add **row-level security** on the `emp
 | **G2** | <img src="./assets/icons/sql-database.svg" width="24" alt=""/> | ☐ Data Agent `data-agent-hr` created over both tables |
 | **G3** | <img src="./assets/icons/gear.svg" width="24" alt=""/> | ☐ Instructions include the `amount_basis` / currency caveat |
 | **G4** | <img src="./assets/icons/dev-console.svg" width="24" alt=""/> | ☐ All five example questions return correct answers in the Fabric chat |
-| **G5** | <img src="./assets/icons/file.svg" width="24" alt=""/> | ☐ Data Agent **published**; workspace + agent identifiers recorded for 03d D3 |
+| **G5** | <img src="./assets/icons/file.svg" width="24" alt=""/> | ☐ Data Agent **published**; workspace + agent identifiers recorded for 08 D3 |
 | **RBAC** | <img src="./assets/icons/entra-id.svg" width="24" alt=""/> | ☐ (If sensitive) on-behalf-of identity chosen and a per-user RLS check passes |
 
 - [ ] `employees` (15) and `agreements` (30) Delta tables loaded and counts verified (G1)
 - [ ] Data Agent `data-agent-hr` created over both tables (G2)
 - [ ] Instructions include the `amount_basis` / currency caveat (G3)
 - [ ] All five example questions return correct answers in the Fabric chat (G4)
-- [ ] Data Agent **published**; workspace + agent identifiers recorded for 03d D3 (G5)
+- [ ] Data Agent **published**; workspace + agent identifiers recorded for 08 D3 (G5)
 - [ ] (If sensitive) on-behalf-of identity chosen and a per-user RLS check passes (Identity & RBAC)
 
 ---
@@ -239,11 +239,11 @@ To show on-behalf-of security end-to-end, add **row-level security** on the `emp
 | | Topic | Links |
 |---|---|---|
 | <img src="./assets/icons/sql-database.svg" width="24" alt=""/> | Fabric Data Agent | [concept](https://learn.microsoft.com/fabric/data-science/concept-data-agent) · [create](https://learn.microsoft.com/fabric/data-science/how-to-create-data-agent) · [end-to-end (incl. security)](https://learn.microsoft.com/fabric/data-science/data-agent-end-to-end-tutorial) |
-| <img src="./assets/icons/foundry-agent-service.svg" width="24" alt=""/> | Foundry consumer | [Microsoft Fabric tool — Microsoft Foundry Agent Service](https://learn.microsoft.com/azure/foundry/agents/how-to/tools/fabric) ![Preview](./assets/badges/preview.svg) · [docs/03d-foundry-agent-setup.md](./03d-foundry-agent-setup.md) |
+| <img src="./assets/icons/foundry-agent-service.svg" width="24" alt=""/> | Foundry consumer | [Microsoft Fabric tool — Microsoft Foundry Agent Service](https://learn.microsoft.com/azure/foundry/agents/how-to/tools/fabric) ![Preview](./assets/badges/preview.svg) · [docs/08-foundry-agent-setup.md](./08-foundry-agent-setup.md) |
 | <img src="./assets/icons/file.svg" width="24" alt=""/> | Structured sample data | [samples/README.md](../samples/README.md) |
 
 ---
 
-Next: [04 - Automated deployment](./04-deployment-automated.md) →
+Next: [10 - Copilot Studio vs Foundry](./10-copilot-studio-vs-foundry.md) →
 
-*Last updated: 2026-10-02*
+*Last updated: 2026-10-07*

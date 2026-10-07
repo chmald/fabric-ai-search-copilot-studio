@@ -1,6 +1,6 @@
-[README](../README.md) › [docs index](./00-reproduce-this-demo.md) › 06 Troubleshooting
+[README](../README.md) › [docs index](./00-reproduce-this-demo.md) › 05 Troubleshooting
 
-# 06 — Troubleshooting
+# 05 — Troubleshooting
 
 <p>
 <img src="./assets/icons/ai-search.svg" width="40" alt="Azure AI Search"/>&nbsp;
@@ -21,7 +21,7 @@ Common failure modes and fixes for the RAG knowledge-base pattern. Organized by 
 > **Start at the symptom layer, fix one layer down.** If the same symptom shows at several layers, fix the deepest layer first. Most auth failures land in [§0 Entra-only auth](#0--entra-only-auth-local-auth-disabled) because this pattern disables local (key) auth on AI Search, Foundry and Storage.
 
 > [!NOTE]
-> The fixes in this guide are documented procedures. No dated live run that exercised each of them is recorded in this repo (see [05 § Validation status](./05-testing.md#validation-status)), so verify each fix against your own deployment.
+> The fixes in this guide are documented procedures. No dated live run that exercised each of them is recorded in this repo (see [04 § Validation status](./04-testing.md#validation-status)), so verify each fix against your own deployment.
 
 ## At a glance
 
@@ -79,6 +79,8 @@ Common failure modes and fixes for the RAG knowledge-base pattern. Organized by 
 | Control table not updating | Notebook → Lakehouse permission issue | [§3.3](#33-control-table-stuck) |
 | OneLake shortcut shows no files | Shortcut permissions or refresh lag | [§2](#2--onelake--source-attachment) |
 | Cost spike | Fabric capacity left running, Foundry quota burned, indexer over-scheduled | [§6](#6--cost-and-quota) |
+| `azd up` stops in `preprovision` with "Refusing to continue with the wrong Azure CLI tenant/subscription" | az and azd are signed in to different tenants, or `AZURE_TENANT_ID` is unset | [§A](#a--azd-triage) |
+| `azd up` finishes but prints "AI Search configuration did not complete" | New search role assignments still propagating | [§A](#a--azd-triage) |
 
 ### Quick triage by product
 
@@ -90,6 +92,30 @@ Common failure modes and fixes for the RAG knowledge-base pattern. Organized by 
 | <img src="./assets/icons/ai-search.svg" width="24" alt="AI Search"/> AI Search | 0 documents; `vectorIndexSize = 0`; `transientFailure` | [§4](#4--ai-search-index--indexer) |
 | <img src="./assets/icons/foundry-models.svg" width="24" alt="Foundry models"/> Foundry models | Embedding role wrong; soft-deleted account blocks redeploy | [§0.5](#05-bicep-deploy-fails-flagmustbesetforrestore-soft-deleted-foundry--cognitive-services-account), [§4.1](#41-vectorizer-auth-failure-loud-or-silent) |
 | <img src="./assets/icons/cost-management.svg" width="24" alt="Cost Management"/> Cost / quota | Cost spike from capacity, quota or indexer schedule | [§6](#6--cost-and-quota) |
+| <img src="./assets/icons/azure-devops.svg" width="24" alt="Azure Developer CLI"/> azd | Hook guard stops the run; outputs or `demo-ids.local.json` missing | [§A](#a--azd-triage) |
+
+---
+
+## A — azd triage
+
+<p><img src="./assets/icons/azure-devops.svg" width="28" alt="Azure Developer CLI"/>&nbsp;<img src="./assets/icons/entra-id.svg" width="28" alt="Microsoft Entra ID"/>&nbsp;<img src="./assets/icons/foundry.svg" width="28" alt="Microsoft Foundry"/></p>
+
+Failures specific to the `azd up` fast path ([03 § Fast path](./03-deployment.md#fast-path--azd-up)). Every variable named here is in [13-configuration-reference.md](./13-configuration-reference.md).
+
+| Symptom (from the hook output) | Cause | Fix |
+|---|---|---|
+| `AZURE_ENV_NAME must be lowercase alphanumeric plus hyphen …` | Environment name has capitals, underscores or > 20 characters | `azd env new <short-lowercase-name>` |
+| `WORKLOAD_NAME must be 2-8 lowercase letters/digits` / `Storage account name … is 27 characters` | Name too long once combined with `WORKLOAD_ENV` and the region | Shorten `WORKLOAD_NAME` (`azd env set WORKLOAD_NAME kb`) |
+| `AZURE_TENANT_ID and AZURE_SUBSCRIPTION_ID must both be set` | azd environment created without a tenant | `azd env set AZURE_TENANT_ID <tenant-id>` |
+| `Refusing to continue with the wrong Azure CLI tenant/subscription` | azd and az keep separate logins; az points somewhere else | `az login --tenant <tenant-id>` · `az account set --subscription <subscription-id>`, then re-run |
+| `CanNotRestoreANonExistingResource` / `FlagMustBeSetForRestore` on `foundry-deploy` | `RESTORE_FOUNDRY_FROM_SOFT_DELETE` out of step with reality (set by hand) | Re-run `azd provision` — `preprovision` resets the flag from `az cognitiveservices account list-deleted`. See [§0.5](#05-bicep-deploy-fails-flagmustbesetforrestore-soft-deleted-foundry--cognitive-services-account) |
+| `VaultAlreadyExists` / soft-deleted vault conflict | Key Vault of the same name is soft-deleted | `preprovision` recovers it automatically; `PURGE_SOFT_DELETED=true` purges instead |
+| `AI Search configuration did not complete (exit 1)` | New Search Service Contributor / Index Data Contributor grants still propagating (up to ~15 min), or Python missing | Wait, then `azd hooks run postprovision` (idempotent). See [§0.1](#01-401-from-services-with-local-auth-disabled) |
+| `demo-ids.local.json` lacks the `fabric` / `corpus` sections you added | It doesn't — the writer merges. If they vanished, the file was not valid JSON before the run | Restore from your editor history; keep the file valid JSON |
+| `azd down` leaves the resource group | The group was created without the `azd-env-name` tag (e.g. by the script path) | Delete it with `az group delete --name <rg>`; use one path per environment |
+
+> [!TIP]
+> `azd env get-values` shows every input and output azd holds for the environment; `azd provision --preview` shows the plan without changing anything. Both are safe first steps.
 
 ---
 
@@ -232,7 +258,7 @@ property. If you don't want to restore existing resource, please purge it first.
 - **restore in place** (preserves the system-assigned MI principal ID and all data-plane state), or
 - **purge** (drops the soft-deleted account entirely so a brand-new resource can be created with a new MI).
 
-**Preserving the MI matters specifically because the DI-caller SP's `Cognitive Services User` role assignment on the Foundry resource is granted manually ([03b-fabric-setup.md § F2.2 step 2](./03b-fabric-setup.md#f22-create-a-di-caller-service-principal-for-msal-from-the-notebook)) and would be orphaned by any purge-and-recreate cycle.**
+**Preserving the MI matters specifically because the DI-caller SP's `Cognitive Services User` role assignment on the Foundry resource is granted manually ([06-fabric-setup.md § F2.2 step 2](./06-fabric-setup.md#f22-create-a-di-caller-service-principal-for-msal-from-the-notebook)) and would be orphaned by any purge-and-recreate cycle.**
 
 #### Fix — restore in place (recommended)
 
@@ -274,7 +300,7 @@ az cognitiveservices account purge `
 Then `pwsh ./infra/deploy.ps1` (no switch). After the deploy:
 
 1. Bicep's deterministic role assignments (AI Search MI → Cognitive Services OpenAI User on Foundry, Foundry MI → Storage Blob Data Reader on Storage) recreate themselves with the new MI principal ID.
-2. **You must manually re-grant the DI-caller SP role** — the SP's `Cognitive Services User` on the *old* Foundry resource is orphaned. Re-run [03b-fabric-setup.md § F2.2 step 2](./03b-fabric-setup.md#f22-create-a-di-caller-service-principal-for-msal-from-the-notebook) against the new Foundry resource.
+2. **You must manually re-grant the DI-caller SP role** — the SP's `Cognitive Services User` on the *old* Foundry resource is orphaned. Re-run [06-fabric-setup.md § F2.2 step 2](./06-fabric-setup.md#f22-create-a-di-caller-service-principal-for-msal-from-the-notebook) against the new Foundry resource.
 3. Wait up to **15 minutes** for role propagation before the Fabric pipeline can call DI again.
 
 #### Verify after fix
@@ -352,13 +378,13 @@ Reference: [Recover or purge deleted Azure AI Services resources](https://learn.
 
 ### 3.1 Document Intelligence call fails
 
-**Symptom.** The OCR step in `nb_ocr_chunk_upload` (which calls the Document Intelligence `prebuilt-read` model on the Microsoft Foundry resource) returns 401 / 403 / 404 / 500. This pattern uses a Fabric **notebook** — not a pipeline Web activity — to call DI; see [03b-fabric-setup.md Appendix A.1](./03b-fabric-setup.md#a1-no-web-activity-until-or-child-pipeline) for the rationale.
+**Symptom.** The OCR step in `nb_ocr_chunk_upload` (which calls the Document Intelligence `prebuilt-read` model on the Microsoft Foundry resource) returns 401 / 403 / 404 / 500. This pattern uses a Fabric **notebook** — not a pipeline Web activity — to call DI; see [06-fabric-setup.md Appendix A.1](./06-fabric-setup.md#a1-no-web-activity-until-or-child-pipeline) for the rationale.
 
 | Status | Common cause | Fix |
 |---|---|---|
-| 401 (with `WWW-Authenticate: Bearer`) | Local auth is disabled on the Foundry resource (which serves DI); the caller used an `Ocp-Apim-Subscription-Key` header instead of a bearer token. | `nb_ocr_chunk_upload` uses MSAL + the DI-caller service principal (secret fetched from Key Vault by the workspace identity) to get a bearer token for `https://cognitiveservices.azure.com/.default`. See [03b-fabric-setup.md § F7.2](./03b-fabric-setup.md#f72-nb_ocr_chunk_upload) and [§ 3.7](#37-nb_ocr_chunk_upload-cant-authenticate-to-document-intelligence). Fabric notebooks don't support `DefaultAzureCredential` and `notebookutils.credentials.getToken` has no `cognitiveservices` audience key — hence the MSAL+SP detour. |
-| 403 (from DI) | The DI-caller service principal (`sp-rag-di-caller`) lacks **Cognitive Services User** on the Foundry resource. The Fabric workspace identity is *not* used for DI calls in this pattern. | Grant the role per [03b-fabric-setup.md § F2.2 step 2](./03b-fabric-setup.md#f22-create-a-di-caller-service-principal-for-msal-from-the-notebook); wait up to 15 min for propagation |
-| 403 (from DI fetching `urlSource`) | The Foundry MI lacks **Storage Blob Data Reader** on the storage account; required because shared-key access on Storage is disabled | Grant the role per [03-deployment-manual.md § 1.7 step 3](./03-deployment-manual.md#17-rbac-wiring) (Bicep deployments wire this automatically via `rbac.bicep`) |
+| 401 (with `WWW-Authenticate: Bearer`) | Local auth is disabled on the Foundry resource (which serves DI); the caller used an `Ocp-Apim-Subscription-Key` header instead of a bearer token. | `nb_ocr_chunk_upload` uses MSAL + the DI-caller service principal (secret fetched from Key Vault by the workspace identity) to get a bearer token for `https://cognitiveservices.azure.com/.default`. See [06-fabric-setup.md § F7.2](./06-fabric-setup.md#f72-nb_ocr_chunk_upload) and [§ 3.7](#37-nb_ocr_chunk_upload-cant-authenticate-to-document-intelligence). Fabric notebooks don't support `DefaultAzureCredential` and `notebookutils.credentials.getToken` has no `cognitiveservices` audience key — hence the MSAL+SP detour. |
+| 403 (from DI) | The DI-caller service principal (`sp-rag-di-caller`) lacks **Cognitive Services User** on the Foundry resource. The Fabric workspace identity is *not* used for DI calls in this pattern. | Grant the role per [06-fabric-setup.md § F2.2 step 2](./06-fabric-setup.md#f22-create-a-di-caller-service-principal-for-msal-from-the-notebook); wait up to 15 min for propagation |
+| 403 (from DI fetching `urlSource`) | The Foundry MI lacks **Storage Blob Data Reader** on the storage account; required because shared-key access on Storage is disabled | Grant the role per [03b-manual-deployment.md § 1.7 step 3](./03b-manual-deployment.md#17-rbac-wiring) (Bicep deployments wire this automatically via `rbac.bicep`) |
 | 404 | Wrong URL or model name | Confirm endpoint is the Foundry resource's `https://<foundry>.cognitiveservices.azure.com/documentintelligence/...` host (not `<foundry>.openai.azure.com`) and uses `prebuilt-read` |
 | 500 | DI service-side error | Retry; if persistent, check Azure status page; verify file is not corrupt and is < DI per-call size limit |
 
@@ -403,7 +429,7 @@ please check the Run logs on Notebook, additional details -
 
 Compounded by: Fabric pipeline base parameters arrive at the notebook as **strings** by default, so `byte_size` and `source_modified_ts` are string-typed when they hit `createDataFrame`, conflicting with the Delta table's `LongType` / `TimestampType`.
 
-**Fix.** Pull the schema from the existing `control_table_files` Delta table and pass it explicitly to `createDataFrame`, and coerce string parameters into proper int / datetime values first. The current [F7.3 `nb_update_control_table`](./03b-fabric-setup.md#f73-nb_update_control_table) reflects this fix — copy that cell wholesale into the notebook. Key fragment:
+**Fix.** Pull the schema from the existing `control_table_files` Delta table and pass it explicitly to `createDataFrame`, and coerce string parameters into proper int / datetime values first. The current [F7.3 `nb_update_control_table`](./06-fabric-setup.md#f73-nb_update_control_table) reflects this fix — copy that cell wholesale into the notebook. Key fragment:
 
 ```python
 from datetime import datetime, timezone
@@ -464,7 +490,7 @@ src = src.withColumn(
 )
 ```
 
-This collapses values like `abfss://.../<lakehouseId>/Files/source_docs/x.pdf` to just `source_docs/x.pdf`. See [03b-fabric-setup.md § F7.1](./03b-fabric-setup.md#f71-nb_lookup_new_files) for the full notebook. After applying the fix, re-run `nb_lookup_new_files` (or the whole pipeline) so `_tmp_new_files` is rewritten with the corrected paths.
+This collapses values like `abfss://.../<lakehouseId>/Files/source_docs/x.pdf` to just `source_docs/x.pdf`. See [06-fabric-setup.md § F7.1](./06-fabric-setup.md#f71-nb_lookup_new_files) for the full notebook. After applying the fix, re-run `nb_lookup_new_files` (or the whole pipeline) so `_tmp_new_files` is rewritten with the corrected paths.
 
 **Verify** in the SQL analytics endpoint:
 
@@ -479,7 +505,7 @@ SELECT source_path FROM _tmp_new_files LIMIT 5;
 
 **Cause.** `nb_lookup_new_files` writes `_tmp_new_files` via Spark to the Lakehouse Delta store. The Lookup activity reads from the same lakehouse but via its **SQL analytics endpoint**, which syncs Delta metadata via a [background process](https://learn.microsoft.com/fabric/data-engineering/sql-analytics-endpoint-metadata-sync). The sync can lag seconds to minutes behind the Spark write, so an immediate downstream Lookup misses the freshly written rows.
 
-**Fix.** Insert a [Refresh SQL Endpoint activity](https://learn.microsoft.com/fabric/data-factory/refresh-sql-endpoint-activity) between the lookup notebook and the Lookup activity. See [03b-fabric-setup.md § F8.2](./03b-fabric-setup.md#f82-activity-15--refresh-sql-endpoint).
+**Fix.** Insert a [Refresh SQL Endpoint activity](https://learn.microsoft.com/fabric/data-factory/refresh-sql-endpoint-activity) between the lookup notebook and the Lookup activity. See [06-fabric-setup.md § F8.2](./06-fabric-setup.md#f82-activity-15--refresh-sql-endpoint).
 
 The activity returns `Success` after a sync, or `NotRun` if there's nothing to sync since the last refresh (both are OK). A `Failure` outcome under lock contention is a [known issue](https://learn.microsoft.com/fabric/data-factory/refresh-sql-endpoint-activity#why-does-my-sql-endpoint-refresh-fail-when-underlying-data-is-locked) — but in our case the lookup notebook has already finished and released its writer locks by the time this activity runs, so contention is rare.
 
@@ -497,7 +523,7 @@ The activity returns `Success` after a sync, or `NotRun` if there's nothing to s
 
 And `notebookutils.credentials.getToken` exposes only **four** audience keys: `storage`, `pbi`, `keyvault`, `kusto`. There is no key for Cognitive Services (the audience needed to call Document Intelligence). The Fabric workspace identity also doesn't expose its client secret, so MSAL with the workspace identity isn't possible either.
 
-**Fix.** Use the MSAL + DI-caller service principal pattern documented in [03b-fabric-setup.md § F7.2](./03b-fabric-setup.md#f72-nb_ocr_chunk_upload) and [F2.2](./03b-fabric-setup.md#f22-create-a-di-caller-service-principal-for-msal-from-the-notebook):
+**Fix.** Use the MSAL + DI-caller service principal pattern documented in [06-fabric-setup.md § F7.2](./06-fabric-setup.md#f72-nb_ocr_chunk_upload) and [F2.2](./06-fabric-setup.md#f22-create-a-di-caller-service-principal-for-msal-from-the-notebook):
 
 1. Create a dedicated service principal (`sp-rag-di-caller`) and grant it **Cognitive Services User** on the **Foundry resource** (which serves the Document Intelligence endpoint in this pattern — no separate FormRecognizer account is provisioned).
 2. Store the SP's client secret in Key Vault under `di-sp-secret`.
@@ -601,7 +627,7 @@ az role assignment create `
 
 Wait **5–15 minutes** for the role to propagate, then re-run the pipeline.
 
-If you originally provisioned via `infra/main.bicep` and this assignment is missing, your deployment predates the DI-consolidation fix — pull latest and re-run `pwsh ./infra/deploy.ps1` (the `rbac.bicep` module now grants Storage Blob Data Reader to the Foundry MI automatically; see [03-deployment-manual.md § 1.7 step 3](./03-deployment-manual.md#17-rbac-wiring)).
+If you originally provisioned via `infra/main.bicep` and this assignment is missing, your deployment predates the DI-consolidation fix — pull latest and re-run `pwsh ./infra/deploy.ps1` (the `rbac.bicep` module now grants Storage Blob Data Reader to the Foundry MI automatically; see [03b-manual-deployment.md § 1.7 step 3](./03b-manual-deployment.md#17-rbac-wiring)).
 
 **If you're running with the storage firewall locked down** (private endpoints, or `defaultAction: Deny`), the role grant alone isn't sufficient — the Foundry resource needs either a [trusted-services bypass](https://learn.microsoft.com/azure/storage/common/storage-network-security#grant-access-to-trusted-azure-services) on the storage account or a shared private endpoint. See [Managed identities for Document Intelligence — Private storage account access](https://learn.microsoft.com/azure/ai-services/document-intelligence/authentication/managed-identities#private-storage-account-access).
 
@@ -626,7 +652,7 @@ The notebook **still runs**, but the conflict can cause subtle import / runtime 
              azure-core==1.30.2 msal==1.30.0 "pyjwt>=2.6.0" tiktoken==0.7.0 --quiet
 ```
 
-The current [F7.2 `nb_ocr_chunk_upload`](./03b-fabric-setup.md#f72-nb_ocr_chunk_upload) reflects this fix.
+The current [F7.2 `nb_ocr_chunk_upload`](./06-fabric-setup.md#f72-nb_ocr_chunk_upload) reflects this fix.
 
 If you've moved to the Fabric Environment pattern from [§ 3.8 Option B](#38-pip-install-fails-with-magicusageerror-pip-magic-command-is-disabled), add `pyjwt>=2.6.0` to the Environment's public-libraries list as well so the Full-mode dependency resolution picks the right version.
 
@@ -634,7 +660,7 @@ If you've moved to the Fabric Environment pattern from [§ 3.8 Option B](#38-pip
 
 **Symptom.** A file shows up in `control_table_files` with `ocr_status = 'failed'` (or `chunk_status` / `index_status` = `'failed'`). You re-run `pl_ingest_docs` and the lookup activity reports `new_count: 0` — the failed file is **not** picked up.
 
-**Cause.** Older versions of `nb_lookup_new_files` used a plain `left_anti` join against `control_table_files`, which excludes **every** row already in the control table — including failed ones. The current notebook ([F7.1](./03b-fabric-setup.md#f71-nb_lookup_new_files)) was updated to also pick up rows where any per-stage status is `'failed'` (gated by `tombstoned`).
+**Cause.** Older versions of `nb_lookup_new_files` used a plain `left_anti` join against `control_table_files`, which excludes **every** row already in the control table — including failed ones. The current notebook ([F7.1](./06-fabric-setup.md#f71-nb_lookup_new_files)) was updated to also pick up rows where any per-stage status is `'failed'` (gated by `tombstoned`).
 
 **Fix — update the lookup notebook.** Open `nb_lookup_new_files` and confirm it contains the union pattern (brand-new + retry):
 
@@ -814,7 +840,7 @@ Invoke-RestMethod -Method Put `
 python scripts/post_deploy_search.py --ids demo-ids.local.json --run-indexer
 ```
 
-For the manual portal walkthrough, see [03-deployment-manual.md § 4.3](./03-deployment-manual.md#43-create-the-skillset-indexing-time-vectorization).
+For the manual portal walkthrough, see [03b-manual-deployment.md § 4.3](./03b-manual-deployment.md#43-create-the-skillset-indexing-time-vectorization).
 
 **Fix B — wrong / missing role (causes #2 and #3).** Apply the right role:
 
@@ -884,7 +910,7 @@ az role assignment create `
 
 **Common causes:**
 
-- Tier mismatch — semantic ranker not available on Basic/Free
+- Semantic ranker disabled on the service (`semanticSearch: disabled`), or the service is on the Free tier with its allowance used up
 - `semanticConfiguration` not specified in the query
 - `captions` not requested in the query (must include `"captions": "extractive"`)
 - Semantic ranker monthly quota exhausted (paid tier kicks in)
@@ -996,7 +1022,7 @@ Manually run once to confirm health, then check scheduling settings.
 - For a small / demo audience: the connecting user's identity is used; grant each user **Search Index Data Reader** on the search service.
 - For broad rollout: configure a Copilot Studio connection that uses a service principal with **Search Index Data Reader** — the agent then resolves the SP identity for every user.
 
-See [03c-copilot-studio-setup.md § C2.1](./03c-copilot-studio-setup.md#c21-add-the-knowledge-source) for the full configuration.
+See [07-copilot-studio-setup.md § C2.1](./07-copilot-studio-setup.md#c21-add-the-knowledge-source) for the full configuration.
 
 ### 5.8 Agent works for me but fails for other users (or: "I had to add Search Index Data Reader to my own account")
 
@@ -1020,7 +1046,7 @@ There is no "agent managed identity" option for the AI Search knowledge source t
 
   Role propagation can take up to 15 minutes. Until the role lands, the user sees the same "no information" / empty-results behavior.
 
-- **Broad / production rollout.** Switch the connection to **Service principal (Microsoft Entra ID application)** — see [03c — Phase C0.3](./03c-copilot-studio-setup.md#c03-ai-search-access-pattern) and [03c — Phase C2.1](./03c-copilot-studio-setup.md#c21-add-the-knowledge-source):
+- **Broad / production rollout.** Switch the connection to **Service principal (Microsoft Entra ID application)** — see [07 — Phase C0.3](./07-copilot-studio-setup.md#c03-ai-search-access-pattern) and [07 — Phase C2.1](./07-copilot-studio-setup.md#c21-add-the-knowledge-source):
   1. Create (or reuse) an Entra app registration + client secret.
   2. Grant the SP **Search Index Data Reader** on the AI Search service — **once**.
   3. In Copilot Studio, edit the AI Search knowledge source → **Edit connection** → recreate with **Service principal**, pasting the SP's tenant ID, client ID, and client secret.
@@ -1165,6 +1191,6 @@ If the issue is blocking a demo or production deployment, open a support case th
 
 ---
 
-Next: [07 - Copilot Studio vs Foundry](./07-copilot-studio-vs-foundry.md) →
+Next: [06 - Fabric setup](./06-fabric-setup.md) →
 
-*Last updated: 2026-10-02*
+*Last updated: 2026-10-07*

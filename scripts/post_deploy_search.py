@@ -22,7 +22,9 @@ In CI/CD, it resolves to the pipeline's federated workload identity / service pr
 What this script does
 =====================
 1. Reads deployment outputs from --ids (default: demo-ids.local.json)
-2. Creates (or updates) the search index `idx-rag-documents`:
+   and applies the `corpus` block (the only domain-specific surface - index/skillset names,
+   analyzer, embedding width, indexer schedule, Search API version)
+2. Creates (or updates) the search index (default `idx-rag-documents`):
      - text + vector + metadata fields (per docs/01-architecture.md schema)
      - integrated `azureOpenAI` vectorizer pointed at the Foundry embedding deployment
        (this vectorizer handles QUERY-time text→vector conversion when Copilot Studio
@@ -34,7 +36,7 @@ What this script does
    `AzureOpenAIEmbeddingSkill` that generates the per-chunk embedding at INDEX time.
    Without this skill, the indexer commits documents with a null `content_vector`,
    the index reports `vectorIndexSize: 0`, and Copilot Studio vector queries return
-   nothing. See docs/06-troubleshooting.md § 4.1.
+   nothing. See docs/05-troubleshooting.md § 4.1.
 5. Creates (or updates) the indexer `ixr-chunks` with a 5-minute schedule, the
    skillset attached, and an `outputFieldMapping` that writes the skill's embedding
    output to the index's `content_vector` field
@@ -64,8 +66,53 @@ import requests
 from azure.core.credentials import AccessToken
 from azure.identity import DefaultAzureCredential
 
-SEARCH_API_VERSION = "2024-07-01"
+SEARCH_API_VERSION = "2024-07-01"  # GA; override with corpus.searchApiVersion (latest GA: 2026-04-01)
 SEARCH_AAD_SCOPE = "https://search.azure.com/.default"
+
+# Known embedding widths. A model swap changes the vector width, so the width is never
+# hardcoded: corpus.embeddingDimensions wins, then this table, then the name heuristic.
+EMBEDDING_DIMENSIONS = {
+    "text-embedding-3-large": 3072,
+    "text-embedding-3-small": 1536,
+    "text-embedding-ada-002": 1536,
+}
+
+# Keys in the ids-file `corpus` block that override the flat top-level value of the
+# same name (the Bicep output is only the default). See docs/13-configuration-reference.md.
+CORPUS_OVERRIDES = ("searchIndexName", "searchSkillsetName")
+
+
+# ---------- configuration ---------------------------------------------------------
+
+
+def setting(ids: dict[str, Any], key: str, default: Any = None) -> Any:
+    """corpus.<key> -> top-level <key> -> default. Null / empty values fall through."""
+    corpus = ids.get("corpus") or {}
+    for source in (corpus, ids):
+        value = source.get(key)
+        if value not in (None, ""):
+            return value
+    return default
+
+
+def resolve_settings(ids: dict[str, Any]) -> dict[str, Any]:
+    """Return a copy of the ids with corpus overrides applied to the flat keys."""
+    resolved = dict(ids)
+    for key in CORPUS_OVERRIDES:
+        value = (ids.get("corpus") or {}).get(key)
+        if value not in (None, ""):
+            resolved[key] = value
+    return resolved
+
+
+def embedding_dimensions(ids: dict[str, Any]) -> int:
+    explicit = setting(ids, "embeddingDimensions")
+    if explicit:
+        return int(explicit)
+    model = str(ids.get("embeddingModel", "")).lower()
+    if model in EMBEDDING_DIMENSIONS:
+        return EMBEDDING_DIMENSIONS[model]
+    return 3072 if "large" in model else 1536
 
 
 # ---------- helpers ----------------------------------------------------------------
@@ -149,9 +196,10 @@ def index_payload(ids: dict[str, Any]) -> dict[str, Any]:
             {"name": "id",            "type": "Edm.String", "key": True, "filterable": True},
             {"name": "doc_id",        "type": "Edm.String", "filterable": True, "facetable": True, "retrievable": True},
             {"name": "chunk_id",      "type": "Edm.Int32",  "retrievable": True},
-            {"name": "content",       "type": "Edm.String", "searchable": True, "analyzer": "en.microsoft", "retrievable": True},
+            {"name": "content",       "type": "Edm.String", "searchable": True,
+             "analyzer": setting(ids, "contentAnalyzer", "en.microsoft"), "retrievable": True},
             {"name": "content_vector","type": "Collection(Edm.Single)", "searchable": True, "retrievable": False,
-             "dimensions": 3072 if "large" in ids.get("embeddingModel", "").lower() else 1536,
+             "dimensions": embedding_dimensions(ids),
              "vectorSearchProfile": "default-vector-profile"},
             {"name": "doc_type",      "type": "Edm.String", "filterable": True, "facetable": True, "retrievable": True},
             {"name": "source_uri",    "type": "Edm.String", "retrievable": True},
@@ -216,8 +264,8 @@ def datasource_payload(ids: dict[str, Any]) -> dict[str, Any]:
 
 
 def skillset_name(ids: dict[str, Any]) -> str:
-    """Skillset name — honors `searchSkillsetName` in ids file, else default."""
-    return ids.get("searchSkillsetName", "skill-rag-embeddings")
+    """Skillset name — corpus.searchSkillsetName, then top-level searchSkillsetName, else default."""
+    return setting(ids, "searchSkillsetName", "skill-rag-embeddings")
 
 
 def skillset_payload(ids: dict[str, Any]) -> dict[str, Any]:
@@ -231,9 +279,8 @@ def skillset_payload(ids: dict[str, Any]) -> dict[str, Any]:
     system-assigned managed identity (authIdentity=None). The MI must have
     'Cognitive Services OpenAI User' on the Foundry resource — NOT the similarly
     named 'Cognitive Services User' role, which doesn't grant OpenAI data-plane
-    access. See docs/06-troubleshooting.md § 4.1.
+    access. See docs/05-troubleshooting.md § 4.1.
     """
-    is_large = "large" in ids.get("embeddingModel", "").lower()
     return {
         "name": skillset_name(ids),
         "description": (
@@ -250,7 +297,7 @@ def skillset_payload(ids: dict[str, Any]) -> dict[str, Any]:
                 "resourceUri": ids["foundryOpenAIEndpoint"],
                 "deploymentId": ids["embeddingDeployment"],
                 "modelName": ids["embeddingModel"],
-                "dimensions": 3072 if is_large else 1536,
+                "dimensions": embedding_dimensions(ids),
                 "inputs": [{"name": "text", "source": "/document/content"}],
                 "outputs": [{"name": "embedding", "targetName": "content_vector_embedding"}],
                 # authIdentity=None => use search service's system-assigned MI
@@ -286,7 +333,7 @@ def indexer_payload(ids: dict[str, Any]) -> dict[str, Any]:
                 "targetFieldName": "content_vector",
             }
         ],
-        "schedule": {"interval": "PT5M"},
+        "schedule": {"interval": setting(ids, "indexerSchedule", "PT5M")},
     }
 
 
@@ -366,7 +413,7 @@ def verify(ids: dict[str, Any], tokens: SearchTokenProvider) -> int:
                 print(f"[OK] Sample query succeeded. {n} result(s); semantic ranker score: {score:.2f}")
             else:
                 print(f"[WARN] Sample query returned {n} result(s) but no rerankerScore — "
-                      f"check semantic ranker is enabled on the service (Standard S1+ required).")
+                      f"check semantic ranker is enabled on the service (Basic tier or higher).")
                 errors += 1
     except Exception as e:
         print(f"[FAIL] Sample query: {e}")
@@ -390,7 +437,7 @@ def verify(ids: dict[str, Any], tokens: SearchTokenProvider) -> int:
     # 4. Service stats — confirm vectorIndexSize > 0 whenever documentCount > 0.
     # Catches the "silent vectorizer failure" mode where the indexer reports success
     # but vectors aren't actually being generated (missing skillset, missing role,
-    # role-name confusion). See docs/06-troubleshooting.md § 4.1.
+    # role-name confusion). See docs/05-troubleshooting.md § 4.1.
     try:
         stats = search_get(endpoint, tokens, "servicestats?")
         counters = stats.get("counters", {})
@@ -405,7 +452,7 @@ def verify(ids: dict[str, Any], tokens: SearchTokenProvider) -> int:
         else:
             print(f"[FAIL] Service stats: documentCount={doc_count} but vectorIndexSize=0. "
                   f"Documents are indexed but vectors are NOT being generated. "
-                  f"This is silent vectorizer failure — see docs/06-troubleshooting.md § 4.1.")
+                  f"This is silent vectorizer failure — see docs/05-troubleshooting.md § 4.1.")
             errors += 1
     except Exception as e:
         print(f"[FAIL] Service stats check: {e}")
@@ -425,7 +472,9 @@ def main() -> int:
     ap.add_argument("--verify", action="store_true", help="Run smoke tests instead of configuration")
     args = ap.parse_args()
 
-    ids = load_ids(args.ids)
+    global SEARCH_API_VERSION
+    ids = resolve_settings(load_ids(args.ids))
+    SEARCH_API_VERSION = setting(ids, "searchApiVersion", SEARCH_API_VERSION)
     credential = DefaultAzureCredential()
     tokens = SearchTokenProvider(credential)
 

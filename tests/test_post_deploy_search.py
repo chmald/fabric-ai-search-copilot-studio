@@ -6,14 +6,14 @@ schema regressions (field name typos, dimensionality mismatches, missing semanti
 config) before the script runs against a live deployment.
 
 Run:
-    pytest scripts/tests/ -q
+    python -m pytest tests -q
 """
 
 import sys
 from pathlib import Path
 
 # Make scripts/ importable when running pytest from the repo root.
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 import post_deploy_search as pds  # noqa: E402
 

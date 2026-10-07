@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
+
+# One-command deployment of the Azure platform layer: `azd up`.
+# azd is an additional entry point over the SAME Bicep as infra/deploy.ps1 and the
+# manual path (docs/03b) - infra/azd.bicep wraps infra/main.bicep, it never forks it.
+# Fabric and Copilot Studio stay manual (docs/06, docs/07) because neither has an ARM surface.
+name: rag-knowledge-base-pattern
+metadata:
+  template: rag-knowledge-base-pattern@1.7.0
+infra:
+  provider: bicep
+  path: infra
+  module: azd # -> infra/azd.bicep + infra/azd.parameters.json
+hooks:
+  preprovision:
+    shell: pwsh
+    run: ./infra/hooks/preprovision.ps1
+    continueOnError: false
+    interactive: true
+  postprovision:
+    shell: pwsh
+    run: ./infra/hooks/postprovision.ps1
+    continueOnError: false
+    interactive: true
+# No `services:` block - the optional web app (webapp/app) is built and deployed by
+# scripts/deploy-webapp.ps1 after provisioning (docs/12).

@@ -25,7 +25,7 @@
 //                for the secretless On-Behalf-Of exchange. The Entra app
 //                registration + federated identity credential + admin consent for
 //                OBO are created by scripts/deploy-webapp.ps1 (not expressible in
-//                Bicep). See docs/08 and docs/09.
+//                Bicep). See docs/11 and docs/12.
 //
 // NOTE: Role assignments require User Access Administrator (or Owner) at the
 // resource group scope — Contributor alone is NOT sufficient (same as rbac.bicep).
@@ -34,7 +34,7 @@
 // branding (Azure AI User -> Foundry User, etc.). Per the Foundry RBAC docs, the
 // "Azure AI Developer" role is NOT used for Foundry projects/agents (it is scoped to
 // Azure ML workspaces and Foundry hubs); agent/project access uses **Foundry User**.
-// Confirm current names/IDs against Microsoft Learn (docs/09 § RBAC). GUIDs below are
+// Confirm current names/IDs against Microsoft Learn (docs/12 § RBAC). GUIDs below are
 // the current built-in IDs.
 // =====================================================================================
 

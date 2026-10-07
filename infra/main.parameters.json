@@ -29,7 +29,7 @@
     },
     "chatModelName": {
       "value": "",
-      "_comment": "OPT-IN. Leave EMPTY (default) to skip the chat deployment — the locked design (Copilot Studio + AI Search + integrated vectorizer) does NOT consume a chat completion model; Copilot Studio uses its own host model. Set to `gpt-4o` (or `gpt-4o-mini` for cost-down) only when an engagement explicitly needs a chat endpoint (custom app code, Foundry agent runtime, BYOM Copilot Studio)."
+      "_comment": "OPT-IN. Leave EMPTY (default) to skip the chat deployment — the locked design (Copilot Studio + AI Search + integrated vectorizer) does NOT consume a chat completion model; Copilot Studio uses its own host model. Set to a current GA chat model, e.g. `gpt-5.5` (or `gpt-5.4-mini` for cost-down; check the model retirement schedule) only when an engagement explicitly needs a chat endpoint (custom app code, Foundry agent runtime, BYOM Copilot Studio)."
     },
     "chatModelVersion": {
       "value": "",
@@ -53,7 +53,7 @@
     },
     "deployWebApp": {
       "value": false,
-      "_comment": "OPT-IN. Set true to also provision the optional web-app hosting platform (Container Apps environment, ACR, Log Analytics, user-assigned managed identity) for the standalone chat front end (docs/09). The container image is built + deployed afterwards by scripts/deploy-webapp.ps1. Leave false for the Copilot Studio path."
+      "_comment": "OPT-IN. Set true to also provision the optional web-app hosting platform (Container Apps environment, ACR, Log Analytics, user-assigned managed identity) for the standalone chat front end (docs/12). The container image is built + deployed afterwards by scripts/deploy-webapp.ps1. Leave false for the Copilot Studio path."
     },
     "tags": {
       "value": {

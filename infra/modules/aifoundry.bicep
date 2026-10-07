@@ -5,7 +5,7 @@
 // Provisions:
 //   * Foundry resource (Microsoft.CognitiveServices/accounts, kind=AIServices) with system-assigned MI
 //   * Embedding model deployment (text-embedding-3-large by default)
-//   * Chat model deployment (gpt-4o by default)
+//   * Chat model deployment (OPTIONAL - only when chatModelName is non-empty; default empty)
 //
 // Foundry resource exposes an OpenAI-compatible endpoint at https://<name>.openai.azure.com
 // — used directly by AI Search's integrated azureOpenAI vectorizer.
@@ -33,6 +33,9 @@ param embeddingModelName string = 'text-embedding-3-large'
 @description('Embedding model version. Leave blank to let Azure pick latest GA.')
 param embeddingModelVersion string = ''
 
+@description('Embedding deployment SKU (Standard | GlobalStandard | DataZoneStandard).')
+param embeddingModelSku string = 'Standard'
+
 @description('Embedding deployment TPM capacity in units of 1000.')
 @minValue(1)
 param embeddingModelTpm int = 10
@@ -43,11 +46,14 @@ param chatModelName string = ''
 @description('Chat model version. Leave blank to let Azure pick latest GA. Ignored when chatModelName is empty.')
 param chatModelVersion string = ''
 
+@description('Chat deployment SKU (Standard | GlobalStandard | DataZoneStandard). Ignored when chatModelName is empty.')
+param chatModelSku string = 'GlobalStandard'
+
 @description('Chat deployment TPM capacity in units of 1000. Ignored when chatModelName is empty.')
 @minValue(1)
 param chatModelTpm int = 10
 
-@description('Set to true ONLY when an existing Foundry account with the same name is in Azure soft-delete state and you want Bicep to restore it in place (preserves the system-assigned MI principal ID and any role assignments granted to it). Default false. CAUTION: when this is true and there is no soft-deleted account to restore, the deploy fails with `CanNotRestoreANonExistingResource`. Set this to true only after a deploy fails with `FlagMustBeSetForRestore`. See docs/06-troubleshooting.md § 0.5.')
+@description('Set to true ONLY when an existing Foundry account with the same name is in Azure soft-delete state and you want Bicep to restore it in place (preserves the system-assigned MI principal ID and any role assignments granted to it). Default false. CAUTION: when this is true and there is no soft-deleted account to restore, the deploy fails with `CanNotRestoreANonExistingResource`. Set this to true only after a deploy fails with `FlagMustBeSetForRestore`. See docs/05-troubleshooting.md § 0.5.')
 param restoreFromSoftDelete bool = false
 
 resource foundry 'Microsoft.CognitiveServices/accounts@2024-10-01' = {
@@ -81,7 +87,7 @@ resource foundry 'Microsoft.CognitiveServices/accounts@2024-10-01' = {
     // Restore an existing soft-deleted account in place. Preserves the MI principal
     // ID and any role assignments granted to it — critical here because the
     // DI-caller SP's "Cognitive Services User" role on this resource is granted
-    // manually (docs/03b-fabric-setup.md § F2.2 step 2) and would be orphaned by
+    // manually (docs/06-fabric-setup.md § F2.2 step 2) and would be orphaned by
     // a purge-and-recreate cycle.
     // Reference: https://learn.microsoft.com/azure/ai-services/recover-purge-resources
     restore: true
@@ -92,7 +98,7 @@ resource embeddingDeployment 'Microsoft.CognitiveServices/accounts/deployments@2
   parent: foundry
   name: 'embedding'
   sku: {
-    name: 'Standard'
+    name: embeddingModelSku
     capacity: embeddingModelTpm
   }
   properties: {
@@ -115,7 +121,7 @@ resource chatDeployment 'Microsoft.CognitiveServices/accounts/deployments@2024-1
   parent: foundry
   name: 'chat'
   sku: {
-    name: 'Standard'
+    name: chatModelSku
     capacity: chatModelTpm
   }
   properties: {

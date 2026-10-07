@@ -26,6 +26,9 @@ secrets.json
 demo-ids.local.json
 *.local.json
 
+# Azure Developer CLI environments (subscription/tenant IDs, resolved outputs)
+.azure/
+
 # OS junk
 .DS_Store
 Thumbs.db
