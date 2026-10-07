@@ -12,7 +12,7 @@ This script itself and `.gitattributes` are marked `export-ignore` so they do NO
 to the public mirror.
 
 .PARAMETER TargetRepo
-GitHub `org/repo`. Defaults to `chmald/fabric-ai-search-copilot-studio`.
+GitHub `org/repo`. Defaults to `chmald/document-qa-knowledge-agent`.
 
 .PARAMETER Branch
 Branch to push on the target. Defaults to `main`.
@@ -31,7 +31,7 @@ Skip the interactive confirmation prompt before force-pushing.
 #>
 [CmdletBinding()]
 param(
-    [string]$TargetRepo = 'chmald/fabric-ai-search-copilot-studio',
+    [string]$TargetRepo = 'chmald/document-qa-knowledge-agent',
     [string]$Branch     = 'main',
     [string]$Message    = "Snapshot from internal source ($(Get-Date -Format 'yyyy-MM-dd'))",
     [switch]$Yes

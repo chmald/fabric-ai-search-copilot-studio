@@ -1,4 +1,4 @@
-# Reusable RAG Knowledge-Base Pattern
+# Document Q&A Knowledge Agent — Reusable RAG Knowledge-Base Pattern
 
 <p>
 <img src="./docs/assets/icons/ai-search.svg" width="40" alt="Azure AI Search"/>&nbsp;
@@ -12,7 +12,9 @@
 
 ![Version](./docs/assets/badges/version.svg) ![azd up](./docs/assets/badges/azd-up.svg) ![Default](./docs/assets/badges/default.svg) ![Optional](./docs/assets/badges/optional.svg) ![Static-only](./docs/assets/badges/static-only.svg)
 
-A reusable, low-code-first **Retrieval-Augmented Generation (RAG) knowledge-base** pattern for grounding a conversational agent on a document corpus. The ingestion and Azure platform layers are shared; the agent itself can be built **two ways — Microsoft Copilot Studio (default) or Microsoft Foundry Agent Service (alternative)**. (**Microsoft Foundry** is the current name for the platform formerly called **Azure AI Foundry**.) This folder is the canonical reference for **demo build + production replication**.
+A reusable, low-code-first **document Q&A agent**: a **Retrieval-Augmented Generation (RAG) knowledge-base** pattern that grounds a conversational agent on a document corpus so users can ask questions and get cited answers. The ingestion and Azure platform layers are shared; the agent itself can be built **two ways — Microsoft Copilot Studio (default) or Microsoft Foundry Agent Service (alternative)**. (**Microsoft Foundry** is the current name for the platform formerly called **Azure AI Foundry**.) This folder is the canonical reference for **demo build + production replication**.
+
+> Formerly published as `fabric-ai-search-copilot-studio`. Old links redirect automatically. Renamed doc pages are mapped in [Moved documents](#moved-documents).
 
 > [!NOTE]
 > **Generic on purpose.** This pattern is document-domain agnostic. Use it for HR contracts, finance policies, legal templates, support knowledge bases, product docs, sales enablement libraries, or any unstructured document corpus that needs to power a grounded chat experience.
@@ -261,6 +263,28 @@ This Demos folder is intended to be **checked into Azure DevOps** as a standalon
 - **`.gitignore`** — excludes secrets (`*.pem`, `*.key`, `.sp-secret.json`, `secrets.json`), the populated copy of demo-ids (`demo-ids.local.json`), the azd environment folder (`.azure/` — tenant/subscription IDs and outputs), Python venvs, IDE state, and local deployment artifacts.
 - **`demo-ids.template.json`** — reference template for the per-deployment IDs file. The live file (`demo-ids.local.json`, gitignored) is **hybrid**: `infra/deploy.ps1` or the azd `postprovision` hook auto-writes the Azure resource IDs / endpoints / MI object IDs from the Bicep `deploymentSummary` output on every successful deploy, and *merges* (rather than overwrites) — so nested objects you populate manually during the Fabric and Copilot Studio setup phases (`corpus`, `fabric`, `sp-rag-di-caller`, `copilotStudio`) survive subsequent redeploys. The `_meta` block in both files documents the contract. **Never commit a populated `demo-ids.local.json` or any secret material.**
 - **Runtime values** (per-environment workspace IDs, endpoints) should come from your CI tool's secret store (ADO variable groups / GitHub Actions secrets / Key Vault), not from the repo.
+
+---
+
+## Moved documents
+
+v1.7.0 (2026-10-07) renumbered the docs to the standard demo layout. If you hold a link to an old path, use the new location below.
+
+| Old path (before v1.7.0) | New location |
+|---|---|
+| `docs/03-deployment-manual.md` | [docs/03b-manual-deployment.md](./docs/03b-manual-deployment.md) |
+| `docs/03b-fabric-setup.md` | [docs/06-fabric-setup.md](./docs/06-fabric-setup.md) |
+| `docs/03c-copilot-studio-setup.md` | [docs/07-copilot-studio-setup.md](./docs/07-copilot-studio-setup.md) |
+| `docs/03d-foundry-agent-setup.md` | [docs/08-foundry-agent-setup.md](./docs/08-foundry-agent-setup.md) |
+| `docs/03e-fabric-data-agent.md` | [docs/09-fabric-data-agent.md](./docs/09-fabric-data-agent.md) |
+| `docs/04-deployment-automated.md` | [docs/03-deployment.md](./docs/03-deployment.md) |
+| `docs/05-testing.md` | [docs/04-testing.md](./docs/04-testing.md) |
+| `docs/06-troubleshooting.md` | [docs/05-troubleshooting.md](./docs/05-troubleshooting.md) |
+| `docs/07-copilot-studio-vs-foundry.md` | [docs/10-copilot-studio-vs-foundry.md](./docs/10-copilot-studio-vs-foundry.md) |
+| `docs/08-rbac-and-identity-passthrough.md` | [docs/11-rbac-and-identity-passthrough.md](./docs/11-rbac-and-identity-passthrough.md) |
+| `docs/09-foundry-agent-webapp.md` | [docs/12-foundry-agent-webapp.md](./docs/12-foundry-agent-webapp.md) |
+
+`docs/00-reproduce-this-demo.md`, `docs/01-architecture.md` and `docs/02-prerequisites.md` kept their paths; `docs/13-configuration-reference.md` is new.
 
 ---
 
