@@ -33,7 +33,7 @@ Skip the interactive confirmation prompt before force-pushing.
 param(
     [string]$TargetRepo = 'chmald/document-qa-knowledge-agent',
     [string]$Branch     = 'main',
-    [string]$Message    = "Snapshot from internal source ($(Get-Date -Format 'yyyy-MM-dd'))",
+    [string]$Message    = "Snapshot from source repo ($(Get-Date -Format 'yyyy-MM-dd'))",
     [switch]$Yes
 )
 
@@ -92,7 +92,7 @@ try {
         git add -A
         git -c user.name="$(git -C $repoRoot config user.name)" `
             -c user.email="$(git -C $repoRoot config user.email)" `
-            commit -m $Message -m "Source: internal @ $shortSha" | Out-Null
+            commit -m $Message -m "Source commit: $shortSha" | Out-Null
 
         # 4. Force-push, overriding the target
         git remote add origin "https://github.com/$TargetRepo.git"

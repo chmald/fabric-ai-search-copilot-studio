@@ -13,8 +13,8 @@
 // This pattern uses Foundry's MODEL GATEWAY capability only. Foundry's agent runtime
 // (Agent Service and projects) is NOT used here — Copilot Studio's native AI Search
 // knowledge source fills the agent role for knowledge-base Q&A. Foundry agent runtime
-// is the right addition when an engagement requires multi-agent routing, custom tool
-// calling, or query triage; that is an engagement-specific decision, not part of this
+// is the right addition when a scenario requires multi-agent routing, custom tool
+// calling, or query triage; that is a scenario-specific decision, not part of this
 // pattern's default stack.
 // =====================================================================================
 
@@ -40,7 +40,7 @@ param embeddingModelSku string = 'Standard'
 @minValue(1)
 param embeddingModelTpm int = 10
 
-@description('Chat model name (Azure OpenAI catalog). Leave EMPTY to skip the chat deployment entirely — the default locked design (Copilot Studio + AI Search hybrid index + integrated vectorizer) does NOT consume a chat completion model, because Copilot Studio uses its own host model for generative answers. Only set this when you have an explicit engagement-specific need: custom app code calling completions, Foundry agent runtime, or a Copilot Studio bring-your-own-model configuration.')
+@description('Chat model name (Azure OpenAI catalog). Leave EMPTY to skip the chat deployment entirely — the default locked design (Copilot Studio + AI Search hybrid index + integrated vectorizer) does NOT consume a chat completion model, because Copilot Studio uses its own host model for generative answers. Only set this when you have an explicit scenario-specific need: custom app code calling completions, Foundry agent runtime, or a Copilot Studio bring-your-own-model configuration.')
 param chatModelName string = ''
 
 @description('Chat model version. Leave blank to let Azure pick latest GA. Ignored when chatModelName is empty.')
@@ -115,7 +115,7 @@ resource embeddingDeployment 'Microsoft.CognitiveServices/accounts/deployments@2
 // Optional chat completion deployment. The locked design (Copilot Studio + AI Search
 // hybrid index + integrated vectorizer) does NOT consume a chat completion model —
 // Copilot Studio uses its own host model for generative answers. Only provisioned
-// when chatModelName is non-empty (engagement-specific opt-in: custom app code,
+// when chatModelName is non-empty (scenario-specific opt-in: custom app code,
 // Foundry agent runtime, or Copilot Studio bring-your-own-model).
 resource chatDeployment 'Microsoft.CognitiveServices/accounts/deployments@2024-10-01' = if (!empty(chatModelName)) {
   parent: foundry

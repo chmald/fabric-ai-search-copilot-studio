@@ -92,7 +92,7 @@ param embeddingModelSku string = 'Standard'
 @maxValue(2000)
 param embeddingModelTpm int = 10
 
-@description('OpenAI chat model. Default is EMPTY (no chat deployment is provisioned) because the locked design — Copilot Studio + AI Search hybrid index + integrated vectorizer — does NOT consume a chat completion model. Copilot Studio uses its own host model for generative answers. Set this to a current GA chat model (for example `gpt-5.5`, or `gpt-5.4-mini` for cost-down — check the model retirement schedule first) only when an engagement explicitly needs a chat endpoint: custom app code calling completions, Foundry agent runtime, or a Copilot Studio bring-your-own-model configuration.')
+@description('OpenAI chat model. Default is EMPTY (no chat deployment is provisioned) because the locked design — Copilot Studio + AI Search hybrid index + integrated vectorizer — does NOT consume a chat completion model. Copilot Studio uses its own host model for generative answers. Set this to a current GA chat model (for example `gpt-5.5`, or `gpt-5.4-mini` for cost-down — check the model retirement schedule first) only when your scenario explicitly needs a chat endpoint: custom app code calling completions, Foundry agent runtime, or a Copilot Studio bring-your-own-model configuration.')
 param chatModelName string = ''
 
 @description('OpenAI chat model version. Leave blank to let Azure pick latest. Ignored when chatModelName is empty.')

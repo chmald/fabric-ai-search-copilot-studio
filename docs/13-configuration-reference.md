@@ -14,7 +14,7 @@
 
 ![Version](./assets/badges/version.svg) ![azd up](./assets/badges/azd-up.svg) ![Static only](./assets/badges/static-only.svg)
 
-Every value you can set in this pattern, on one page: where it is set, its default, what it changes and who reads it. Use it to change a model, region, capacity, SKU, name or behaviour without reading Bicep, PowerShell or Python. It is written for whoever deploys or retargets the pattern (solution engineer, platform engineer, the customer's own team) and can be forwarded on its own.
+Every value you can set in this pattern, on one page: where it is set, its default, what it changes and who reads it. Use it to change a model, region, capacity, SKU, name or behaviour without reading Bicep, PowerShell or Python. It is written for whoever deploys or retargets the pattern (platform engineer, developer, or the team that will operate it) and can be forwarded on its own.
 
 ## At a glance
 

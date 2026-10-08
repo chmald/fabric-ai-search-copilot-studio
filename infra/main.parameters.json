@@ -29,7 +29,7 @@
     },
     "chatModelName": {
       "value": "",
-      "_comment": "OPT-IN. Leave EMPTY (default) to skip the chat deployment — the locked design (Copilot Studio + AI Search + integrated vectorizer) does NOT consume a chat completion model; Copilot Studio uses its own host model. Set to a current GA chat model, e.g. `gpt-5.5` (or `gpt-5.4-mini` for cost-down; check the model retirement schedule) only when an engagement explicitly needs a chat endpoint (custom app code, Foundry agent runtime, BYOM Copilot Studio)."
+      "_comment": "OPT-IN. Leave EMPTY (default) to skip the chat deployment — the locked design (Copilot Studio + AI Search + integrated vectorizer) does NOT consume a chat completion model; Copilot Studio uses its own host model. Set to a current GA chat model, e.g. `gpt-5.5` (or `gpt-5.4-mini` for cost-down; check the model retirement schedule) only when your scenario explicitly needs a chat endpoint (custom app code, Foundry agent runtime, BYOM Copilot Studio)."
     },
     "chatModelVersion": {
       "value": "",

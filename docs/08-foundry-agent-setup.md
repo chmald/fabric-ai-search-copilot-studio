@@ -298,7 +298,7 @@ Details for each step:
 | **5** | <img src="./assets/icons/enterprise-applications.svg" width="28" alt=""> | Org-wide availability via Teams admin center → Manage apps | ☐ Approved (1–2 business days) |
 
 > [!WARNING]
-> **Data handling.** When you publish to Microsoft 365 and Teams, those services process and store the agent's metadata and the responses users receive, under Microsoft 365 / Teams terms and data-residency commitments — review that with the customer's compliance owner first. Projects with **public network access disabled** can't publish from the portal; use the REST API with the source-IP-filtered public route (see the Learn page).
+> **Data handling.** When you publish to Microsoft 365 and Teams, those services process and store the agent's metadata and the responses users receive, under Microsoft 365 / Teams terms and data-residency commitments — review that with your organization's compliance owner first. Projects with **public network access disabled** can't publish from the portal; use the REST API with the source-IP-filtered public route (see the Learn page).
 
 **Alternative route — custom engine agent (Microsoft 365 Agents Toolkit).** Use it when you need custom code in the channel (your own bot logic, adaptive cards, extra SSO handling). The Foundry agent is exposed to Teams / M365 Copilot through a thin Microsoft 365 Agents SDK app (a bot registration) that forwards user turns to your Foundry agent endpoint and streams responses back:
 

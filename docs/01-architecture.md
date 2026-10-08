@@ -395,7 +395,7 @@ Everything else — pipeline activity wiring, indexer configuration, vectorizer 
 | 1.4 | 2026-06-10 | Terminology refresh: **Azure AI Foundry → Microsoft Foundry** (current Microsoft Learn brand) across all docs, the README, and Bicep comments; standardized **Microsoft Foundry Agent Service** and dropped the legacy **Hub** framing. No architectural change — the resource is still `Microsoft.CognitiveServices/accounts` `kind=AIServices` with the same `*.openai.azure.com` / `*.cognitiveservices.azure.com` endpoints. |
 | 1.7 | 2026-10-07 | Standard layout + one-command deploy: docs renumbered to the `03`/`03b`/`04`/`05` + `06`–`13` layout; `azd up` template over the shared Bicep ([03](03-deployment.md)); configuration reference ([13](13-configuration-reference.md)); `corpus` block as the single domain surface (above); semantic-ranker tier claim corrected (Basic and above). Architecture decisions unchanged. |
 
-Future revisions track changes to the artifact (docs / IaC / scripts), not changes to the architectural decisions. Architectural changes get their own decision records.
+Future revisions track changes to the artifact (docs / IaC / scripts), not changes to the architectural decisions. Architectural changes get their own architecture decision records (ADRs).
 
 **Next:** [02 — Prerequisites](./02-prerequisites.md)
 

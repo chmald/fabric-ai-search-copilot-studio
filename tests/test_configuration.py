@@ -1,4 +1,4 @@
-"""Configuration guard (hard-rule #18): every knob a user can set is documented in
+"""Configuration guard: every knob a user can set is documented in
 docs/13-configuration-reference.md, and infra/azd.bicep passes every main.bicep
 parameter through to the shared template."""
 

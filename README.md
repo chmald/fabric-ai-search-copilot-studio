@@ -110,7 +110,7 @@ The ingestion (Fabric) and Azure platform (Blob + AI Search + Foundry model gate
 
 ## Locked design decisions
 
-These are the design decisions locked for this pattern's primary use case — single-purpose knowledge-base Q&A over a document corpus. Deviate only with an explicit decision record describing the deployment-specific need and updated guidance.
+These are the design decisions locked for this pattern's primary use case — single-purpose knowledge-base Q&A over a document corpus. Deviate only with an explicit architecture decision record (ADR) describing the deployment-specific need and updated guidance.
 
 | # | Decision | Choice | Why |
 |---|---|---|---|

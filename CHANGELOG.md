@@ -4,11 +4,21 @@ Change history for this pattern. Entries are listed newest-first.
 
 ---
 
+## 2026-10-08
+
+### Docs: rewrote for external audiences; removed internal terminology
+
+- Reworded docs, code comments, test docstrings and one diagram label so the repo reads as a self-contained reference for any reader: no references to private authoring tooling or numbered internal rules, and no sales-role or consulting framing — docs now address the reader and their team directly.
+- `testing-matrix` diagram label now reads "run the way end users will see it"; PNG re-exported.
+- `tests/test_reusability_guards.py` gains `test_no_internal_terminology`, which fails if internal tooling names or sales/process jargon reappear in tracked text files.
+
+---
+
 ## 2026-10-07
 
 ### v1.7.0 — Current demo standard: docs layout, `azd up`, configuration reference, reusability guards, Learn currency pass
 
-Brings the pattern up to the current demo-pattern standard (hard rules #4, #14, #16–#19) and re-verifies the fast-moving claims against Microsoft Learn. Also records the 2026-10-02 visual retrofit (official V24 icons, local badges, callouts, 16 draw.io diagrams + PNGs, `scripts/lint_doc_visuals.py`), which shipped without its own entry.
+Brings the pattern up to the repo's current documentation and deployment conventions (standard docs layout, structural reusability, one-command deploy, configuration reference, visual-doc lint) and re-verifies the fast-moving claims against Microsoft Learn. Also records the 2026-10-02 visual retrofit (official V24 icons, local badges, callouts, 16 draw.io diagrams + PNGs, `scripts/lint_doc_visuals.py`), which shipped without its own entry.
 
 **Docs renumbered to the standard layout** (`git mv`, history preserved; every link, anchor, diagram label and code comment updated):
 
@@ -31,11 +41,11 @@ Brings the pattern up to the current demo-pattern standard (hard rules #4, #14, 
 
 Historical entries below keep their original wording; their links now point at the new file names.
 
-**One-command deployment (hard-rule #17).** `azure.yaml` + subscription-scoped `infra/azd.bicep` (wraps the shared `main.bicep`, passes every parameter) + `infra/azd.parameters.json` (quoted `${VAR=default}` substitutions) + hooks: `preprovision` validates names (storage-name length), **stops unless `az account show` matches `AZURE_TENANT_ID` / `AZURE_SUBSCRIPTION_ID`**, restores a soft-deleted Foundry account / recovers a soft-deleted Key Vault (or purges with `PURGE_SOFT_DELETED=true`) and keeps `RESTORE_FOUNDRY_FROM_SOFT_DELETE` in step; `postprovision` writes `demo-ids.local.json` and runs `post_deploy_search.py` (`CONFIGURE_SEARCH`). The ids writer, tenant guard, soft-delete guard and post-deploy call live in `infra/hooks/common.ps1`, which `infra/deploy.ps1` now dot-sources (new optional `-TenantId` / `-SubscriptionId` guard). `main.bicep` gained `resourceGroupName`, `embeddingModelSku` and `chatModelSku` (defaults keep existing behaviour). `.gitignore` excludes `.azure/`. New diagram `azd-deployment-flow`.
+**One-command deployment.** `azure.yaml` + subscription-scoped `infra/azd.bicep` (wraps the shared `main.bicep`, passes every parameter) + `infra/azd.parameters.json` (quoted `${VAR=default}` substitutions) + hooks: `preprovision` validates names (storage-name length), **stops unless `az account show` matches `AZURE_TENANT_ID` / `AZURE_SUBSCRIPTION_ID`**, restores a soft-deleted Foundry account / recovers a soft-deleted Key Vault (or purges with `PURGE_SOFT_DELETED=true`) and keeps `RESTORE_FOUNDRY_FROM_SOFT_DELETE` in step; `postprovision` writes `demo-ids.local.json` and runs `post_deploy_search.py` (`CONFIGURE_SEARCH`). The ids writer, tenant guard, soft-delete guard and post-deploy call live in `infra/hooks/common.ps1`, which `infra/deploy.ps1` now dot-sources (new optional `-TenantId` / `-SubscriptionId` guard). `main.bicep` gained `resourceGroupName`, `embeddingModelSku` and `chatModelSku` (defaults keep existing behaviour). `.gitignore` excludes `.azure/`. New diagram `azd-deployment-flow`.
 
-**Configuration reference (hard-rule #18).** `docs/13-configuration-reference.md` lists every azd variable, output, Bicep / script parameter, ids-file key and runtime env var, with a `configuration-flow` diagram and recipes; `tests/test_configuration.py` fails when any of them is undocumented or when `azd.bicep` stops passing a `main.bicep` parameter.
+**Configuration reference.** `docs/13-configuration-reference.md` lists every azd variable, output, Bicep / script parameter, ids-file key and runtime env var, with a `configuration-flow` diagram and recipes; `tests/test_configuration.py` fails when any of them is undocumented or when `azd.bicep` stops passing a `main.bicep` parameter.
 
-**Structural reusability (hard-rule #14).** `demo-ids.template.json` gains `_template` / `_note` and a **`corpus` block** — the only domain-specific surface (index/skillset names, content analyzer, embedding width, indexer schedule, Search API version, accepted file types, chunk size/overlap, agent + knowledge-source name/description). `post_deploy_search.py` reads it (`corpus.<key>` → flat key → code default); embedding width is no longer inferred from the model name alone. `docs/01` gains *Adapting this pattern to another domain*. New `tests/test_reusability_guards.py` (caught and fixed two `hr-…` example IDs in `webapp/app/main.py` and `scripts/deploy-webapp.ps1`) and `tests/test_retarget_domain.py`. The Fabric notebook tokenizer uses `tiktoken.get_encoding("o200k_base")` instead of a model name.
+**Structural reusability.** `demo-ids.template.json` gains `_template` / `_note` and a **`corpus` block** — the only domain-specific surface (index/skillset names, content analyzer, embedding width, indexer schedule, Search API version, accepted file types, chunk size/overlap, agent + knowledge-source name/description). `post_deploy_search.py` reads it (`corpus.<key>` → flat key → code default); embedding width is no longer inferred from the model name alone. `docs/01` gains *Adapting this pattern to another domain*. New `tests/test_reusability_guards.py` (caught and fixed two `hr-…` example IDs in `webapp/app/main.py` and `scripts/deploy-webapp.ps1`) and `tests/test_retarget_domain.py`. The Fabric notebook tokenizer uses `tiktoken.get_encoding("o200k_base")` instead of a model name.
 
 **Microsoft Learn currency pass (2026-10-07) — corrections:**
 - **Semantic ranker tier** — was "requires Standard (S1); not available on Basic". Semantic ranker runs on Basic and above (free plan + per-1,000-request standard plan) ([semantic ranker](https://learn.microsoft.com/azure/search/semantic-search-overview)); Free is excluded only because it has no managed identity ([managed identities](https://learn.microsoft.com/azure/search/search-how-to-managed-identities)). S1 stays the default for capacity; `searchSku` / `SEARCH_SKU` now allows `basic`. Storage figures updated to 15 GB (Basic) / 160 GB (S1) per partition for current services ([limits](https://learn.microsoft.com/azure/search/search-limits-quotas-capacity)).
@@ -52,7 +62,7 @@ Historical entries below keep their original wording; their links now point at t
 ## 2026-06-19
 
 ### v1.6.1 — Microsoft Learn currency + accuracy pass
-A verification pass against current Microsoft Learn plus an internal-alignment audit of the v1.6 web app.
+A verification pass against current Microsoft Learn plus a consistency audit of the v1.6 web app.
 
 - **RBAC fix (functional):** the web-app managed identity now uses **Foundry User** (`53ca6127-db72-4b80-b1b0-d745d6d5456d`) for agent/project access instead of **Azure AI Developer**. Per the [Foundry RBAC docs](https://learn.microsoft.com/azure/foundry/concepts/rbac-foundry), *Azure AI Developer* is scoped to Azure ML workspaces / Foundry hubs — **not** Foundry projects or hosted agents (`infra/modules/containerapp.bicep`, `docs/09`).
 - **Date fix:** corrected the classic Foundry/Assistants runtime retirement to **sunsets 2026-08-26** (was 2027-03-31) in `docs/03d` and the v1.4 note, per [navigate from classic](https://learn.microsoft.com/azure/foundry/how-to/navigate-from-classic).

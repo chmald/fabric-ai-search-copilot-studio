@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.48.1.52935",
-      "templateHash": "12417221430326406289"
+      "templateHash": "2512240081574188201"
     }
   },
   "parameters": {
@@ -75,7 +75,7 @@
       "type": "string",
       "defaultValue": "",
       "metadata": {
-        "description": "OpenAI chat model. Default is EMPTY (no chat deployment is provisioned) because the locked design — Copilot Studio + AI Search hybrid index + integrated vectorizer — does NOT consume a chat completion model. Copilot Studio uses its own host model for generative answers. Set this to a current GA chat model (for example `gpt-5.5`, or `gpt-5.4-mini` for cost-down — check the model retirement schedule first) only when an engagement explicitly needs a chat endpoint: custom app code calling completions, Foundry agent runtime, or a Copilot Studio bring-your-own-model configuration."
+        "description": "OpenAI chat model. Default is EMPTY (no chat deployment is provisioned) because the locked design — Copilot Studio + AI Search hybrid index + integrated vectorizer — does NOT consume a chat completion model. Copilot Studio uses its own host model for generative answers. Set this to a current GA chat model (for example `gpt-5.5`, or `gpt-5.4-mini` for cost-down — check the model retirement schedule first) only when your scenario explicitly needs a chat endpoint: custom app code calling completions, Foundry agent runtime, or a Copilot Studio bring-your-own-model configuration."
       }
     },
     "chatModelVersion": {
@@ -514,7 +514,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.48.1.52935",
-              "templateHash": "11961083409042944649"
+              "templateHash": "2967468710666293218"
             }
           },
           "parameters": {
@@ -570,7 +570,7 @@
               "type": "string",
               "defaultValue": "",
               "metadata": {
-                "description": "Chat model name (Azure OpenAI catalog). Leave EMPTY to skip the chat deployment entirely — the default locked design (Copilot Studio + AI Search hybrid index + integrated vectorizer) does NOT consume a chat completion model, because Copilot Studio uses its own host model for generative answers. Only set this when you have an explicit engagement-specific need: custom app code calling completions, Foundry agent runtime, or a Copilot Studio bring-your-own-model configuration."
+                "description": "Chat model name (Azure OpenAI catalog). Leave EMPTY to skip the chat deployment entirely — the default locked design (Copilot Studio + AI Search hybrid index + integrated vectorizer) does NOT consume a chat completion model, because Copilot Studio uses its own host model for generative answers. Only set this when you have an explicit scenario-specific need: custom app code calling completions, Foundry agent runtime, or a Copilot Studio bring-your-own-model configuration."
               }
             },
             "chatModelVersion": {

@@ -1,5 +1,5 @@
 """Retarget the pattern at a clearly different domain using ONLY the corpus block
-(hard-rule #14) and assert every AI Search payload follows it and nothing from the
+(structural reusability) and assert every AI Search payload follows it and nothing from the
 default / example domain survives."""
 
 import copy
