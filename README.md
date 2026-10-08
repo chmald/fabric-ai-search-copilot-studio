@@ -16,6 +16,9 @@ A reusable, low-code-first **document Q&A agent**: a **Retrieval-Augmented Gener
 
 > Formerly published as `fabric-ai-search-copilot-studio`. Old links redirect automatically. Renamed doc pages are mapped in [Moved documents](#moved-documents).
 
+> [!WARNING]
+> **For testing and demonstration purposes only.** This is a personal reference demo provided "as is" under the [MIT License](LICENSE), without warranty or support. It is not an official Microsoft product or sample, has not been through a production security review, and is not intended for production use. Review, test, and harden it before reusing any part of it, deploy only to non-production subscriptions, and never use real customer or personal data.
+
 > [!NOTE]
 > **Generic on purpose.** This pattern is document-domain agnostic. Use it for HR contracts, finance policies, legal templates, support knowledge bases, product docs, sales enablement libraries, or any unstructured document corpus that needs to power a grounded chat experience.
 
@@ -297,4 +300,16 @@ Change history lives in [CHANGELOG.md](./CHANGELOG.md).
 
 ---
 
-*Last updated: 2026-10-07*
+## Disclaimer
+
+> [!CAUTION]
+> This project is provided for testing, learning, and demonstration purposes only. It is not an official Microsoft product, sample, or service, and it is not supported under any Microsoft support program. Azure services, APIs, and pricing referenced here change over time — validate against current Microsoft Learn documentation before relying on any detail. Deploying it creates billable Azure resources; you are responsible for their cost, security, and cleanup.
+
+## License
+
+> [!NOTE]
+> Released under the [MIT License](LICENSE).
+
+---
+
+*Last updated: 2026-10-08*
